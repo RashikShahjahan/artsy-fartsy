@@ -11,7 +11,7 @@ function Line({ start, end }: { start: number[], end: number[] }) {
     return (
       <line>
         <bufferGeometry ref={ref} />
-        <lineBasicMaterial color="red" />
+        <lineBasicMaterial color="hotpink" />
       </line>
     )
   }
