@@ -22,6 +22,27 @@ Enhancements:
     Add error validation
     Add coloring
 
+Create Express server to host interpreter
+    -Create API endpoint to run interpreter
+    -Use API endpoint in frontend
+
+Saving Drawings
+    -Create button to save drawings
+    -Save drawings to Database
+    -Load drawings from Database
+
+Routing and Authentication
+    -Create login/register
+    -Create protected routes
+    -Create logout
+
+News Feed which lets you see all drawings
+
+  
+
+
+
+
 
 */
 
