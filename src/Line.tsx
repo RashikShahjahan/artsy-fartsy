@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import * as THREE from 'three';
 
-function Line({ start, end }: { start: number[], end: number[] }) {
+function Line({ start, end, color }: { start: number[], end: number[], color: string }) {
     const ref = useRef<THREE.BufferGeometry>(null);
     useLayoutEffect(() => {
       if (ref.current) {
@@ -12,7 +12,7 @@ function Line({ start, end }: { start: number[], end: number[] }) {
     return (
       <line>
         <bufferGeometry ref={ref} />
-        <lineBasicMaterial color="hotpink" />
+        <lineBasicMaterial color={color} />
       </line>
     )
   }

@@ -17,10 +17,11 @@ Write version of interpreter to run single command->Line and arc:[DONE]
 Fix tailwind[Done]
 
 Enhancements:
+    Add coloring[Done]
     Add variables and expressions
     Add loops
     Add error validation
-    Add coloring
+
 
 Create Express server to host interpreter
     -Create API endpoint to run interpreter
@@ -37,12 +38,6 @@ Routing and Authentication
     -Create logout
 
 News Feed which lets you see all drawings
-
-  
-
-
-
-
 
 */
 
@@ -63,16 +58,18 @@ function App() {
         <Canvas className="w-full h-full mb-6 border border-gray-300 rounded">
           {drawCommands.map((command, index) => (
             command.type === 'line' ? 
-              <Line key={index} start={[command.args[0], command.args[1], 0]} end={[command.args[2], command.args[3], 0]} /> :
+              <Line key={index} start={[Number(command.args[0]), Number(command.args[1]), 0]} end={[Number(command.args[2]), Number(command.args[3]), 0]} color={command.args[4].toString()} /> :
               <Arc 
                 key={index} 
-                center={[command.args[0], command.args[1], 0]}
-                start={[command.args[2], command.args[3], 0]}
-                end={[command.args[4], command.args[5], 0]}
-                startAngle={command.args[6]}
-                endAngle={command.args[7]}
-                clockwise={command.args[8] as boolean}
-                rotation={command.args[9]}
+                center={[Number(command.args[0]), Number(command.args[1]), 0]}
+                start={[Number(command.args[2]), Number(command.args[3]), 0]}
+                end={[Number(command.args[4]), Number(command.args[5]), 0]}
+                startAngle={Number(command.args[6])}
+                endAngle={Number(command.args[7])}
+                clockwise={Boolean(command.args[8])}
+                rotation={Number(command.args[9])}
+                color={command.args[10].toString()}
+
               />
           ))}
         </Canvas>

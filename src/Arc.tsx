@@ -1,14 +1,15 @@
 import { useLayoutEffect, useRef } from "react";
 import * as THREE from 'three';
 
-function Arc({ start, end, center, startAngle, endAngle, clockwise, rotation }: { 
+function Arc({ start, end, center, startAngle, endAngle, clockwise, rotation, color }: { 
   start: number[], 
   end: number[], 
   center: number[], 
   startAngle: number, 
   endAngle: number, 
   clockwise: boolean, 
-  rotation: number 
+  rotation: number,
+  color: string
 }) {
     const ref = useRef<THREE.BufferGeometry>(null);
     useLayoutEffect(() => {
@@ -28,7 +29,7 @@ function Arc({ start, end, center, startAngle, endAngle, clockwise, rotation }: 
     return (
       <line>
         <bufferGeometry ref={ref} />
-        <lineBasicMaterial color="#FFD700" />
+        <lineBasicMaterial color={color} />
       </line>
     )
   }
