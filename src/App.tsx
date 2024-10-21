@@ -1,4 +1,5 @@
 import { Canvas } from '@react-three/fiber'
+import Line from './Line';
 /*Tasks:
 Setup react-three/fiber with react 
     -Create draw function for ARC and LINE
@@ -19,14 +20,9 @@ Enhancements:
 */
 function App() {
   return (
-      <Canvas>
-        <mesh>
-          <boxGeometry args={[2, 2, 2]} />
-          <meshStandardMaterial />
-        </mesh>
-        <ambientLight intensity={0.1} />
-        <directionalLight position={[0, 0, 5]} color="red" />
-      </Canvas>
+    <Canvas>
+        <Line start={[0, 0, 0]} end={[1, 1, 1]} />
+    </Canvas>
   )
 }
 
