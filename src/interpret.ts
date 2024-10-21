@@ -8,11 +8,11 @@ There are 5 types of “actions”:
 
 Draw an arc:
 
-Arc center-x center-y width height start-angle stop-angle
+Arc start, end, center, startAngle, endAngle, clockwise, rotation 
 
 Draw a line:
 
-Line start-x start-y stop-x stop-y
+Line start, end
 
 Assign expr to variable:
 
@@ -70,11 +70,6 @@ Each expression maps to a ts function and the interpreter output is a list:
 
 
 Tasks:
-Setup react-three/fiber with react 
-    -Create draw function for ARC and LINE
-    -Call draw function from react
-    -Add textbox in react to call interpreter on button click
-    -Create render function to render the output list of objects
 
 Write version of interpreter to run single command->Line and arc:
     -Create lexer for ARC and LINE
@@ -87,5 +82,67 @@ Enhancements:
     Add error validation
     Add coloring
 */
+
+type Token = {
+    type: string;
+    value: string;
+}
+
+// LineArgs represents the arguments for a LINE command
+// [start-x, start-y, end-x, end-y, color, thickness]
+type LineArgs = [number, number, number, number, number, number];
+
+// ArcArgs represents the arguments for an ARC command
+// [center-x, center-y, start-x, start-y, end-x, end-y, 
+//  start-angle, end-angle, radius-x, radius-y, rotation, clockwise, thickness]
+type ArcArgs = [number, number, number, number, number, number, number, number, number, number, number, boolean, number];
+
+export type Command = {
+    type: 'line';
+    args: LineArgs;
+} | {
+    type: 'arc';
+    args: ArcArgs;
+}
+
+function lexer(input: string): Token[] {
+    const tokens = input.split(' ');
+    return tokens.map(token => {
+        if (token === 'ARC' || token === 'LINE') {
+            return { type: token, value: token };
+        } else {
+            return { type: 'VALUE', value: token };
+        }
+    });
+}
+
+function parser(tokens: Token[]): Command[] {
+    const commands: Command[] = [];
+    let i = 0;
+    while (i < tokens.length) {
+        const token = tokens[i];
+        i++;
+        if (token.type === 'LINE' || token.type === 'ARC') {
+            const argCount = token.type === 'LINE' ? 6 : 13;
+            const args = tokens.slice(i, i + argCount).map(t => {
+                const value = parseFloat(t.value);
+                return isNaN(value) ? (t.value === 'true') : value;
+            }) as LineArgs | ArcArgs;
+            i += argCount;
+            if (token.type === 'LINE') {
+                commands.push({ type: 'line', args: args as LineArgs });
+            } else if (token.type === 'ARC') {
+                commands.push({ type: 'arc', args: args as ArcArgs });
+            }
+        }
+    }
+    return commands;
+}
+
+export function interpret(input: string): Command[] {
+    const tokens = lexer(input);
+    const commands = parser(tokens);
+    return commands;
+}
 
 

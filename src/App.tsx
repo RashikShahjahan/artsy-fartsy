@@ -3,6 +3,7 @@ import Line from './Line';
 import Arc from './Arc';
 import './App.css';
 import { useState } from 'react';
+import { Command, interpret } from './interpret';
 /*Tasks:
 Setup react-three/fiber with react [Done]
     -Create component for ARC and LINE
@@ -20,51 +21,49 @@ Enhancements:
     Add error validation
     Add coloring
 */
-type DrawCommand = {
-  type: 'line' | 'arc';
-  args: {
-    start: [number, number, number];
-    end: [number, number, number];
-    center?: [number, number, number];
-    startAngle?: number;
-    endAngle?: number;
-    clockwise?: boolean;
-    rotation?: number;
-  };
-}
+
 
 function App() {
   const [input, setInput] = useState('');
-  const [drawCommands, setDrawCommands] = useState<DrawCommand[]>([]);
+  const [drawCommands, setDrawCommands] = useState<Command[]>([]);
   
   function submitInput() {
     console.log(input);
-    setDrawCommands([
-      { type: 'line', args: { start: [0, 0, 0], end: [1, 1, 1] } },
-      { type: 'arc', args: { start: [0, 2, 0], end: [4, 1, 1], center: [2, 1.5, 0.5], startAngle: 0, endAngle: Math.PI, clockwise: true, rotation: 0 } },
-    ]);
+    setDrawCommands(interpret(input));
   }
 
   return (
-    <div>
-      <Canvas>
-        {drawCommands.map((command, index) => (
-          command.type === 'line' ? 
-            <Line key={index} start={command.args.start} end={command.args.end} /> :
-            <Arc 
-              key={index} 
-              start={command.args.start} 
-              end={command.args.end} 
-              center={command.args.center!} 
-              startAngle={command.args.startAngle!} 
-              endAngle={command.args.endAngle!} 
-              clockwise={command.args.clockwise!} 
-              rotation={command.args.rotation!} 
-            />
-        ))}
-      </Canvas>
-      <input type="text" value={input} onChange={(e) => setInput(e.target.value)} />
-      <button onClick={() => submitInput()}>Draw</button>
+    <div className="flex w-full h-screen">
+      <div className="w-1/2 h-full">
+        <Canvas className="w-full h-full">
+          {drawCommands.map((command, index) => (
+            command.type === 'line' ? 
+              <Line key={index} start={[command.args[0], command.args[1], 0]} end={[command.args[2], command.args[3], 0]} /> :
+              <Arc 
+                key={index} 
+                center={[command.args[0], command.args[1], 0]}
+                start={[command.args[2], command.args[3], 0]}
+                end={[command.args[4], command.args[5], 0]}
+                startAngle={command.args[6]}
+                endAngle={command.args[7]}
+                clockwise={command.args[11] as boolean}
+                rotation={command.args[12]}
+              />
+          ))}
+        </Canvas>
+      </div>
+      <div className="w-1/2 h-full flex flex-col justify-center items-center">
+        <input 
+          type="text" 
+          value={input} 
+          onChange={(e) => setInput(e.target.value)} 
+          placeholder="Enter drawing commands"
+          className="w-4/5 mb-4 p-2 border border-gray-300 rounded"
+        />
+        <button onClick={() => submitInput()} className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+          Draw
+        </button>
+      </div>
     </div>
   )
 }
