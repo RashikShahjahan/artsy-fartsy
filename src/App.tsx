@@ -16,13 +16,6 @@ Write version of interpreter to run single command->Line and arc:[DONE]
 
 Fix tailwind[Done]
 
-Enhancements:
-    Add coloring[Done]
-    Add variables and expressions
-    Add loops
-    Add error validation
-
-
 Create Express server to host interpreter
     -Create API endpoint to run interpreter
     -Use API endpoint in frontend
@@ -38,6 +31,15 @@ Routing and Authentication
     -Create logout
 
 News Feed which lets you see all drawings
+
+Enhancements:
+    Add coloring[Done]
+    Add variables and expressions
+    Add loops
+    Add error validation
+
+
+
 
 */
 
