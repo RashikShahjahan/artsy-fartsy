@@ -6,6 +6,7 @@ function Line({ start, end }: { start: number[], end: number[] }) {
     useLayoutEffect(() => {
       if (ref.current) {
         ref.current.setFromPoints([start, end].map((point) => new THREE.Vector3(...point)));
+        console.log(start, end);
       }
     }, [start, end]);
     return (

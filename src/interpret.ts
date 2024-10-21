@@ -89,13 +89,13 @@ type Token = {
 }
 
 // LineArgs represents the arguments for a LINE command
-// [start-x, start-y, end-x, end-y, color, thickness]
-type LineArgs = [number, number, number, number, number, number];
+// [start-x, start-y, end-x, end-y]
+type LineArgs = [number, number, number, number];
 
 // ArcArgs represents the arguments for an ARC command
 // [center-x, center-y, start-x, start-y, end-x, end-y, 
-//  start-angle, end-angle, radius-x, radius-y, rotation, clockwise, thickness]
-type ArcArgs = [number, number, number, number, number, number, number, number, number, number, number, boolean, number];
+//  start-angle, end-angle, clockwise,rotation]
+type ArcArgs = [number, number, number, number, number, number, number, number, boolean, number];
 
 export type Command = {
     type: 'line';
@@ -106,14 +106,21 @@ export type Command = {
 }
 
 function lexer(input: string): Token[] {
-    const tokens = input.split(' ');
-    return tokens.map(token => {
-        if (token === 'ARC' || token === 'LINE') {
-            return { type: token, value: token };
-        } else {
-            return { type: 'VALUE', value: token };
+    const lines = input.split('\n');
+    const tokens: Token[] = [];
+    
+    for (const line of lines) {
+        const lineTokens = line.trim().split(/\s+/);
+        for (const token of lineTokens) {
+            if (token === 'ARC' || token === 'LINE') {
+                tokens.push({ type: token, value: token });
+            } else if (token !== '') {
+                tokens.push({ type: 'VALUE', value: token });
+            }
         }
-    });
+    }
+    
+    return tokens;
 }
 
 function parser(tokens: Token[]): Command[] {
@@ -121,10 +128,9 @@ function parser(tokens: Token[]): Command[] {
     let i = 0;
     while (i < tokens.length) {
         const token = tokens[i];
-        i++;
         if (token.type === 'LINE' || token.type === 'ARC') {
-            const argCount = token.type === 'LINE' ? 6 : 13;
-            const args = tokens.slice(i, i + argCount).map(t => {
+            const argCount = token.type === 'LINE' ? 5 : 11;
+            const args = tokens.slice(i+1, i + argCount).map(t => {
                 const value = parseFloat(t.value);
                 return isNaN(value) ? (t.value === 'true') : value;
             }) as LineArgs | ArcArgs;
@@ -134,6 +140,11 @@ function parser(tokens: Token[]): Command[] {
             } else if (token.type === 'ARC') {
                 commands.push({ type: 'arc', args: args as ArcArgs });
             }
+            console.log(commands);
+
+        }
+        else {
+            i++; // Skip unknown tokens
         }
     }
     return commands;
@@ -142,7 +153,27 @@ function parser(tokens: Token[]): Command[] {
 export function interpret(input: string): Command[] {
     const tokens = lexer(input);
     const commands = parser(tokens);
+    console.log(commands);
     return commands;
 }
+
+// Test function
+function testInterpret() {
+    const testInput = "LINE 0 0 100 100 ARC 50 50 0 0 100 100 0 3.14 true 0";
+    const result = interpret(testInput);
+    console.log("Test Result:", result);
+    
+    // Expected output
+    const expectedOutput = [
+        { type: 'line', args: [0, 0, 100, 100] },
+        { type: 'arc', args: [50, 50, 0, 0, 100, 100, 0, 3.14, true, 0] }
+    ];
+    
+    console.log("Test passed:", JSON.stringify(result) === JSON.stringify(expectedOutput));
+}
+
+// Run the test
+testInterpret();
+
 
 
