@@ -1,10 +1,13 @@
-
-
+/*Enhancements:
+    Make some arguments conditional
+    Add variables and expressions
+    Add loops
+    Add error validation
+*/
 type Token = {
     type: string;
     value: string;
 }
-
 
 function lexer(input: string): Token[] {
     const lines = input.split('\n');
