@@ -3,29 +3,25 @@ import Line from './Line';
 import Arc from './Arc';
 import { useState } from 'react';
 /*Tasks:
-
-Create Express server to host interpreter
-    -Create API endpoint to run interpreter
-    -Use API endpoint in frontend
-
-Saving Drawings
-    -Create button to save drawings
-    -Save drawings to Database
-    -Load drawings from Database
-
 Routing and Authentication
-    -Create login/register
-    -Create protected routes
-    -Create logout
+  - Add signup/login/logout button on the side of the drawings page
+  - Add clerk auth logic 
+  - Make routes to save and view gallery restricted logged in users
+  - Send auth params to the respective requests in axios
 
-News Feed which lets you see all drawings
+Saving Drawings and viewing gallery
+  - Create button to save drawings
+  - Axios POST request to /save_art
+  - View to Display drawings in their feed in a news feed(Make it like a gallery)
+  - GET request to retrieve_gallery
+  - Post request to like/unlike drawings
 
 Enhancements:
-    Add coloring[Done]
-    Add variables and expressions
-    Add loops
-    Add error validation
-
+  - User profile page
+  - View to display user's saved drawings
+  - View to display user's followers and following
+  - Help button to help artists with code syntax
+  - Call LLM to gnerate code
 */
 
 type CommandArgs = (number | string | boolean)[];
@@ -34,8 +30,6 @@ type Command = {
     type: 'line' | 'arc';
     args: CommandArgs;
 }
-
-
 
 function App() {
   const [input, setInput] = useState('');
