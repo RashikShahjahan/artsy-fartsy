@@ -2,7 +2,6 @@ import { Canvas } from '@react-three/fiber'
 import Line from './Line';
 import Arc from './Arc';
 import { useState } from 'react';
-import { Command, interpret } from '../backend/interpret';
 /*Tasks:
 
 Create Express server to host interpreter
@@ -28,6 +27,14 @@ Enhancements:
     Add error validation
 
 */
+
+type CommandArgs = (number | string | boolean)[];
+
+type Command = {
+    type: 'line' | 'arc';
+    args: CommandArgs;
+}
+
 
 
 function App() {

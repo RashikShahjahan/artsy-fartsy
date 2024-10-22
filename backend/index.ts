@@ -1,7 +1,4 @@
 /*Tasks:
-
-
-
 Saving Drawings
     -Create button to save drawings
     -Save drawings to Database
@@ -19,7 +16,6 @@ Enhancements:
     Add variables and expressions
     Add loops
     Add error validation
-
 */
 
 import express from 'express';
