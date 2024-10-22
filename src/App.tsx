@@ -43,7 +43,8 @@ function App() {
   
   async function submitInput() {
     try {
-      const response = await fetch('http://localhost:3001/interpret', {
+      const apiBaseUrl = process.env.REACT_APP_API_BASE_URL;
+      const response = await fetch(`${apiBaseUrl}/interpret`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
