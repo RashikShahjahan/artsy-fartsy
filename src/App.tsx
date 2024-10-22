@@ -2,19 +2,8 @@ import { Canvas } from '@react-three/fiber'
 import Line from './Line';
 import Arc from './Arc';
 import { useState } from 'react';
-import { Command, interpret } from './interpret';
+import { Command, interpret } from '../backend/interpret';
 /*Tasks:
-Setup react-three/fiber with react [Done]
-    -Create component for ARC and LINE
-    -Add textbox in react to call interpreter on button click
-    -Create render function to render the output list of objects
-
-Write version of interpreter to run single command->Line and arc:[DONE]
-    -Create lexer for ARC and LINE
-    -Parse tokens to create ARC and LINE objects
-    -return ARC and LINE objects
-
-Fix tailwind[Done]
 
 Create Express server to host interpreter
     -Create API endpoint to run interpreter
@@ -38,9 +27,6 @@ Enhancements:
     Add loops
     Add error validation
 
-
-
-
 */
 
 
@@ -48,10 +34,21 @@ function App() {
   const [input, setInput] = useState('');
   const [drawCommands, setDrawCommands] = useState<Command[]>([]);
   
-  function submitInput() {
-    const commands = interpret(input);
-    console.log(commands)
-    setDrawCommands(commands);
+  async function submitInput() {
+    try {
+      const response = await fetch('http://localhost:3001/interpret', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: input }),
+      });
+      const commands = await response.json();
+      console.log(commands);
+      setDrawCommands(commands);
+    } catch (error) {
+      console.error('Error interpreting code:', error);
+    }
   }
 
   return (
