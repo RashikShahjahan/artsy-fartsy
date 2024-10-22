@@ -15,7 +15,6 @@ Routing and Authentication
 News Feed which lets you see all drawings
 
 Enhancements:
-    Add coloring[Done]
     Add variables and expressions
     Add loops
     Add error validation
