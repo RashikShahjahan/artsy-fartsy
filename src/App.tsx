@@ -51,6 +51,10 @@ function App() {
         },
         body: JSON.stringify({ code: input }),
       });
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const commands = await response.json();
       console.log(commands);
       setDrawCommands(commands);
