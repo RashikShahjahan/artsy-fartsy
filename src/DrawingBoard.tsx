@@ -2,7 +2,8 @@ import { Canvas } from '@react-three/fiber'
 import Line from './Line';
 import Arc from './Arc';
 import { useState } from 'react';
-
+import axios from 'axios';
+import { useAuth } from '@clerk/clerk-react';
 
 type CommandArgs = (number | string | boolean)[];
 
@@ -14,22 +15,22 @@ type Command = {
 function DrawingBoard() {
   const [input, setInput] = useState('');
   const [drawCommands, setDrawCommands] = useState<Command[]>([]);
-  
+  const { getToken } = useAuth();
   async function submitInput() {
     try {
+      const token = await getToken();
       const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-      const response = await fetch(`${apiBaseUrl}/interpret`, {
-        method: 'POST',
+      const response = await axios.post(`${apiBaseUrl}/interpret`, { code: input }, {
         headers: {
+           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ code: input }),
       });
-      if (!response.ok) {
+      if (response.status !== 200) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      const commands = await response.json();
+      const commands = response.data;
       console.log(commands);
       setDrawCommands(commands);
     } catch (error) {

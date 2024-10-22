@@ -1,5 +1,7 @@
-import { SignedIn, SignedOut, SignInButton, SignOutButton} from '@clerk/clerk-react'
+import { SignedIn, SignedOut, SignInButton, SignOutButton } from '@clerk/clerk-react'
 import DrawingBoard from './DrawingBoard'
+
+
 /*Tasks:
 Saving Drawings and viewing gallery(Add auth)
   - Create button to save drawings
@@ -15,6 +17,8 @@ Enhancements:
   - Help button to help artists with code syntax
   - Call LLM to generate code
 */
+
+
 export default function App() {
   return (
     <header>
