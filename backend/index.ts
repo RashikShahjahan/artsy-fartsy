@@ -28,6 +28,8 @@ Deployment:
 import express from 'express';
 import cors from 'cors';
 import { interpret } from './interpret';
+import 'dotenv/config'; // To read CLERK_API_KEY
+import { ClerkExpressWithAuth } from '@clerk/clerk-sdk-node'
 
 const app = express();
 app.use(cors());
@@ -39,6 +41,9 @@ app.post('/interpret', (req, res) => {
     const commands = interpret(code);
     res.json(commands);
 });
+
+app.get('/protected-endpoint', ClerkExpressWithAuth(), (req, res) => {
+  })
 
 app.listen(3001, () => {
     console.log('Server is running on port 3001');

@@ -1,15 +1,7 @@
-import { Canvas } from '@react-three/fiber'
-import Line from './Line';
-import Arc from './Arc';
-import { useState } from 'react';
+import { SignedIn, SignedOut, SignInButton, SignOutButton} from '@clerk/clerk-react'
+import DrawingBoard from './DrawingBoard'
 /*Tasks:
-Routing and Authentication
-  - Add signup/login/logout button on the side of the drawings page
-  - Add clerk auth logic 
-  - Make routes to save and view gallery restricted logged in users
-  - Send auth params to the respective requests in axios
-
-Saving Drawings and viewing gallery
+Saving Drawings and viewing gallery(Add auth)
   - Create button to save drawings
   - Axios POST request to /save_art
   - View to Display drawings in their feed in a news feed(Make it like a gallery)
@@ -21,79 +13,23 @@ Enhancements:
   - View to display user's saved drawings
   - View to display user's followers and following
   - Help button to help artists with code syntax
-  - Call LLM to gnerate code
+  - Call LLM to generate code
 */
-
-type CommandArgs = (number | string | boolean)[];
-
-type Command = {
-    type: 'line' | 'arc';
-    args: CommandArgs;
-}
-
-function App() {
-  const [input, setInput] = useState('');
-  const [drawCommands, setDrawCommands] = useState<Command[]>([]);
-  
-  async function submitInput() {
-    try {
-      const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-      const response = await fetch(`${apiBaseUrl}/interpret`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ code: input }),
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const commands = await response.json();
-      console.log(commands);
-      setDrawCommands(commands);
-    } catch (error) {
-      console.error('Error interpreting code:', error);
-    }
-  }
-
+export default function App() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-100">
-      <div className="w-full max-w-[90%] h-96 bg-white rounded-lg shadow-md p-6 flex-grow">
-        <Canvas className="w-full h-full mb-6 border border-gray-300 rounded">
-          {drawCommands.map((command, index) => (
-            command.type === 'line' ? 
-              <Line key={index} start={[Number(command.args[0]), Number(command.args[1]), 0]} end={[Number(command.args[2]), Number(command.args[3]), 0]} color={command.args[4].toString()} /> :
-              <Arc 
-                key={index} 
-                center={[Number(command.args[0]), Number(command.args[1]), 0]}
-                start={[Number(command.args[2]), Number(command.args[3]), 0]}
-                end={[Number(command.args[4]), Number(command.args[5]), 0]}
-                startAngle={Number(command.args[6])}
-                endAngle={Number(command.args[7])}
-                clockwise={Boolean(command.args[8])}
-                rotation={Number(command.args[9])}
-                color={command.args[10].toString()}
-
-              />
-          ))}
-        </Canvas>
-      </div>
-      <div className="w-full max-w-[90%] mt-4">
-        <textarea 
-          value={input} 
-          onChange={(e) => setInput(e.target.value)} 
-          placeholder="Enter drawing commands"
-          className="w-full mb-3 p-4 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-          rows={10}
-        />
-        <button 
-          onClick={() => submitInput()} 
-          className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-        >
-          Draw
-        </button>
-      </div>
-    </div>)}
-
-export default App;
+    <header>
+      <SignedOut>
+        <div>
+          <SignInButton />
+          <DrawingBoard />
+        </div>
+      </SignedOut>
+      <SignedIn>
+        <div>
+          <DrawingBoard />
+          <SignOutButton />
+        </div>
+      </SignedIn>
+    </header>
+  )
+}
