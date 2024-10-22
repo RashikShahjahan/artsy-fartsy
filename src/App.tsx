@@ -10,6 +10,10 @@ Saving Drawings and viewing gallery(Add auth)
   - GET request to retrieve_gallery
   - Post request to like/unlike drawings
 
+Styling:
+  - Sign in button and sign out button should be styled
+  - Everything else should be styled
+
 Enhancements:
   - User profile page
   - View to display user's saved drawings
@@ -21,19 +25,6 @@ Enhancements:
 
 export default function App() {
   return (
-    <header>
-      <SignedOut>
-        <div>
-          <SignInButton />
-          <DrawingBoard />
-        </div>
-      </SignedOut>
-      <SignedIn>
-        <div>
-          <DrawingBoard />
-          <SignOutButton />
-        </div>
-      </SignedIn>
-    </header>
+    <DrawingBoard />
   )
 }

@@ -1,3 +1,23 @@
+
+/*Tasks:
+Saving Drawings and viewing gallery(Add auth)
+  - Create button to save drawings
+  - Axios POST request to /save_art
+  - View to Display drawings in their feed in a news feed(Make it like a gallery)
+  - GET request to retrieve_gallery
+  - Post request to like/unlike drawings
+
+Styling:
+  - Sign in button and sign out button should be styled
+  - Everything else should be styled
+
+Enhancements:
+  - User profile page
+  - View to display user's saved drawings
+  - View to display user's followers and following
+  - Help button to help artists with code syntax
+  - Call LLM to generate code
+*/
 import { Canvas } from '@react-three/fiber'
 import Line from './Line';
 import Arc from './Arc';
@@ -68,13 +88,20 @@ function DrawingBoard() {
           className="w-full mb-3 p-4 border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
           rows={10}
         />
-        <button 
-          onClick={() => submitInput()} 
-          className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+        <div className="flex justify-between gap-4">
+          <button 
+            onClick={() => submitInput()} 
+          className="w-1/2 px-6 py-3 bg-pink-400 text-black  hover:bg-pink-350 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-pink-200 focus:ring-opacity-50"
         >
-          Draw
-        </button>
+            Draw
+          </button>
+          <button className="w-1/2 px-6 py-3 bg-yellow-400 text-black  hover:bg-yellow-350 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-yellow-200 focus:ring-opacity-50">
+            Save
+          </button>
+        </div>
       </div>
-    </div>)}
+    </div>
+  )
+}
 
 export default DrawingBoard;
