@@ -1,14 +1,13 @@
 /*Tasks:
-
-Database
-  - Setup Prisma and connect to PostgreSQL
-  - Create prisma schema to store images and user 
-
 Art Gallery
   - POST endpoint save_art
   - GET endpoint retrieve_gallery
   - POST endpoint like_art
   - POST endpoint unlike_art
+
+Database
+  - Setup Prisma and connect to PostgreSQL
+  - Create prisma schema to store images and user 
 
 Enhancements
   - GET endpoint retrieve_user_arts(Optional)

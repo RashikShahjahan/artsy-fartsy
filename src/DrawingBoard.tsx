@@ -1,16 +1,6 @@
 /*Tasks:
-Saving Drawings and viewing gallery(Add auth)
-  - View to Display drawings in their feed in a news feed(Make it like a gallery)
-  - GET request to retrieve_gallery
-  - Post request to like/unlike drawings
-
-Styling:
-
-
 Enhancements:
-  - User profile page
-  - View to display user's saved drawings
-  - View to display user's followers and following
+
   - Help button to help artists with code syntax
   - Call LLM to generate code
 */
@@ -54,8 +44,8 @@ function DrawingBoard({auth}: {auth: boolean}) {
   }
 
   return (
-    <div className="flex flex-row items-start justify-center min-h-screen bg-gray-100 p-8 gap-8">
-      <div className="w-1/2 h-[calc(100vh-4rem)] bg-white rounded-lg shadow-md p-6 flex flex-col relative">
+    <div className="flex flex-col md:flex-row items-start justify-center gap-8">
+      <div className="w-full md:w-1/2 h-[calc(100vh-16rem)] bg-white rounded-lg shadow-md p-6 flex flex-col relative">
         <Canvas>
           {drawCommands.map((command, index) => (
             command.type === 'line' ? 
@@ -75,25 +65,25 @@ function DrawingBoard({auth}: {auth: boolean}) {
         </Canvas>
         {auth ? (
           <button 
-            className="absolute bottom-6 left-6 right-6 px-6 py-3 bg-yellow-400 text-black hover:bg-yellow-350 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-yellow-200 focus:ring-opacity-50"
+            className="absolute bottom-6 left-6 right-6 px-6 py-3 bg-yellow-400 text-black rounded-lg hover:bg-yellow-300 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-yellow-200 focus:ring-opacity-50"
             onClick={handleSaveDrawing}
           >
             Save
           </button>
         ) : (
-          <SignInButtonWrapper />
+          <SignInButtonWrapper text="Sign in to save your art!" />
         )}
       </div>
-      <div className="w-1/2 h-[calc(100vh-4rem)] bg-white rounded-lg shadow-md p-6 flex flex-col">
+      <div className="w-full md:w-1/2 h-[calc(100vh-16rem)] bg-white rounded-lg shadow-md p-6 flex flex-col">
         <textarea 
           value={input} 
           onChange={(e) => setInput(e.target.value)} 
           placeholder="Enter drawing commands"
-          className="w-full flex-grow border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="w-full flex-grow border border-gray-300 rounded-lg resize-none p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <button 
           onClick={handleSubmitInput} 
-          className="w-full px-6 py-3 bg-pink-400 text-black hover:bg-pink-350 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-pink-200 focus:ring-opacity-50 mt-6"
+          className="w-full px-6 py-3 bg-pink-400 text-black rounded-lg hover:bg-pink-300 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-pink-200 focus:ring-opacity-50 mt-6"
         >
           Draw
         </button>
