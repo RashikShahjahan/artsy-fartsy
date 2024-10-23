@@ -27,18 +27,10 @@ import 'dotenv/config';
 import cors from 'cors';
 import { clerkClient, clerkMiddleware, getAuth} from '@clerk/express'
 
-async function identifyUserMiddleware(req: Request, res: Response, next: NextFunction) {
-    const { userId } = getAuth(req);
-    console.log(userId);
-
-    next();
-}
-
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(clerkMiddleware());
-app.use(identifyUserMiddleware);
 
 app.post('/interpret', async(req, res) => {
     const { code } = req.body;
@@ -46,10 +38,22 @@ app.post('/interpret', async(req, res) => {
     res.json(commands);
 });
 
-app.post('/save_art', async(req, res) => {
-    const { image } = req.body;
-    console.log(image);
-    res.json({message: 'Art saved'});
+app.post('/save_art', async (req, res) => {
+  const { drawCommands } = req.body;
+  const { userId } = getAuth(req);
+  
+  // Here you would save the drawCommands to your database
+  // For example, using Prisma:
+  // await prisma.drawing.create({
+  //   data: {
+  //     userId,
+  //     commands: JSON.stringify(drawCommands),
+  //   },
+  // });
+
+  console.log(drawCommands);
+
+  res.json({message: 'Art saved'});
 });
 
 app.listen(3001, () => {

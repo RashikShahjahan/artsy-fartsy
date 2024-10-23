@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { Command } from './types';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
@@ -17,14 +18,11 @@ export async function submitDrawingCommands(code: string, token: string) {
   return response.data;
 }
 
-export async function saveDrawingToServer(blob: Blob, token: string) {
-  const formData = new FormData();
-  formData.append('image', blob, 'drawing.png');
-
-  await axios.post(`${apiBaseUrl}/save_drawing`, formData, {
+export async function saveDrawingToServer(drawCommands: Command[], token: string) {
+  await axios.post(`${apiBaseUrl}/save_art`, { drawCommands }, {
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'multipart/form-data',
+      'Content-Type': 'application/json',
     },
   });
 }

@@ -14,9 +14,9 @@ Enhancements:
   - Help button to help artists with code syntax
   - Call LLM to generate code
 */
-import { useState, useCallback } from 'react';
+import { useState} from 'react';
 import { useAuth } from '@clerk/clerk-react';
-import { submitDrawingCommands } from './api';
+import { saveDrawingToServer, submitDrawingCommands } from './api';
 import { Command } from './types';
 import { Canvas } from '@react-three/fiber';
 import Line from './Line';
@@ -37,20 +37,17 @@ function DrawingBoard() {
     }
   };
 
-  const handleSaveDrawing = useCallback(() => {
-    const canvas = document.querySelector('canvas');
-    if (canvas) {
-      canvas.toBlob(async (blob) => {
-        if (blob) {
-          const token = await getToken() ?? '';
-          await submitDrawingCommands(input, token);
- 
-        } else {
-          console.error('Failed to capture canvas');
-        }
-      });
+  async function handleSaveDrawing() {
+    try {
+      const token = await getToken() ?? '';
+
+      await saveDrawingToServer(drawCommands, token);
+      console.log('Drawing saved successfully');
+    } catch (error) {
+      console.error('Error saving drawing:', error);
+      // You might want to show an error message to the user here
     }
-  }, []);
+  }
 
   return (
     <div className="flex flex-row items-start justify-center min-h-screen bg-gray-100 p-8 gap-8">
