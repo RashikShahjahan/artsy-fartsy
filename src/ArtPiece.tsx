@@ -1,5 +1,3 @@
-
-
 import { Canvas } from "@react-three/fiber";
 import { ArtData } from "./types";
 import Line from "./Line";

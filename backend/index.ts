@@ -1,34 +1,17 @@
-/*Tasks:
-Art Gallery
-  - POST endpoint save_art
-  - GET endpoint retrieve_gallery
-  - POST endpoint like_art
-  - POST endpoint unlike_art
-
-Database
-  - Setup Prisma and connect to PostgreSQL
-  - Create prisma schema to store images and user 
-
-Enhancements
-  - GET endpoint retrieve_user_arts(Optional)
-  - GET endpoint retrieve_user_followers(Optional)
-  - GET endpoint retrieve_user_following(Optional)
-  - POST endpoint follow_user(Optional)
-  - POST endpoint unfollow_user(Optional)   
-
-Deployment:
-  - Dockerize the app(Optional)
-  - Deploy the app 
-*/
 import express, {type NextFunction, type Request, type Response} from 'express';
 import { interpret, type Command } from './interpret';
 import 'dotenv/config';
 import cors from 'cors';
 import { clerkClient, clerkMiddleware, getAuth} from '@clerk/express'
 
-// temporary storage for saved art each userID has a list of drawCommands
-// TODO: save to prisma
-const savedArt: Record<string, Command[]> = {};
+
+type SavedArt = {
+  id: number;
+  username: string;
+  likes: number;
+  commands: Command[];
+};
+
 
 const app = express();
 app.use(cors());
@@ -44,22 +27,47 @@ app.post('/interpret', async(req, res) => {
 app.post('/save_art', async (req, res) => {
   const { drawCommands } = req.body;
   const { userId } = getAuth(req);
-    if (!userId) {
+  if (!userId) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  savedArt[userId] = drawCommands;
-  // Here you would save the drawCommands to your database
-  // For example, using Prisma:
-  // await prisma.drawing.create({
-  //   data: {
-  //     userId,
-  //     commands: JSON.stringify(drawCommands),
-  //   },
-  // });
+  
 
-  console.log(userId, drawCommands);
+  const newArt: SavedArt = {
+    id: 0,
+    username: userId,
+    likes: 0,
+    commands: drawCommands
+  };
 
-  res.json({message: 'Art saved'});
+
+  res.json({message: 'Art saved', id: newArt.id});
+});
+
+app.get('/get_art/:artId', async (req, res) => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+
+});
+
+app.get('/get_previous_art', async (req, res) => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  
+});
+
+app.get('/get_next_art', async (req, res) => {
+  const { userId } = getAuth(req);
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+
 });
 
 app.listen(3001, () => {
