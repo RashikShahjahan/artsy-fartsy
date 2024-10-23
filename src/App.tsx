@@ -1,3 +1,4 @@
+import { SignedIn, SignedOut, SignIn } from '@clerk/clerk-react'
 import DrawingBoard from './DrawingBoard'
 
 
@@ -24,6 +25,13 @@ Enhancements:
 
 export default function App() {
   return (
-      <DrawingBoard />
+    <div>
+    <SignedIn>  
+        <DrawingBoard auth={true}/>
+    </SignedIn>
+    <SignedOut>
+      <DrawingBoard auth={false}/>
+    </SignedOut>
+    </div>
   )
 }

@@ -21,15 +21,19 @@ import { Command } from './types';
 import { Canvas } from '@react-three/fiber';
 import Line from './Line';
 import Arc from './Arc';
+import SignInButtonWrapper from './components/SignInButtonWrapper';
 
-function DrawingBoard() {
+function DrawingBoard({auth}: {auth: boolean}) {
   const [input, setInput] = useState('');
   const [drawCommands, setDrawCommands] = useState<Command[]>([]);
   const { getToken } = useAuth();
 
   const handleSubmitInput = async () => {
     try {
-      const token = await getToken() ?? '';
+      const token = await getToken();
+      if (!token) {
+        throw new Error('No token found');
+      }
       const commands = await submitDrawingCommands(input, token);
       setDrawCommands(commands);
     } catch (error) {
@@ -69,12 +73,16 @@ function DrawingBoard() {
               />
           ))}
         </Canvas>
-        <button 
-          className="absolute bottom-6 left-6 right-6 px-6 py-3 bg-yellow-400 text-black hover:bg-yellow-350 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-yellow-200 focus:ring-opacity-50"
-          onClick={handleSaveDrawing}
-        >
-          Save
-        </button>
+        {auth ? (
+          <button 
+            className="absolute bottom-6 left-6 right-6 px-6 py-3 bg-yellow-400 text-black hover:bg-yellow-350 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-yellow-200 focus:ring-opacity-50"
+            onClick={handleSaveDrawing}
+          >
+            Save
+          </button>
+        ) : (
+          <SignInButtonWrapper />
+        )}
       </div>
       <div className="w-1/2 h-[calc(100vh-4rem)] bg-white rounded-lg shadow-md p-6 flex flex-col">
         <textarea 
