@@ -46,6 +46,12 @@ app.post('/interpret', async(req, res) => {
     res.json(commands);
 });
 
+app.post('/save_art', async(req, res) => {
+    const { image } = req.body;
+    console.log(image);
+    res.json({message: 'Art saved'});
+});
+
 app.listen(3001, () => {
     console.log('Server is running on port 3001');
 });
