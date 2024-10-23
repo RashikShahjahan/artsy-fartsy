@@ -27,9 +27,29 @@ export async function saveDrawingToServer(drawCommands: Command[], token: string
   });
 }
 
-export async function fetchDrawCommands(artId: number, token: string) {
+export async function fetchArtFromServer(artId: number, token: string) {
   const response = await axios.get(`${apiBaseUrl}/get_art/${artId}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data;
+}
+
+export async function fetchPreviousArtId(token: string) {
+  const response = await axios.get(`${apiBaseUrl}/get_previous_art/`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data;
+}
+
+export async function fetchNextArtId(token: string) {
+  const response = await axios.get(`${apiBaseUrl}/get_next_art/`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   });
   return response.data;
 }
