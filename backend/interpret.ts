@@ -28,7 +28,7 @@ function lexer(input: string): Token[] {
 
 type CommandArgs = (number | string | boolean)[];
 
-type Command = {
+export type Command = {
     type: 'line' | 'arc';
     args: CommandArgs;
 }

@@ -22,10 +22,14 @@ Deployment:
   - Deploy the app 
 */
 import express, {type NextFunction, type Request, type Response} from 'express';
-import { interpret } from './interpret';
+import { interpret, type Command } from './interpret';
 import 'dotenv/config';
 import cors from 'cors';
 import { clerkClient, clerkMiddleware, getAuth} from '@clerk/express'
+
+// temporary storage for saved art each userID has a list of drawCommands
+// TODO: save to prisma
+const savedArt: Record<string, Command[]> = {};
 
 const app = express();
 app.use(cors());
@@ -41,7 +45,10 @@ app.post('/interpret', async(req, res) => {
 app.post('/save_art', async (req, res) => {
   const { drawCommands } = req.body;
   const { userId } = getAuth(req);
-  
+    if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  savedArt[userId] = drawCommands;
   // Here you would save the drawCommands to your database
   // For example, using Prisma:
   // await prisma.drawing.create({
@@ -51,7 +58,7 @@ app.post('/save_art', async (req, res) => {
   //   },
   // });
 
-  console.log(drawCommands);
+  console.log(userId, drawCommands);
 
   res.json({message: 'Art saved'});
 });
