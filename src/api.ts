@@ -26,3 +26,10 @@ export async function saveDrawingToServer(drawCommands: Command[], token: string
     },
   });
 }
+
+export async function fetchDrawCommands(artId: number, token: string) {
+  const response = await axios.get(`${apiBaseUrl}/get_art/${artId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+}
