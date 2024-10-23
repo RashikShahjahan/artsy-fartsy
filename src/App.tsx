@@ -1,37 +1,28 @@
-import { SignedIn, SignedOut, SignIn } from '@clerk/clerk-react'
-import DrawingBoard from './DrawingBoard'
-
-
-/*Tasks:
-Saving Drawings and viewing gallery(Add auth)
-  - Create button to save drawings
-  - Axios POST request to /save_art
-  - View to Display drawings in their feed in a news feed(Make it like a gallery)
-  - GET request to retrieve_gallery
-  - Post request to like/unlike drawings
-
-Styling:
-  - Sign in button and sign out button should be styled
-  - Everything else should be styled
-
-Enhancements:
-  - User profile page
-  - View to display user's saved drawings
-  - View to display user's followers and following
-  - Help button to help artists with code syntax
-  - Call LLM to generate code
-*/
-
+import { SignedIn, SignedOut, SignIn } from "@clerk/clerk-react";
+import { useState } from "react";
+import DrawingBoard from "./DrawingBoard";
+import Gallery from "./Gallery";
 
 export default function App() {
+  const [drawMode, setDrawMode] = useState(true);
+
   return (
-    <div>
-    <SignedIn>  
-        <DrawingBoard auth={true}/>
-    </SignedIn>
-    <SignedOut>
-      <DrawingBoard auth={false}/>
-    </SignedOut>
+    <div className="flex flex-col items-center min-h-screen bg-gray-100 p-4 sm:p-6 md:p-8">
+      <div className="w-full max-w-7xl">
+        <button
+          onClick={() => setDrawMode(!drawMode)}
+          className="w-full mb-8 py-4 px-6 text-xl font-bold text-black bg-red-400 rounded-lg shadow-md hover:bg-red-300 focus:outline-none focus:ring-2 focus:ring-red-300 focus:ring-opacity-50 transition-colors duration-300"
+        >
+          Switch to {drawMode ? 'Gallery' : 'Drawing Board'}
+        </button>
+        
+        <SignedIn>
+          {drawMode ? <DrawingBoard auth={true} /> : <Gallery />}
+        </SignedIn>
+        <SignedOut>
+          {drawMode ? <DrawingBoard auth={false} /> : <SignIn />}
+        </SignedOut>
+      </div>
     </div>
   )
 }
