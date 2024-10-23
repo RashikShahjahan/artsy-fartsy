@@ -28,7 +28,7 @@ function lexer(input: string): Token[] {
 
 type CommandArgs = (number | string | boolean)[];
 
-type Command = {
+export type Command = {
     type: 'line' | 'arc';
     args: CommandArgs;
 }
@@ -46,7 +46,6 @@ function parser(tokens: Token[]): Command[] {
             });
             i += argCount + 1;
             commands.push({ type: token.type.toLowerCase() as 'line' | 'arc', args });
-            console.log(commands);
         } else {
             i++;
         }
@@ -57,7 +56,6 @@ function parser(tokens: Token[]): Command[] {
 export function interpret(input: string): Command[] {
     const tokens = lexer(input);
     const commands = parser(tokens);
-    console.log(commands);
     return commands;
 }
 

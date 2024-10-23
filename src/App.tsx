@@ -1,4 +1,4 @@
-import { SignedIn, SignedOut, SignInButton, SignOutButton } from '@clerk/clerk-react'
+import { SignedIn, SignedOut, SignIn } from '@clerk/clerk-react'
 import DrawingBoard from './DrawingBoard'
 
 
@@ -9,6 +9,10 @@ Saving Drawings and viewing gallery(Add auth)
   - View to Display drawings in their feed in a news feed(Make it like a gallery)
   - GET request to retrieve_gallery
   - Post request to like/unlike drawings
+
+Styling:
+  - Sign in button and sign out button should be styled
+  - Everything else should be styled
 
 Enhancements:
   - User profile page
@@ -21,19 +25,13 @@ Enhancements:
 
 export default function App() {
   return (
-    <header>
-      <SignedOut>
-        <div>
-          <SignInButton />
-          <DrawingBoard />
-        </div>
-      </SignedOut>
-      <SignedIn>
-        <div>
-          <DrawingBoard />
-          <SignOutButton />
-        </div>
-      </SignedIn>
-    </header>
+    <div>
+    <SignedIn>  
+        <DrawingBoard auth={true}/>
+    </SignedIn>
+    <SignedOut>
+      <DrawingBoard auth={false}/>
+    </SignedOut>
+    </div>
   )
 }
