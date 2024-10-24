@@ -9,7 +9,12 @@ const prisma = new PrismaClient();
 
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGIN,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type'],
+  credentials: true
+}));
 app.use(express.json());
 app.use(clerkMiddleware());
 app.use(identifyUserMiddleware);
