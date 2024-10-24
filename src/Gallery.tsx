@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import ArtPiece from "./ArtPiece";
 import { ArtData } from "./types";
 import { useAuth } from "@clerk/clerk-react";
-import { fetchArtFromServer } from "./api";
+import { fetchArtCountFromServer, fetchArtFromServer } from "./api";
 
 export default function Gallery() {
     const [artIdx, setArtIdx] = useState(0);
@@ -18,7 +18,9 @@ export default function Gallery() {
                     throw new Error('No token found');
                 }
                 const response = await fetchArtFromServer(artIdx, token);
+
                 setArtData(response.artData[0]);
+                console.log(response.artData[0]);
             } catch (error) {
                 console.error("Error fetching art:", error);
                 // Handle error state here if needed
@@ -33,7 +35,9 @@ export default function Gallery() {
         if (!token) {
             throw new Error('No token found');
         }
-        setArtIdx(artIdx - 1);
+        if (artIdx > 0) {
+            setArtIdx(artIdx - 1);
+        }
     }
 
     const getNextArtId = async () => {
@@ -41,7 +45,12 @@ export default function Gallery() {
         if (!token) {
             throw new Error('No token found');
         }
-        setArtIdx(artIdx + 1);
+
+        const data = await fetchArtCountFromServer(token);
+        console.log(data);
+        if (artIdx < data.artCount-1) {
+            setArtIdx(artIdx + 1);
+        }
     }
 
     return (

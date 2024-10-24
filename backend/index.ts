@@ -62,11 +62,53 @@ app.post('/save_art', async (req: Request, res: Response) => {
 
 app.get('/get_art', async (req, res) => {
   const { skip } = req.query;
+
   const art = await prisma.art.findMany({
     skip: parseInt(skip as string),
     take: 1
   });
   res.json({artData: art});
+});
+
+app.get('/get_art_count', async (req, res) => {
+  const artCount = await prisma.art.count();
+  res.json({artCount});
+});
+
+app.post('/like_art', async (req, res) => {
+  const { artId } = req.body;
+  await prisma.art.update({
+    where: { id: artId },
+    data: { likes: { increment: 1 } }
+  });
+  await prisma.user.update({
+    where: { id: req.user.id },
+    data: { likedArts: { connect: { id: artId } } }
+  });
+});
+
+app.post('/unlike_art', async (req, res) => {
+  const { artId } = req.body;
+  await prisma.art.update({
+    where: { id: artId },
+    data: { likes: { decrement: 1 } }
+  });
+  await prisma.user.update({
+    where: { id: req.user.id },
+    data: { likedArts: { disconnect: { id: artId } } }
+  });
+});
+
+app.get('/get_liked_status', async (req, res) => {
+  const { artId } = req.query;
+  const likedStatus = await prisma.user.findFirst({ where: { id: req.user.id, likedArts: { some: { id: artId } } } });
+  res.json({ isLiked: likedStatus !== null});
+});
+
+app.get('/get_likes', async (req, res) => {
+  const { artId } = req.query;
+  const likes = await prisma.art.findUnique({ where: { id: artId } });
+  res.json({likes: likes?.likes});
 });
 
 app.listen(3001, () => {

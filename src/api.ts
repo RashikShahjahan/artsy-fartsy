@@ -36,3 +36,32 @@ export async function fetchArtFromServer(skip: number, token: string) {
   });
   return response.data;
 }
+
+export async function fetchArtCountFromServer(token: string) {
+  const response = await axios.get(`${apiBaseUrl}/get_art_count`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+}
+
+export async function likeArtRequest(artId:   string, token: string) {
+  await axios.post(`${apiBaseUrl}/like_art`, { artId }, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function unlikeArtRequest(artId: string, token: string) {
+  await axios.post(`${apiBaseUrl}/unlike_art`, { artId }, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+}
+
+export async function fetchLikedStatus(artId: string, token: string) {
+  const response = await axios.get(`${apiBaseUrl}/get_liked_status`, { params: { artId }, headers: { Authorization: `Bearer ${token}` } });
+  return response.data;
+}
+
+export async function fetchLikes(artId: string, token: string) {
+  const response = await axios.get(`${apiBaseUrl}/get_likes`, { params: { artId }, headers: { Authorization: `Bearer ${token}` } });
+  return response.data;
+}
