@@ -20,7 +20,6 @@ export default function Gallery() {
                 const response = await fetchArtFromServer(artIdx, token);
 
                 setArtData(response.artData[0]);
-                console.log(response.artData[0]);
             } catch (error) {
                 console.error("Error fetching art:", error);
                 // Handle error state here if needed
@@ -28,6 +27,8 @@ export default function Gallery() {
         };
 
         fetchArt();
+        console.log(artData);
+
     }, [artIdx, getToken]);
 
     const getPreviousArtId = async () => {

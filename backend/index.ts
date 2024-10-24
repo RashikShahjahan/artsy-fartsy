@@ -1,5 +1,5 @@
 import express, {type NextFunction, type Request, type Response} from 'express';
-import { interpret, type Command } from './interpret';
+import { interpret} from './interpret';
 import 'dotenv/config';
 import cors from 'cors';
 import { clerkClient, clerkMiddleware, getAuth} from '@clerk/express';
@@ -55,17 +55,17 @@ app.post('/interpret', async (req: Request, res: Response) => {
 });
 
   app.post('/save_art', async (req: Request, res: Response) => {
-  const { drawCommands } = req.body;
-  const user = req.user;
-  if (!user) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  const art = await prisma.art.create({
-    data: {
-      userId: user.id,
-      commands: drawCommands
+    const { drawCommands } = req.body;
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ error: 'Unauthorized' });
     }
+
+    const art = await prisma.art.create({
+      data: {
+        userId: user.id,
+        commands: drawCommands
+      }
   });
 
   res.json({artId: art.id});
@@ -107,9 +107,6 @@ app.post('/like_art', async (req: Request, res: Response) => {
 
 app.post('/unlike_art', async (req: Request, res: Response) => {
   const { artId } = req.body;
-  if (typeof artId !== 'string') {
-    return res.status(400).json({ error: 'Invalid artId' });
-  }
   await prisma.art.update({
     where: { id: artId },
     data: { likes: { decrement: 1 } }
@@ -128,9 +125,7 @@ app.post('/unlike_art', async (req: Request, res: Response) => {
   if (!req.user) {
     return res.status(401).json({ error: 'User not authenticated' });
   }
-  if (typeof artId !== 'string') {
-    return res.status(400).json({ error: 'Invalid artId' });
-  }
+
   const likedStatus = await prisma.user.findFirst({
     where: {
       id: req.user.id,
@@ -142,9 +137,7 @@ app.post('/unlike_art', async (req: Request, res: Response) => {
 
 app.get('/get_likes', async (req: Request, res: Response) => {
   const { artId } = req.query;
-  if (typeof artId !== 'string') {
-    return res.status(400).json({ error: 'Invalid artId' });
-  }
+
   const art = await prisma.art.findUnique({ where: { id: artId } });
   res.json({ likes: art?.likes ?? 0 });
 });
