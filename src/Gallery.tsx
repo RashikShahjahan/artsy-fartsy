@@ -18,18 +18,17 @@ export default function Gallery() {
                     throw new Error('No token found');
                 }
                 const response = await fetchArtFromServer(artIdx, token);
-
                 setArtData(response.artData[0]);
             } catch (error) {
                 console.error("Error fetching art:", error);
-                // Handle error state here if needed
+
             } 
         };
 
         fetchArt();
         console.log(artData);
 
-    }, [artIdx, getToken]);
+    }, [artIdx,artData, getToken]);
 
     const getPreviousArtId = async () => {
         const token = await getToken();

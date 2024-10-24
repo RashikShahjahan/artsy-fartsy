@@ -99,7 +99,13 @@ app.post('/like_art', async (req: Request, res: Response) => {
   if (req.user) {
     await prisma.user.update({
       where: { id: req.user.id },
-      data: { likedArts: { connect: { id: artId } } }
+      data: { 
+        likedArts: { 
+          connect: { 
+            id: artId 
+        } 
+      } 
+      }
     });
   }
   res.json({ success: true });
@@ -114,33 +120,54 @@ app.post('/unlike_art', async (req: Request, res: Response) => {
   if (req.user) {
     await prisma.user.update({
       where: { id: req.user.id },
-      data: { likedArts: { disconnect: { id: artId } } }
+      data: { 
+        likedArts: { 
+          disconnect: 
+          { 
+          id: artId 
+          } 
+        } 
+      }
     });
   }
   res.json({ success: true });
 });
 
-  app.get('/get_liked_status', async (req: Request, res: Response) => {
-  const { artId } = req.query;
-  if (!req.user) {
-    return res.status(401).json({ error: 'User not authenticated' });
-  }
 
-  const likedStatus = await prisma.user.findFirst({
-    where: {
-      id: req.user.id,
-      likedArts: { some: { id: artId } }
+
+  app.get('/get_liked_status', async (req: Request, res: Response) => {
+    const { artId } = req.query;
+    if (!req.user) {
+      return res.status(401).json(
+        {
+         error: 'User not authenticated' 
+        }
+
+      );
     }
-  });
-  res.json({ isLiked: likedStatus !== null });
-});
+
+    const likedStatus = await prisma.user.findFirst({
+      where: {
+        id: req.user.id,
+        likedArts: { 
+          some: { 
+            id: artId 
+            } 
+          }
+          }
+        }
+      );
+    res.json({ isLiked: likedStatus !== null });
+    }
+  );
 
 app.get('/get_likes', async (req: Request, res: Response) => {
   const { artId } = req.query;
 
   const art = await prisma.art.findUnique({ where: { id: artId } });
   res.json({ likes: art?.likes ?? 0 });
-});
+    }
+  );
 
 app.listen(3001, () => {
     console.log('Server is running on port 3001');
