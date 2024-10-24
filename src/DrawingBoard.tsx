@@ -40,6 +40,7 @@ function DrawingBoard({auth}: {auth: boolean}) {
     } catch (error) {
       console.error('Error saving drawing:', error);
       // You might want to show an error message to the user here
+      
     }
   }
 

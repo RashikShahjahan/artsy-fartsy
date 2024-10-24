@@ -7,7 +7,7 @@ export default function ArtPiece({artData}: {artData: ArtData}) {
 
     return (
     <Canvas>
-        {artData.drawCommands.map((command, index) => (
+        {artData.commands.map((command, index) => (
           command.type === 'line' ? 
             <Line key={index} start={[Number(command.args[0]), Number(command.args[1]), 0]} end={[Number(command.args[2]), Number(command.args[3]), 0]} color={command.args[4].toString()} /> :
             <Arc 
