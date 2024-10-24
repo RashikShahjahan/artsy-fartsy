@@ -9,7 +9,14 @@ const prisma = new PrismaClient();
 
 
 const app = express();
-app.use(cors());
+
+// Configure CORS
+const allowedOrigin = process.env.ALLOWED_ORIGIN;
+app.use(cors({
+  origin: allowedOrigin,
+  credentials: true,
+}));
+
 app.use(express.json());
 app.use(clerkMiddleware());
 app.use(identifyUserMiddleware);
@@ -114,5 +121,3 @@ app.get('/get_likes', async (req, res) => {
 app.listen(3001, () => {
     console.log('Server is running on port 3001');
 });
-
-

@@ -3,10 +3,6 @@ import { useState } from "react";
 import DrawingBoard from "./DrawingBoard";
 import Gallery from "./Gallery";
 
-/*
-  TODO:
-  - deploy 
-  */
 
 export default function App() {
   const [drawMode, setDrawMode] = useState(true);
