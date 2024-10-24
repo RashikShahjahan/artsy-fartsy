@@ -9,17 +9,28 @@ const prisma = new PrismaClient();
 
 
 const app = express();
-
-// Configure CORS
-const allowedOrigin = process.env.ALLOWED_ORIGIN;
 app.use(cors({
-  origin: '*',
-  credentials: true,
+  origin: process.env.ALLOWED_ORIGIN,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type'],
+  credentials: true
 }));
-
 app.use(express.json());
 app.use(clerkMiddleware());
 app.use(identifyUserMiddleware);
+
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://artsy-fartsy-front.onrender.com');
+  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
+  
+  // intercept OPTIONS method
+  if ('OPTIONS' === req.method) {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
+});
 
 async function identifyUserMiddleware(req: Request, res: Response, next: NextFunction) {
     const { userId } = getAuth(req);
