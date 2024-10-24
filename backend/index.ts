@@ -13,7 +13,7 @@ const app = express();
 // Configure CORS
 const allowedOrigin = process.env.ALLOWED_ORIGIN;
 app.use(cors({
-  origin: allowedOrigin,
+  origin: '*',
   credentials: true,
 }));
 
