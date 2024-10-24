@@ -2,44 +2,38 @@ import { useEffect, useState } from "react";
 import ArtPiece from "./ArtPiece";
 import { ArtData } from "./types";
 import { useAuth } from "@clerk/clerk-react";
-import { fetchArtFromServer, fetchNextArtId, fetchPreviousArtId } from "./api";
+import { fetchArtFromServer } from "./api";
 
 export default function Gallery() {
-    const [artId, setArtId] = useState(0);
+    const [artIdx, setArtIdx] = useState(0);
     const [artData, setArtData] = useState<ArtData | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
 
     const { getToken } = useAuth();
 
     useEffect(() => {
         const fetchArt = async () => {
-            setIsLoading(true);
             try {
                 const token = await getToken();
                 if (!token) {
                     throw new Error('No token found');
                 }
-                const response = await fetchArtFromServer(artId, token);
-                setArtData(response.artData);
-                setArtId(response.artId);
+                const response = await fetchArtFromServer(artIdx, token);
+                setArtData(response.artData[0]);
             } catch (error) {
                 console.error("Error fetching art:", error);
                 // Handle error state here if needed
-            } finally {
-                setIsLoading(false);
-            }
+            } 
         };
 
         fetchArt();
-    }, [artId, getToken]);
+    }, [artIdx, getToken]);
 
     const getPreviousArtId = async () => {
         const token = await getToken();
         if (!token) {
             throw new Error('No token found');
         }
-        const response = await fetchPreviousArtId(token);
-        setArtId(response.artId);
+        setArtIdx(artIdx - 1);
     }
 
     const getNextArtId = async () => {
@@ -47,15 +41,12 @@ export default function Gallery() {
         if (!token) {
             throw new Error('No token found');
         }
-        const response = await fetchNextArtId(token);
-        setArtId(response.artId);
+        setArtIdx(artIdx + 1);
     }
 
     return (
         <div className="w-full h-[calc(100vh-16rem)] bg-white rounded-lg shadow-md p-6 flex flex-col">
-            {isLoading ? (
-                <div>Loading...</div>
-            ) : artData && artData.drawCommands ? (
+            {artData && artData.commands ? (
                 <ArtPiece artData={artData} />
             ) : (
                 <div>No art data available</div>
