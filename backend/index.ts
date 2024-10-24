@@ -7,41 +7,16 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-// Define a custom type for requests with user information
-interface AuthenticatedRequest extends Request {
-  user?: {
-    id: string;
-    clerkId: string;
-    username: string;
-    // Add other user properties if needed
-  };
-}
 
 const app = express();
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN,
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Authorization', 'Content-Type'],
-  credentials: true
-}));
+app.use(cors());
 app.use(express.json());
 app.use(clerkMiddleware());
 app.use(identifyUserMiddleware);
 
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', 'https://artsy-fartsy-front.onrender.com');
-  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
-  
-  // intercept OPTIONS method
-  if ('OPTIONS' === req.method) {
-    res.sendStatus(200);
-  } else {
-    next();
-  }
-});
 
-async function identifyUserMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+
+async function identifyUserMiddleware(req: Request, res: Response, next: NextFunction) {
     const { userId } = getAuth(req);
 
     if (userId) {
@@ -74,9 +49,9 @@ app.post('/interpret', async (req: Request, res: Response) => {
     res.json(commands);
 });
 
-app.post('/save_art', async (req: AuthenticatedRequest, res: Response) => {
+  app.post('/save_art', async (req: Request, res: Response) => {
   const { drawCommands } = req.body;
-  const user = (req as AuthenticatedRequest).user;
+  const user = req.user;
   if (!user) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
@@ -107,7 +82,7 @@ app.get('/get_art_count', async (req: Request, res: Response) => {
   res.json({artCount});
 });
 
-app.post('/like_art', async (req: AuthenticatedRequest, res: Response) => {
+app.post('/like_art', async (req: Request, res: Response) => {
   const { artId } = req.body;
   if (typeof artId !== 'string') {
     return res.status(400).json({ error: 'Invalid artId' });
@@ -125,7 +100,7 @@ app.post('/like_art', async (req: AuthenticatedRequest, res: Response) => {
   res.json({ success: true });
 });
 
-app.post('/unlike_art', async (req: AuthenticatedRequest, res: Response) => {
+app.post('/unlike_art', async (req: Request, res: Response) => {
   const { artId } = req.body;
   if (typeof artId !== 'string') {
     return res.status(400).json({ error: 'Invalid artId' });
@@ -143,7 +118,7 @@ app.post('/unlike_art', async (req: AuthenticatedRequest, res: Response) => {
   res.json({ success: true });
 });
 
-app.get('/get_liked_status', async (req: AuthenticatedRequest, res: Response) => {
+  app.get('/get_liked_status', async (req: Request, res: Response) => {
   const { artId } = req.query;
   if (!req.user) {
     return res.status(401).json({ error: 'User not authenticated' });
