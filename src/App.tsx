@@ -1,4 +1,4 @@
-import { SignedIn, SignedOut, SignIn, SignOutButton, UserButton } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignIn,  UserButton } from "@clerk/clerk-react";
 import { useState } from "react";
 import DrawingBoard from "./DrawingBoard";
 import Gallery from "./Gallery";
