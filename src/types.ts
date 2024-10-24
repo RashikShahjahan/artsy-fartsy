@@ -6,6 +6,7 @@ export type Command = {
 }
 
 export type ArtData = {
+    id: string;
     commands: Command[];
     username: string;
     likes: number;

@@ -21,6 +21,7 @@ model Art {
   likes Int @default(0)
   commands Json
   user User @relation(fields: [userId], references: [id])
+  likedBy User[] @relation("UserLikes")
 }
 
 model User {
@@ -28,5 +29,6 @@ model User {
   username String
   clerkId String@unique
   Arts Art[]
+  likedArts Art[] @relation("UserLikes")
 }
 
