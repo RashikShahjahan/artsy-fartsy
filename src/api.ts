@@ -5,6 +5,7 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
 export async function submitDrawingCommands(code: string, token: string) {
   const response = await axios.post(`${apiBaseUrl}/interpret`, { code }, {
+    withCredentials: true,
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
@@ -20,6 +21,7 @@ export async function submitDrawingCommands(code: string, token: string) {
 
 export async function saveDrawingToServer(drawCommands: Command[], token: string) {
   await axios.post(`${apiBaseUrl}/save_art`, { drawCommands }, {
+    withCredentials: true,
     headers: {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
@@ -30,6 +32,7 @@ export async function saveDrawingToServer(drawCommands: Command[], token: string
 export async function fetchArtFromServer(skip: number, token: string) {
   const response = await axios.get(`${apiBaseUrl}/get_art`, {
     params: { skip },
+    withCredentials: true,
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -40,7 +43,7 @@ export async function fetchArtFromServer(skip: number, token: string) {
 export async function fetchArtCountFromServer(token: string) {
   const response = await axios.get(`${apiBaseUrl}/get_art_count`, {
     headers: { Authorization: `Bearer ${token}` },
-  });
+      });
   return response.data;
 }
 
