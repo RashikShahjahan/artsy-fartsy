@@ -73,7 +73,7 @@ app.post('/interpret', async (req: Request, res: Response) => {
 
 app.get('/get_art', async (req: Request, res: Response) => {
   const { skip } = req.query;
-  const skipValue = typeof skip === 'string' ? parseInt(skip, 10) : 0;
+  const skipValue = parseInt(skip as string);
 
   const art = await prisma.art.findMany({
     skip: skipValue,
