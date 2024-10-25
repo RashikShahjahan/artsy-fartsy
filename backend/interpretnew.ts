@@ -1,13 +1,49 @@
-
-
 // Type definitions for the program structure
-
-
 type Token = {
     type: string;
     value: string;
     line: number;
 }
+
+type Node = WhileNode | LineNode | LetNode | ArcNode;
+
+type WhileNode = {
+    type: 'while';
+    condition: string;
+    body: Node[];
+}
+
+type LineNode = {
+    type: 'line';
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    color: string;
+}
+
+type ArcNode = {
+    type: 'arc';
+    centerX: number;
+    centerY: number;
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    radius: number;
+    startAngle: number;
+    endAngle: number;
+    clockwise: boolean;
+    rotation: number;
+    color: string;
+}
+
+type LetNode = {
+    type: 'let';
+    variable: string;
+    value: string | number;
+}
+
 
 
 function lexer(code: string): Token[]{
@@ -43,64 +79,119 @@ function lexer(code: string): Token[]{
 }
 
 
-class Parser{
+class Parser {
     tokens: Token[];
-    tokenIndex: number;
-    lineIndex: number;
+    current: number;
 
-    constructor(tokens: Token[]){
+    constructor(tokens: Token[]) {
         this.tokens = tokens;
-        this.tokenIndex = 0;
-        this.lineIndex = 0;
+        this.current = 0;
     }
 
-    parseProgram(){
-        if (this.tokens[this.tokenIndex].type === 'WHILE'){
-            return this.parseLoop();
+    parse(): Node[] {
+        const nodes: Node[] = [];
+        while (!this.isAtEnd()) {
+            nodes.push(this.parseStatement());
         }
-        else {
-            return this.parseStatement();
+        return nodes;
+    }
+
+    private parseStatement(): Node {
+        const token = this.peek();
+        
+        switch (token.type) {
+            case 'WHILE':
+                return this.parseWhile();
+            case 'LINE':
+                return this.parseLine();
+            case 'ARC':
+                return this.parseArc();
+            case 'LET':
+                return this.parseLet();
+            default:
+                throw new Error(`Unexpected token type: ${token.type}`);
         }
-    }   
-    parseLoop() {
-        // consume WHILE
-        this.tokenIndex++;
-        // parse condition
+    }
+
+    private parseWhile(): WhileNode {
+        this.advance(); // consume 'while'
         const condition = this.parseCondition();
-        this.lineIndex++;
-        // parse body
-        const body = this.parseBody();
-        // consume ENDWHILE
-        this.tokenIndex++;
-        return { condition, body };
-    }
-    parseBody() {
-        while (this.tokens[this.tokenIndex].type !== 'ENDWHILE'){
-            this.parseStatement();
-            this.tokenIndex++;
+        const body: Node[] = [];
+        
+        while (!this.isAtEnd() && this.peek().type !== 'ENDWHILE') {
+            body.push(this.parseStatement());
         }
+        
+        this.consume('ENDWHILE', "Expected 'endwhile' after while body");
+        return { type: 'while', condition, body };
     }
-    parseCondition() {
-        let condition = '';
-        while (this.lineIndex === this.tokens[this.tokenIndex].line){
-            condition += this.tokens[this.tokenIndex].value;
-            this.tokenIndex++;
-        }
-        return condition;
-    }
-    parseStatement() {
 
+    private parseLine(): LineNode {
+        this.advance(); // consume 'line'
+        const x1 = Number(this.advance().value);
+        const y1 = Number(this.advance().value);
+        const x2 = Number(this.advance().value);
+        const y2 = Number(this.advance().value);
+        return { type: 'line', x1, y1, x2, y2 };
+    }
+
+    private parseArc(): ArcNode {
+        this.advance(); // consume 'arc'
+        const x = Number(this.advance().value);
+        const y = Number(this.advance().value);
+        const radius = Number(this.advance().value);
+        const startAngle = Number(this.advance().value);
+        const endAngle = Number(this.advance().value);
+        return { type: 'arc', x, y, radius, startAngle, endAngle };
+    }
+
+    private parseLet(): LetNode {
+        this.advance(); // consume 'let'
+        const variable = this.advance().value;
+        this.consume('VAR', "Expected ':' after variable name"); // consume ':'
+        const value = this.advance().value;
+        return { type: 'let', variable, value };
+    }
+
+    private parseCondition(): string {
+        let condition = '';
+        const currentLine = this.peek().line;
+        
+        while (!this.isAtEnd() && this.peek().line === currentLine) {
+            condition += this.advance().value + ' ';
+        }
+        
+        return condition.trim();
+    }
+
+    // Helper methods
+    private isAtEnd(): boolean {
+        return this.current >= this.tokens.length;
+    }
+
+    private peek(): Token {
+        return this.tokens[this.current];
+    }
+
+    private advance(): Token {
+        if (!this.isAtEnd()) this.current++;
+        return this.tokens[this.current - 1];
+    }
+
+    private consume(type: string, message: string): Token {
+        if (this.peek().type === type) return this.advance();
+        throw new Error(message);
     }
 }
 
 
 
-function interpreter(code: string){
+function interpreter(code: string) {
     const tokens = lexer(code);
-    console.log(tokens);
-    //const parser = new Parser(tokens);
-    //const commands = parser.parseProgram();
-    //return commands;
+    const parser = new Parser(tokens);
+    const ast = parser.parse();
+    console.log(JSON.stringify(ast, null, 2));
+    // Later you'll add code to execute the AST
 }
 
 interpreter(`
@@ -110,4 +201,5 @@ interpreter(`
 endwhile
 line 10 10 20 20
 `);
+
 

@@ -42,6 +42,7 @@ function DrawingBoard({auth}: {auth: boolean}) {
         throw new Error('No token found');
       }
       const commands = await aiDrawingCommands(input, token);
+      console.log(commands);
       setDrawCommands(commands);
     } catch (error) {
       console.error('Error generating code:', error);
