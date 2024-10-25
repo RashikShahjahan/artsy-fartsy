@@ -64,9 +64,12 @@ export async function isLikedRequest(artId: string, token: string) {
   return response.data;
 }
 
-export async function generateCode(token: string) {
-  const response = await axios.get(`${apiBaseUrl}/generate_code`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+export async function aiDrawingCommands(userPrompt: string, token: string) {
+  const response = await axios.post(`${apiBaseUrl}/generate_code`, 
+    { userPrompt },
+    { 
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
   return response.data;
 }
