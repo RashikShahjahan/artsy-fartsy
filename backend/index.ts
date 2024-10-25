@@ -4,6 +4,7 @@ import 'dotenv/config';
 import cors from 'cors';
 import { clerkClient, clerkMiddleware, getAuth} from '@clerk/express';
 import { PrismaClient } from '@prisma/client';
+import { generateCode } from './llm';
 
 const prisma = new PrismaClient();
 
@@ -150,14 +151,19 @@ app.get('/is_liked', async (req: Request, res: Response) => {
 });
 
 
-  
-
-
 app.get('/get_likes', async (req: Request, res: Response) => {
   const { artId } = req.query;
   const art = await prisma.art.findUnique({ where: { id: artId as string  } });
   res.json({ likes: art?.likes ?? 0 });
 });
+
+app.post('/generate_code', async (req: Request, res: Response) => {
+  const { userPrompt } = req.body;
+  const code = await generateCode(userPrompt);
+  const commands = interpret(code);
+  res.json(commands);
+});
+
 
 
 
