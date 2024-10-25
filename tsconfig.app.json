@@ -20,5 +20,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "backend/interpret.ts"]
+  "include": ["src", "backend/interpretnew.ts"]
 }
