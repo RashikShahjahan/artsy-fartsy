@@ -1,12 +1,6 @@
-/*Tasks:
-Enhancements:
-
-  - Help button to help artists with code syntax
-  - Call LLM to generate code
-*/
 import { useState} from 'react';
 import { useAuth } from '@clerk/clerk-react';
-import { saveDrawingToServer, submitDrawingCommands } from './api';
+import { saveDrawingToServer, submitDrawingCommands, generateCode } from './api';
 import { Command } from './types';
 import { Canvas } from '@react-three/fiber';
 import Line from './Line';
@@ -43,6 +37,20 @@ function DrawingBoard({auth}: {auth: boolean}) {
       
     }
   }
+
+  const handleGenerateCode = async () => {
+    try {
+      const token = await getToken();
+      if (!token) {
+        throw new Error('No token found');
+      }
+      const generatedCode = await generateCode(token);
+      setInput(generatedCode);
+    } catch (error) {
+      console.error('Error generating code:', error);
+      // You might want to show an error message to the user here
+    }
+  };
 
   return (
     <div className="flex flex-col md:flex-row items-start justify-center gap-8">
@@ -82,12 +90,20 @@ function DrawingBoard({auth}: {auth: boolean}) {
           placeholder="Enter drawing commands"
           className="w-full flex-grow border border-gray-300 rounded-lg resize-none p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
-        <button 
-          onClick={handleSubmitInput} 
-          className="w-full px-6 py-3 bg-pink-400 text-black rounded-lg hover:bg-pink-300 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-pink-200 focus:ring-opacity-50 mt-6"
-        >
-          Draw
-        </button>
+        <div className="flex gap-4 mt-6">
+          <button 
+            onClick={handleSubmitInput} 
+            className="flex-1 px-6 py-3 bg-pink-400 text-black rounded-lg hover:bg-pink-300 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-pink-200 focus:ring-opacity-50"
+          >
+            Draw
+          </button>
+          <button 
+            onClick={handleGenerateCode} 
+            className="flex-1 px-6 py-3 bg-blue-400 text-black rounded-lg hover:bg-blue-300 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-200 focus:ring-opacity-50"
+          >
+            Generate Code
+          </button>
+        </div>
       </div>
     </div>
   );
