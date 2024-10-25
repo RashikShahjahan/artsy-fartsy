@@ -15,11 +15,10 @@ datasource db {
 
 model Art {
   id String @id @default(cuid())
-  userId String
   likes Int @default(0)
   commands Json
   user User @relation(fields: [userId], references: [id])
-  likedBy User[] @relation("UserLikes")
+  userId String
 }
 
 model User {
@@ -27,6 +26,11 @@ model User {
   username String
   clerkId String@unique
   Arts Art[]
-  likedArts Art[] @relation("UserLikes")
+}
+
+model Like {
+  id String @id @default(cuid())
+  artId String
+  userId String
 }
 

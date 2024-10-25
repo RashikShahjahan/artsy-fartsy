@@ -87,88 +87,80 @@ app.get('/get_art_count', async (req: Request, res: Response) => {
   res.json({artCount});
 });
 
-app.post('/like_art', async (req: Request, res: Response) => {
+app.post('/toggle_like', async (req: Request, res: Response) => {
   const { artId } = req.body;
-  if (typeof artId !== 'string') {
-    return res.status(400).json({ error: 'Invalid artId' });
+  const userId = req.user?.id;
+
+  if (!userId) {
+    return res.status(401).json({ error: 'Unauthorized' });
   }
-  await prisma.art.update({
-    where: { id: artId },
-    data: { likes: { increment: 1 } }
-  });
-  if (req.user) {
-    await prisma.user.update({
-      where: { id: req.user.id },
-      data: { 
-        likedArts: { 
-          connect: { 
-            id: artId 
-        } 
-      } 
-      }
-    });
-  }
-  res.json({ success: true });
-});
 
-app.post('/unlike_art', async (req: Request, res: Response) => {
-  const { artId } = req.body;
-  await prisma.art.update({
-    where: { id: artId },
-    data: { likes: { decrement: 1 } }
-  });
-  if (req.user) {
-    await prisma.user.update({
-      where: { id: req.user.id },
-      data: { 
-        likedArts: { 
-          disconnect: 
-          { 
-          id: artId 
-          } 
-        } 
-      }
-    });
-  }
-  res.json({ success: true });
-});
-
-
-
-  app.get('/get_liked_status', async (req: Request, res: Response) => {
-    const { artId } = req.query;
-    if (!req.user) {
-      return res.status(401).json(
-        {
-         error: 'User not authenticated' 
-        }
-
-      );
+  // Find existing like
+  const existingLike = await prisma.like.findFirst({
+    where: {
+      userId: userId,
+      artId: artId
     }
+  });
 
-    const likedStatus = await prisma.user.findFirst({
+  if (existingLike) {
+    // User already liked, so remove like
+    await prisma.like.delete({
       where: {
-        id: req.user.id,
-        likedArts: { 
-          some: { 
-            id: artId 
-            } 
-          }
-          }
+        id: existingLike.id
+      }
+    });
+
+    // Decrement likes count, ensuring it doesn't go below 0
+    await prisma.art.update({
+      where: { id: artId },
+      data: {
+        likes: {
+          decrement: 1
         }
-      );
-    res.json({ isLiked: likedStatus !== null });
-    }
-  );
+      }
+    });
+  } else {
+    // User hasn't liked, so add like
+    await prisma.like.create({
+      data: {
+        userId: userId,
+        artId: artId
+      }
+    });
+
+    // Increment likes count
+    await prisma.art.update({
+      where: { id: artId },
+      data: {
+        likes: {
+          increment: 1
+        }
+      }
+    });
+  }
+  res.json({ success: true, isLiked: !existingLike});
+});
+  
+app.get('/is_liked', async (req: Request, res: Response) => {
+  const { artId } = req.query;
+  const userId = req.user?.id;
+  const isLiked = await prisma.like.findFirst({ where: { userId, artId }});
+  res.json({ isLiked: !!isLiked});
+});
+
+
+  
+
 
 app.get('/get_likes', async (req: Request, res: Response) => {
   const { artId } = req.query;
-
-  const art = await prisma.art.findUnique({ where: { id: artId } });
+  const art = await prisma.art.findUnique({ where: { id: artId as string  } });
   res.json({ likes: art?.likes ?? 0 });
-    }
-  );
+});
 
-app.listen(3001, () => {
-    console.log('Server is running on port 3001');
+
+
+app.listen(3000, () => {
+    console.log('Server is running on port 3000');
 });
