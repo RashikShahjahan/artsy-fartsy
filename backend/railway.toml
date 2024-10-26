@@ -1,5 +1,6 @@
 [phases.setup]
 nixPkgs = ['bun']
+NIXPACKS_LIBS=openssl
 
 [phases.install]
 cmds = ['bun install']
