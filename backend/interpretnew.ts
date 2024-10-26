@@ -1,4 +1,5 @@
 // Type definitions for the program structure
+/*
 type Token = {
     type: string;
     value: string;
@@ -203,3 +204,4 @@ line 10 10 20 20
 `);
 
 
+*/

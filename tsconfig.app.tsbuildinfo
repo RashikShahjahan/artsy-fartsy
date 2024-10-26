@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/Arc.tsx","./src/Line.tsx","./src/main.tsx","./src/vite-env.d.ts","./backend/interpret.ts"],"version":"5.6.3"}
+{"root":["./src/App.tsx","./src/Arc.tsx","./src/DrawingBoard.tsx","./src/Gallery.tsx","./src/Line.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/components/SignInButtonWrapper.tsx","./backend/interpretnew.ts"],"version":"5.6.3"}

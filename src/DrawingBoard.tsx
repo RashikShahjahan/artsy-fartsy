@@ -15,8 +15,7 @@ function DrawingBoard({auth}: {auth: boolean}) {
   const { getToken } = useAuth();
 
   const handleSubmitInput = async () => {
-      const token = await getToken();
-
+      const token = await getToken() ?? '';
       const commands = await submitDrawingCommands(input, token);
       setDrawCommands(commands);
 

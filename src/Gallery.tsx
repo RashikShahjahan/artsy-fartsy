@@ -41,9 +41,13 @@ export default function Gallery() {
             throw new Error('No token found');
         }
 
-        await toggleLikeRequest(artData.id, token);
-        const response = await isLikedRequest(artData.id, token);
-        setIsLiked(response.isLiked);
+        if (artData) {
+            await toggleLikeRequest(artData.id, token);
+            const response = await isLikedRequest(artData.id, token);
+            setIsLiked(response.isLiked);
+        } else {
+            console.error('No art data available');
+        }
     }
 
     useEffect(() => {
