@@ -67,27 +67,5 @@ ARC 1 1 0.8 1 1.2 1 180 0 true 0 blue # Blue semicircle
 - Like/Unlike artwork (authenticated users)
 - View popularity through like counts
 
-## Technical Stack
 
-- Frontend: React with TypeScript
-- 3D Rendering: React Three Fiber
-- Authentication: Clerk
-- AI Integration: OpenAI GPT-4
 
-## Example Drawing: House
-
-### Base structure
-
-LINE 0 0 2 0 black # Bottom
-LINE 2 0 2 2 black # Right wall
-LINE 2 2 0 2 black # Top
-LINE 0 2 0 0 black # Left wall
-
-### Roof
-
-LINE 0 2 1 3 brown # Left roof
-LINE 1 3 2 2 brown # Right roof
-
-### Door
-
-ARC 1 1.5 0.85 1.5 1.15 1.5 180 0 true 0 red # Arched door
