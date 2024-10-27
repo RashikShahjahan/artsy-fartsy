@@ -1,5 +1,19 @@
 // Type definitions for the program structure
 /*
+TODOs:
+- Interpreter
+   - Add support for variables and loops
+   - Support creating animations
+   - Support creating custom functions  
+   - Support 3D shapes
+
+- UX
+   - Add examples of each basic shape on prompt
+   - Add save alert and load alert
+   - Show the AI generated code on the screen
+   - Add names for art pieces and the creator name, in the case of AI art add the prompt used to generate it 
+*/
+
 type Token = {
     type: string;
     value: string;
@@ -71,6 +85,9 @@ function lexer(code: string): Token[]{
             else if(tokenValue === 'endwhile'){
                 tokens.push({ type: 'ENDWHILE', value: tokenValue, line: i });
             }
+            else if(tokenValue === '='){
+                tokens.push({ type: 'ASSIGN', value: tokenValue, line: i });
+            }
             else{
                 tokens.push({ type: 'VAR', value: tokenValue, line: i });
             }
@@ -83,10 +100,12 @@ function lexer(code: string): Token[]{
 class Parser {
     tokens: Token[];
     current: number;
+    line: number;
 
     constructor(tokens: Token[]) {
         this.tokens = tokens;
         this.current = 0;
+        this.line = 0;
     }
 
     parse(): Node[] {
@@ -123,7 +142,7 @@ class Parser {
             body.push(this.parseStatement());
         }
         
-        this.consume('ENDWHILE', "Expected 'endwhile' after while body");
+        this.consume('ENDWHILE', "Expected 'endwhile' after while body", this.line);
         return { type: 'while', condition, body };
     }
 
@@ -133,23 +152,31 @@ class Parser {
         const y1 = Number(this.advance().value);
         const x2 = Number(this.advance().value);
         const y2 = Number(this.advance().value);
-        return { type: 'line', x1, y1, x2, y2 };
+        const color = this.advance().value;
+        return { type: 'line', x1, y1, x2, y2, color };
     }
 
     private parseArc(): ArcNode {
         this.advance(); // consume 'arc'
-        const x = Number(this.advance().value);
-        const y = Number(this.advance().value);
+        const centerX = Number(this.advance().value);
+        const centerY = Number(this.advance().value);
         const radius = Number(this.advance().value);
         const startAngle = Number(this.advance().value);
         const endAngle = Number(this.advance().value);
-        return { type: 'arc', x, y, radius, startAngle, endAngle };
+        const x1 = Number(this.advance().value);
+        const y1 = Number(this.advance().value);
+        const x2 = Number(this.advance().value);
+        const y2 = Number(this.advance().value);
+        const clockwise = Boolean(this.advance().value);
+        const rotation = Number(this.advance().value);
+        const color = this.advance().value;
+        return { type: 'arc', centerX, centerY, radius, startAngle, endAngle, x1, y1, x2, y2, clockwise, rotation, color };
     }
 
     private parseLet(): LetNode {
         this.advance(); // consume 'let'
         const variable = this.advance().value;
-        this.consume('VAR', "Expected ':' after variable name"); // consume ':'
+        this.consume('ASSIGN', "Expected '=' after variable name", this.line); 
         const value = this.advance().value;
         return { type: 'let', variable, value };
     }
@@ -175,13 +202,20 @@ class Parser {
     }
 
     private advance(): Token {
-        if (!this.isAtEnd()) this.current++;
+        if (!this.isAtEnd()) {
+            this.current++;
+            this.line = this.tokens[this.current - 1].line;  // Update line number when advancing
+        }
         return this.tokens[this.current - 1];
     }
 
-    private consume(type: string, message: string): Token {
-        if (this.peek().type === type) return this.advance();
-        throw new Error(message);
+    private consume(type: string, message: string, line: number): Token {
+        if (this.peek().type === type) {
+            const token = this.advance();
+            this.line = token.line;  // Update line number when consuming
+            return token;
+        }
+        throw new Error(`${message} at line ${line}`);
     }
 }
 
@@ -189,19 +223,18 @@ class Parser {
 
 function interpreter(code: string) {
     const tokens = lexer(code);
+    console.log(tokens)
     const parser = new Parser(tokens);
     const ast = parser.parse();
     console.log(JSON.stringify(ast, null, 2));
-    // Later you'll add code to execute the AST
 }
 
 interpreter(`
     while a < 10
-    let a:10
+    let a = 10
     line 10 10 20 20
 endwhile
 line 10 10 20 20
-`);
+`); 
 
 
-*/
