@@ -1,10 +1,11 @@
 import { useState} from 'react';
 import { modifyDrawing, retrieveArtCode, runDrawingCode } from './api';
 import { useAuth } from '@clerk/clerk-react';
+
 function DrawingBoard() {
   const [code, setCode] = useState('');
   const [image, setImage] = useState('');
-  const [prompt, setPrompt] = useState(''); // Add this state
+  const [prompt, setPrompt] = useState(''); 
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const { getToken } = useAuth();
 
@@ -16,7 +17,7 @@ function DrawingBoard() {
     if (promptHistory.length == 0) {
       const newCode = await retrieveArtCode(prompt, token);  
       setPromptHistory([prompt]);
-      setCode(newCode);
+      setCode(newCode.code);
     } else {
       const newCode = await modifyDrawing(promptHistory[promptHistory.length - 1], prompt, token);
       setPromptHistory([...promptHistory, prompt]);
@@ -25,7 +26,6 @@ function DrawingBoard() {
   };
 
   const runCode = async () => {
-    // TODO: Fetch generated image
     const token = await getToken();
     if (!token) {
       throw new Error('No token found');
@@ -39,8 +39,7 @@ function DrawingBoard() {
   };
 
   return (
-    <div className="flex flex-col gap-4"> {/* New wrapper div */}
-      {/* New AI prompt section */}
+    <div className="flex flex-col gap-4"> 
       <div className="flex gap-4 w-full max-w-4xl mx-auto">
         <input
           type="text"
@@ -57,14 +56,12 @@ function DrawingBoard() {
         </button>
       </div>
 
-      {/* Existing drawing board section */}
       <div className="flex flex-col md:flex-row items-start justify-center gap-8">
         <div className="w-full md:w-1/2 h-[calc(100vh-16rem)] bg-white rounded-lg shadow-md p-6 flex flex-col relative">
-          {/* Added dummy image */}
           <img 
             src={image}
             alt="Drawing Board"
-            className="w-full h-full object-contain mb-16" // mb-16 to make space for the Share button
+            className="w-full h-full object-contain mb-16" 
           />
           <button 
             onClick={() => shareDrawing()}
