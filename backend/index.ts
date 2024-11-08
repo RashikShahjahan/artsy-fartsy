@@ -49,7 +49,7 @@ app.post('/run_code', async (req, res) => {
   try {
     const { code } = RunCodeSchema.parse(req.body);
     const codeFilePath = 'drawing/generated_art_script.py';
-    const outputPath = 'output.png';
+    const outputPath = 'drawing/output.png';
 
     await fs.promises.writeFile(codeFilePath, code);
 
