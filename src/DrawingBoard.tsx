@@ -1,36 +1,19 @@
 import { useState} from 'react';
-import { modifyDrawing, retrieveArtCode, runDrawingCode } from './api';
-import { useAuth } from '@clerk/clerk-react';
+import { retrieveArtCode, runDrawingCode } from './api';
 
 function DrawingBoard() {
   const [code, setCode] = useState('');
   const [image, setImage] = useState('');
   const [prompt, setPrompt] = useState(''); 
-  const [promptHistory, setPromptHistory] = useState<string[]>([]);
-  const { getToken } = useAuth();
 
   const generateCode = async () => {
-    const token = await getToken();
-    if (!token) {
-      throw new Error('No token found');
-    }
-    if (promptHistory.length == 0) {
-      const newCode = await retrieveArtCode(prompt, token);  
-      setPromptHistory([prompt]);
-      setCode(newCode.code);
-    } else {
-      const newCode = await modifyDrawing(promptHistory[promptHistory.length - 1], prompt, token);
-      setPromptHistory([...promptHistory, prompt]);
-      setCode(newCode);
-    }
+    const newCode = await retrieveArtCode(prompt);  
+    setCode(newCode.code);
+    setImage('');
   };
 
   const runCode = async () => {
-    const token = await getToken();
-    if (!token) {
-      throw new Error('No token found');
-    }
-    const image = await runDrawingCode(code, token);  
+    const image = await runDrawingCode(code);  
     setImage(image);
   };
 

@@ -2,12 +2,11 @@ import axios from 'axios';
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
 
-export async function retrieveArtCode(userPrompt: string, token: string) {
+export async function retrieveArtCode(userPrompt: string) {
   const response = await axios.post(`${apiBaseUrl}/generate_code`, 
     { userPrompt },
     { 
       headers: { 
-        Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json'
       }
     }
@@ -15,21 +14,20 @@ export async function retrieveArtCode(userPrompt: string, token: string) {
   return response.data;
 }
 
-export async function runDrawingCode(code: string, token: string) {
+export async function runDrawingCode(code: string) {
   const response = await axios.post(`${apiBaseUrl}/run_code`, 
     { code },
     { 
-      headers: { Authorization: `Bearer ${token}` },
       responseType: 'blob'
     }
   );
   return URL.createObjectURL(response.data);
 }
 
-export async function modifyDrawing(code: string, userPrompt: string, token: string) {
+export async function modifyDrawing(code: string, userPrompt: string) {
   const response = await axios.post(`${apiBaseUrl}/modify_art_code`, 
     { code, userPrompt },
-    { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
+    { headers: { 'Content-Type': 'application/json' } }
   );
   return response.data;
 }
