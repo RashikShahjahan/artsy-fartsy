@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { z } from 'zod';
-import { generateArtCode, modifyArtCode } from './utils';
+import { generateArtCode, modifyArtCode } from './utils/generation';
 import { exec } from 'child_process';
 import fs from 'fs';
 import { promisify } from 'util';
