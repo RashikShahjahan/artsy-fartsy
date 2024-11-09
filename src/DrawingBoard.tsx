@@ -1,5 +1,5 @@
 import { useState} from 'react';
-import { retrieveArtCode, runDrawingCode } from './api';
+import { retrieveArtCode, runDrawingCode, storeCode } from './api';
 
 function DrawingBoard() {
   const [code, setCode] = useState('');
@@ -17,8 +17,8 @@ function DrawingBoard() {
     setImage(image);
   };
 
-  const shareDrawing = async () => {
-    // TODO: Generate shareable link 
+  const saveDrawing = async () => {
+    await storeCode(code);
   };
 
   return (
@@ -47,10 +47,10 @@ function DrawingBoard() {
             className="w-full h-full object-contain mb-16" 
           />
           <button 
-            onClick={() => shareDrawing()}
+            onClick={() => saveDrawing()}
             className="absolute bottom-6 left-6 right-6 px-6 py-3 bg-yellow-400 text-black rounded-lg hover:bg-yellow-300 transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-yellow-200 focus:ring-opacity-50"
           >
-            Share
+            Save
           </button>
         </div>
         <div className="w-full md:w-1/2 h-[calc(100vh-16rem)] bg-white rounded-lg shadow-md p-6 flex flex-col">
