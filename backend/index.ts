@@ -5,6 +5,8 @@ import { generateArtCode } from './utils/generation';
 import { exec } from 'child_process';
 import fs from 'fs';
 import { promisify } from 'util';
+import { storeDocument } from './utils/embeddings';
+import { initializeDatabase } from './utils/db';
 
 const execAsync = promisify(exec);
 const app = express();
@@ -17,6 +19,10 @@ const GenerateCodeSchema = z.object({
 });
 
 const RunCodeSchema = z.object({
+  code: z.string()
+});
+
+const StoreCodeSchema = z.object({
   code: z.string()
 });
 
@@ -64,6 +70,13 @@ app.post('/run_code', async (req, res) => {
       error: error instanceof Error ? error.message : 'Server error'
     });
   }
+});
+
+app.post('/store_code', async (req, res) => {
+    await initializeDatabase();
+    const { code } = StoreCodeSchema.parse(req.body);
+    await storeDocument(code);
+    res.json({ success: true });
 });
 
 const PORT = process.env.PORT || 8000;
