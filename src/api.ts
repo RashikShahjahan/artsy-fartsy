@@ -31,3 +31,11 @@ export async function storeCode(code: string) {
   );
   return response.data;
 }
+
+export async function findSimilarDrawing(prompt: string): Promise<string[]> {
+  const response = await axios.post(`${apiBaseUrl}/find_similar`, 
+    { prompt },
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+  return response.data.images;
+}

@@ -10,9 +10,11 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@types/archiver": "^6.0.3",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/pg": "^8.11.10",
+    "archiver": "^7.0.1",
     "cors": "^2.8.5",
     "express": "^4.21.1",
     "pg": "^8.13.1",

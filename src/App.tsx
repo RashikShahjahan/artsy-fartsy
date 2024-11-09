@@ -1,12 +1,12 @@
 import { useState} from 'react';
-import { retrieveArtCode, runDrawingCode, storeCode } from './api';
-
+import { findSimilarDrawing, retrieveArtCode, runDrawingCode, storeCode } from './api';
 
 function App() {
   const [code, setCode] = useState('');
   const [image, setImage] = useState('');
   const [prompt, setPrompt] = useState(''); 
   const [drawMode, setDrawMode] = useState(true);
+  const [similarDrawings, setSimilarDrawings] = useState<string[]>([]);
 
   const generateCode = async () => {
     const newCode = await retrieveArtCode(prompt);  
@@ -20,7 +20,9 @@ function App() {
   };
 
   const findSimilar = async () => {
-
+    const response = await findSimilarDrawing(prompt);
+    console.log(response);
+    setSimilarDrawings(response);
   };
 
   const saveDrawing = async () => {
@@ -47,7 +49,6 @@ function App() {
 
       <div className="flex flex-col md:flex-row items-start justify-center gap-8">
         {drawMode ? (
-          // Original drawing board and code editor layout
           <>
             <div className="w-full md:w-1/2 h-[calc(100vh-16rem)] bg-white rounded-lg shadow-md p-6 flex flex-col relative">
               <img 
@@ -80,12 +81,11 @@ function App() {
             </div>
           </>
         ) : (
-          // Three side-by-side images layout
           <>
-            {[1, 2, 3].map((index) => (
+            {similarDrawings.map((drawing, index) => (
               <div key={index} className="w-full md:w-1/3 h-[calc(100vh-16rem)] bg-white rounded-lg shadow-md p-6">
                 <img 
-                  src={image}
+                  src={drawing}
                   alt={`Similar Image ${index}`}
                   className="w-full h-full object-contain" 
                 />
@@ -95,7 +95,7 @@ function App() {
         )}
       </div>
       <button 
-              onClick={() => {setDrawMode(!drawMode)}}
+        onClick={() => {setDrawMode(!drawMode)}}
         className="w-1/2 mx-auto px-6 py-3 text-black rounded-lg transition duration-300 ease-in-out focus:outline-none focus:ring-2 focus:ring-opacity-50 bg-purple-400 hover:bg-purple-300 focus:ring-purple-200"
         >
         {drawMode ? "Find Similar" : "Back to Drawing"}

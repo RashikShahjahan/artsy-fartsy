@@ -106,4 +106,5 @@ Return the complete modified Python code.
         .trim();
 }
 
+
 export { generateArtCode, modifyArtCode};
