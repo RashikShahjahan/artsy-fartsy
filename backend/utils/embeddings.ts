@@ -3,7 +3,7 @@ import { VoyageAIClient } from "voyageai";
 
 const client = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
 
-export async function generateEmbedding(text: string): Promise<number[]> {
+async function generateEmbedding(text: string): Promise<number[]> {
     const response = await client.embed({
         input: text,
 

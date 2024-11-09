@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { z } from 'zod';
-import { generateArtCode, modifyArtCode } from './utils/generation';
+import { generateArtCode } from './utils/generation';
 import { exec } from 'child_process';
 import fs from 'fs';
 import { promisify } from 'util';
@@ -20,10 +20,6 @@ const RunCodeSchema = z.object({
   code: z.string()
 });
 
-const ModifyArtCodeSchema = z.object({
-  code: z.string(),
-  userPrompt: z.string()
-});
 
 app.post('/generate_code', async (req, res) => {
   try {
@@ -35,21 +31,12 @@ app.post('/generate_code', async (req, res) => {
   }
 });
 
-app.post('/modify_art_code', async (req, res) => {
-  try {
-    const { code, userPrompt } = ModifyArtCodeSchema.parse(req.body);
-    const modifiedCode = await modifyArtCode(code, userPrompt);
-    res.json({ code: modifiedCode });
-  } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid request' });
-  }
-});
 
 app.post('/run_code', async (req, res) => {
   try {
     const { code } = RunCodeSchema.parse(req.body);
     const codeFilePath = 'drawing/generated_art_script.py';
-    const outputPath = 'drawing/output.png';
+    const outputPath = 'output.png';
 
     await fs.promises.writeFile(codeFilePath, code);
 

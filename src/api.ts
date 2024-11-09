@@ -24,9 +24,9 @@ export async function runDrawingCode(code: string) {
   return URL.createObjectURL(response.data);
 }
 
-export async function modifyDrawing(code: string, userPrompt: string) {
-  const response = await axios.post(`${apiBaseUrl}/modify_art_code`, 
-    { code, userPrompt },
+export async function storeCode(code: string) {
+  const response = await axios.post(`${apiBaseUrl}/save_drawing`, 
+    { code },
     { headers: { 'Content-Type': 'application/json' } }
   );
   return response.data;
