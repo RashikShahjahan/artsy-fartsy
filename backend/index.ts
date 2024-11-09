@@ -5,10 +5,14 @@ import { generateArtCode } from './utils/generation';
 import { exec } from 'child_process';
 import fs from 'fs';
 import { promisify } from 'util';
-import { storeDocument } from './utils/embeddings';
+import { findSimilarDocuments, storeDocument } from './utils/embeddings';
 import { initializeDatabase } from './utils/db';
+import archiver from 'archiver';
+
+
 
 const execAsync = promisify(exec);
+const archive = archiver('zip');
 const app = express();
 
 app.use(express.json());
@@ -26,6 +30,26 @@ const StoreCodeSchema = z.object({
   code: z.string()
 });
 
+async function executeArtCode(code: string): Promise<string> {
+  const codeFilePath = 'drawing/generated_art_script.py';
+  const outputPath = `output.png`;
+
+  await fs.promises.writeFile(codeFilePath, code);
+
+  try {
+    await execAsync(`python ${codeFilePath}`, { timeout: 30000 });
+    
+    if (!fs.existsSync(outputPath)) {
+      throw new Error('Image was not generated');
+    }
+
+    return outputPath;
+  } finally {
+    if (fs.existsSync(codeFilePath)) {
+      await fs.promises.unlink(codeFilePath);
+    }
+  }
+}
 
 app.post('/generate_code', async (req, res) => {
   try {
@@ -37,34 +61,26 @@ app.post('/generate_code', async (req, res) => {
   }
 });
 
-
 app.post('/run_code', async (req, res) => {
   try {
     const { code } = RunCodeSchema.parse(req.body);
-    const codeFilePath = 'drawing/generated_art_script.py';
-    const outputPath = 'output.png';
-
-    await fs.promises.writeFile(codeFilePath, code);
-
-    try {
-      await execAsync(`python ${codeFilePath}`, { timeout: 30000 });
-      
-      if (!fs.existsSync(outputPath)) {
-        throw new Error('Image was not generated');
+    
+    const outputPath = await executeArtCode(code);
+    
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Content-Disposition', `attachment; filename="${outputPath}"`);
+    
+    const stream = fs.createReadStream(outputPath);
+    stream.pipe(res);
+    
+    stream.on('end', async () => {
+      try {
+        await fs.promises.unlink(outputPath);
+      } catch (error) {
+        console.error('Error deleting output file:', error);
       }
+    });
 
-      const timestamp = Date.now();
-      const filename = `generated_art_${timestamp}.png`;
-      
-      res.setHeader('Content-Type', 'image/png');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      fs.createReadStream(outputPath).pipe(res);
-
-    } finally {
-      if (fs.existsSync(codeFilePath)) {
-        await fs.promises.unlink(codeFilePath);
-      }
-    }
   } catch (error) {
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Server error'
@@ -82,4 +98,35 @@ app.post('/store_code', async (req, res) => {
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+app.post('/find_similar', async (req, res) => {
+    try {
+        const { prompt } = req.body;
+        const similarCode = await findSimilarDocuments(prompt);
+        
+        // Array to store base64 images
+        const images = [];
+        
+        // Process each code example
+        for (const code of similarCode) {
+            const outputPath = await executeArtCode(code);
+            // Read file and convert to base64
+            const imageBuffer = await fs.promises.readFile(outputPath);
+            const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`;
+            images.push(base64Image);
+            
+            // Cleanup image
+            await fs.promises.unlink(outputPath).catch(err => 
+                console.error('Error deleting file:', err)
+            );
+        }
+        
+        res.json({ images });
+        
+    } catch (error) {
+        res.status(500).json({ 
+            error: error instanceof Error ? error.message : 'Server error'
+        });
+    }
 });

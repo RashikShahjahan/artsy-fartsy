@@ -37,5 +37,5 @@ export async function findSimilarDocuments(query: string, limit: number = 3): Pr
     [vectorString, limit]
   );
 
-  return result.rows.map((row) => row.content + ", distance: " + row.distance);
+  return result.rows.map((row) => row.content);
 }
