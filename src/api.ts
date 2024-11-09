@@ -25,7 +25,7 @@ export async function runDrawingCode(code: string) {
 }
 
 export async function storeCode(code: string) {
-  const response = await axios.post(`${apiBaseUrl}/save_drawing`, 
+  const response = await axios.post(`${apiBaseUrl}/store_code`, 
     { code },
     { headers: { 'Content-Type': 'application/json' } }
   );

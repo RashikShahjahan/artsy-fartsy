@@ -9,6 +9,7 @@ export const pool = new Pool({
   database: "ragdemo",
 });
 
+
 // Initialize the database with required extensions and tables
 export async function initializeDatabase() {
   const client = await pool.connect();
