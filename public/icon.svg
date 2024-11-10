@@ -1,0 +1,50 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle with gradient -->
+  <circle cx="256" cy="256" r="248" fill="url(#paint0_linear)" stroke="#1A1A1A" stroke-width="16"/>
+  
+  <!-- Abstract brush strokes -->
+  <path d="M156 256C156 156 256 156 256 256C256 356 356 356 356 256" 
+        stroke="#1A1A1A" 
+        stroke-width="24" 
+        stroke-linecap="round"
+        fill="none">
+    <animate attributeName="d" 
+             dur="8s" 
+             repeatCount="indefinite"
+             values="
+               M156 256C156 156 256 156 256 256C256 356 356 356 356 256;
+               M156 256C156 356 256 356 256 256C256 156 356 156 356 256;
+               M156 256C156 156 256 156 256 256C256 356 356 356 356 256"
+    />
+  </path>
+
+  <!-- AI dot pattern -->
+  <circle cx="196" cy="256" r="8" fill="#1A1A1A">
+    <animate attributeName="r" 
+             values="8;12;8" 
+             dur="2s" 
+             repeatCount="indefinite"/>
+  </circle>
+  <circle cx="256" cy="256" r="8" fill="#1A1A1A">
+    <animate attributeName="r" 
+             values="8;12;8" 
+             dur="2s" 
+             begin="0.6s"
+             repeatCount="indefinite"/>
+  </circle>
+  <circle cx="316" cy="256" r="8" fill="#1A1A1A">
+    <animate attributeName="r" 
+             values="8;12;8" 
+             dur="2s" 
+             begin="1.2s"
+             repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Gradient definition -->
+  <defs>
+    <linearGradient id="paint0_linear" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F0F0F0"/>
+      <stop offset="100%" stop-color="#E0E0E0"/>
+    </linearGradient>
+  </defs>
+</svg> 

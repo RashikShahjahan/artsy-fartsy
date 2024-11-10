@@ -1,71 +1,36 @@
-# Drawing & Gallery Application
+# AI Drawing Application
 
-A web-based drawing application that combines a custom drawing language with AI-powered generation and a social gallery system.
+An interactive web application that allows users to generate and manipulate drawings using AI, with features to save drawings and find similar artwork.
 
 ## Features
 
-### 🎨 Drawing Board
+### Drawing Mode
+- **Generate Drawings**: Enter a text prompt describing what you want to draw
+- **Edit Code**: Modify the generated code to customize your drawing
+- **Run Code**: Execute the code to see your drawing come to life
+- **Save Drawing**: Store your artwork for future reference
 
-- **Dual Input Modes**
-  - Traditional command-based drawing
-  - AI-powered natural language drawing generation
-- **Real-time Preview**
-- **Save Functionality** (authenticated users)
+### Search Mode
+- **Find Similar**: Search for artwork similar to your description
+- **View Results**: See multiple similar drawings displayed side by side
 
-### 🖼️ Gallery System
+## How to Use
 
-- Browse community artwork
-- Like/Unlike system
-- Sequential navigation
-- Social interaction features
+1. **Drawing Mode** (Default)
+   - Enter your drawing description in the input field
+   - Click "Draw" to generate the code
+   - The generated code will appear in the right panel
+   - Click "Run Code" to see your drawing in the left panel
+   - Optionally click "Save" to store your drawing
 
-### 🔐 Authentication
+2. **Search Mode**
+   - Click "Find Similar" at the bottom to switch modes
+   - Enter a description in the input field
+   - Click "Find" to search for similar drawings
+   - View the similar drawings that are displayed
 
-- Protected features for registered users
-- Seamless sign-in integration
-- Personalized experience
-
-## Drawing Language Reference
-
-### LINE Command
-
-LINE startX startY endX endY color
-
-Draws a straight line between two points.
-
-**Example:**
-
-LINE 0 0 2 0 black   # Horizontal black line
-
-### ARC Command
-
-ARC centerX centerY radius startAngle endAngle  clockwise rotation color
-
-Creates curved arcs as part of a circle.
-
-**Example:**
-
-ARC 1 1 0.8 1 1.2 1 180 0 true 0 blue # Blue semicircle
-
-## Usage Guide
-
-### Drawing Board Mode
-
-1. **Normal Mode**
-   - Enter drawing commands in the textarea
-   - Click "Draw" to execute
-   - Save your work (requires authentication)
-
-2. **AI Mode** (Authenticated Users)
-   - Toggle AI mode with the switch button
-   - Describe your desired drawing in natural language
-   - AI converts descriptions to drawing commands
-
-### Gallery Mode
-
-- Navigate through artwork using Previous/Next buttons
-- Like/Unlike artwork (authenticated users)
-- View popularity through like counts
-
-
+3. **Switch Modes**
+   - Use the bottom button to toggle between "Drawing" and "Find Similar" modes
+   - "Find Similar" switches to search mode
+   - "Back to Drawing" returns to drawing mode
 
