@@ -1,13 +1,22 @@
 // src/db.ts
 import { Pool } from "pg";
 
-export const pool = new Pool({
-  user: "postgres",
-  password: "postgres",
-  host: "localhost",
-  port: 15432,
-  database: "ragdemo",
-});
+export const pool = new Pool(
+  process.env.DATABASE_URL
+    ? {
+        connectionString: process.env.DATABASE_URL,
+        ssl: {
+          rejectUnauthorized: false // Required for Heroku
+        }
+      }
+    : {
+        user: "postgres",
+        password: "postgres",
+        host: "localhost",
+        port: 5432,
+        database: "codeart",
+      }
+);
 
 
 export async function initializeDatabase() {
