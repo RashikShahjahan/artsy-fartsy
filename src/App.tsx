@@ -169,7 +169,7 @@ function App() {
         onClick={() => {setDrawMode(!drawMode)}}
         className="btn btn-secondary w-1/2 mx-auto"
       >
-        {drawMode ? "Find Similar" : "Back to Drawing"}
+        {drawMode ? "Search for similar" : "Back to Drawing"}
       </button>
     </div>
   );
