@@ -54,4 +54,5 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Start the application
-CMD ["bun", "run", "backend/index.ts"] 
+CMD ["bun", "run", "backend/index.ts", "&&", "bun", "run", "start"] 
+

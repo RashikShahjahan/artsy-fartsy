@@ -7,6 +7,11 @@ import fs from 'fs';
 import { promisify } from 'util';
 import { findSimilarDocuments, storeDocument } from './utils/embeddings';
 import { initializeDatabase } from './utils/db';
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 
 const execAsync = promisify(exec);
@@ -132,4 +137,12 @@ app.post('/find_similar', async (req, res) => {
             error: error instanceof Error ? error.message : 'Server error'
         });
     }
+});
+
+// Add this after your other routes
+app.use(express.static(path.join(__dirname, '../dist')));
+
+// Add this as the last route
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
