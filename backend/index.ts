@@ -7,12 +7,9 @@ import fs from 'fs';
 import { promisify } from 'util';
 import { findSimilarDocuments, storeDocument } from './utils/embeddings';
 import { initializeDatabase } from './utils/db';
-import archiver from 'archiver';
-
 
 
 const execAsync = promisify(exec);
-const archive = archiver('zip');
 const app = express();
 
 app.use(express.json());
@@ -37,7 +34,7 @@ async function executeArtCode(code: string): Promise<string> {
   await fs.promises.writeFile(codeFilePath, code);
 
   try {
-    await execAsync(`python ${codeFilePath}`, { timeout: 30000 });
+    await execAsync(`./venv/bin/python ${codeFilePath}`, { timeout: 30000 });
     
     if (!fs.existsSync(outputPath)) {
       throw new Error('Image was not generated');
@@ -57,7 +54,7 @@ app.post('/generate_code', async (req, res) => {
     const generatedCode = await generateArtCode(userPrompt);
     res.json({ code: generatedCode });
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid request' });
+    res.status(500).json({ error: error instanceof Error ? error.message : 'Invalid request' });
   }
 });
 
@@ -89,10 +86,16 @@ app.post('/run_code', async (req, res) => {
 });
 
 app.post('/store_code', async (req, res) => {
-    await initializeDatabase();
-    const { code } = StoreCodeSchema.parse(req.body);
-    await storeDocument(code);
-    res.json({ success: true });
+    try {
+        await initializeDatabase();
+        const { code } = StoreCodeSchema.parse(req.body);
+        await storeDocument(code);
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ 
+            error: error instanceof Error ? error.message : 'Server error'
+        });
+    }
 });
 
 const PORT = process.env.PORT || 8000;
