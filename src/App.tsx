@@ -80,7 +80,7 @@ function App() {
             isGenerating ? (
               <>
                 <span className="loading loading-spinner"></span>
-                Drawing...
+                Generating...
               </>
             ) : "Draw"
           ) : (
