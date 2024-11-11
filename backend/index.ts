@@ -9,6 +9,8 @@ import { findSimilarDocuments, storeDocument } from './utils/embeddings';
 import { initializeDatabase } from './utils/db';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import crypto from 'crypto';
+import process from 'process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,24 +35,68 @@ const StoreCodeSchema = z.object({
 });
 
 async function executeArtCode(code: string): Promise<string> {
-  const codeFilePath = 'drawing/generated_art_script.py';
-  const outputPath = `output.png`;
+  // Generate random file names to prevent conflicts and predictable paths
+  const randomId = crypto.randomBytes(16).toString('hex');
+  const codeFilePath = path.join(__dirname, 'drawing', `generated_art_script_${randomId}.py`);
+  const outputPath = path.join(__dirname, 'output', `${randomId}.png`);
+
+  await fs.promises.mkdir(path.dirname(codeFilePath), { recursive: true });
+  await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
+
+  if (containsMaliciousCode(code)) {
+    throw new Error('Potentially malicious code detected');
+  }
 
   await fs.promises.writeFile(codeFilePath, code);
 
   try {
-    await execAsync(`./venv/bin/python ${codeFilePath}`, { timeout: 30000 });
-    
+    const pythonPath = path.join(__dirname, 'venv', 'bin', 'python');
+    const { stdout, stderr } = await execAsync(`"${pythonPath}" "${codeFilePath}"`, {
+      timeout: 30000,
+      maxBuffer: 1024 * 1024, // 1MB output limit
+      env: {
+        PATH: path.join(__dirname, 'venv', 'bin'),
+        PYTHONPATH: path.join(__dirname, 'drawing'),
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+        PYTHONUNBUFFERED: '1',
+        PYTHONDONTWRITEBYTECODE: '1',
+        PYTHONHOME: undefined,
+        PYTHONSTARTUP: undefined,
+        PYTHONPATH_ORIG: undefined,
+        HOME: undefined,
+        USER: undefined,
+      },
+      cwd: path.dirname(outputPath)
+    });
+
     if (!fs.existsSync(outputPath)) {
       throw new Error('Image was not generated');
     }
 
     return outputPath;
   } finally {
-    if (fs.existsSync(codeFilePath)) {
-      await fs.promises.unlink(codeFilePath);
+    try {
+      if (fs.existsSync(codeFilePath)) {
+        await fs.promises.unlink(codeFilePath);
+      }
+    } catch (error) {
+      console.error('Error cleaning up code file:', error);
     }
   }
+}
+
+function containsMaliciousCode(code: string): boolean {
+  const dangerousPatterns = [
+    /import\s+os/,
+    /import\s+sys/,
+    /import\s+subprocess/,
+    /open\(/,
+    /exec\(/,
+    /eval\(/,
+  ];
+
+  return dangerousPatterns.some(pattern => pattern.test(code));
 }
 
 app.post('/generate_code', async (req, res) => {
@@ -111,23 +157,17 @@ app.listen(PORT, () => {
 app.post('/find_similar', async (req, res) => {
     try {
         const { prompt } = req.body;
-        // First generate code from the prompt
         const generatedCode = await generateArtCode(prompt);
-        // Then find similar documents using the generated code
         const similarCode = await findSimilarDocuments(generatedCode);
         
-        // Array to store base64 images
         const images = [];
         
-        // Process each code example
         for (const code of similarCode) {
             const outputPath = await executeArtCode(code);
-            // Read file and convert to base64
             const imageBuffer = await fs.promises.readFile(outputPath);
             const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`;
             images.push(base64Image);
             
-            // Cleanup image
             await fs.promises.unlink(outputPath).catch(err => 
                 console.error('Error deleting file:', err)
             );
