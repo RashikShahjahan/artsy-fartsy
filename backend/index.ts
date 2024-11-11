@@ -91,12 +91,26 @@ function containsMaliciousCode(code: string): boolean {
     /import\s+os/,
     /import\s+sys/,
     /import\s+subprocess/,
+    /from\s+os\s+import/,
+    /from\s+sys\s+import/,
+    /from\s+subprocess\s+import/,
     /open\(/,
     /exec\(/,
     /eval\(/,
+    /Popen\(/,
+    /environ\[/,
+    /process\./,
+    /child_process/,
+    /spawn\(/,
+    /fork\(/,
+    /\.system\(/,
+    /\.popen\(/,
+    /\.call\(/,
   ];
 
-  return dangerousPatterns.some(pattern => pattern.test(code));
+  // Remove line continuations before testing
+  const normalizedCode = code.replace(/\\\s*\n/g, '');
+  return dangerousPatterns.some(pattern => pattern.test(normalizedCode));
 }
 
 app.post('/generate_code', async (req, res) => {
