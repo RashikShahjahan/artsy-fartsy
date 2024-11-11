@@ -111,7 +111,10 @@ app.listen(PORT, () => {
 app.post('/find_similar', async (req, res) => {
     try {
         const { prompt } = req.body;
-        const similarCode = await findSimilarDocuments(prompt);
+        // First generate code from the prompt
+        const generatedCode = await generateArtCode(prompt);
+        // Then find similar documents using the generated code
+        const similarCode = await findSimilarDocuments(generatedCode);
         
         // Array to store base64 images
         const images = [];
@@ -139,10 +142,8 @@ app.post('/find_similar', async (req, res) => {
     }
 });
 
-// Add this after your other routes
 app.use(express.static(path.join(__dirname, '../dist')));
 
-// Add this as the last route
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../dist/index.html'));
 });
