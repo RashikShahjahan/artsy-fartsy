@@ -82,7 +82,7 @@ function App() {
                 <span className="loading loading-spinner"></span>
                 Generating...
               </>
-            ) : "Draw"
+            ) : "Generate Code"
           ) : (
             isFinding ? (
               <>
