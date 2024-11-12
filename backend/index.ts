@@ -1,6 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import { z } from 'zod';
+import { 
+  GenerateCodeSchema, 
+  RunCodeSchema, 
+  StoreCodeSchema, 
+  FindSimilarSchema 
+} from '../src/schemas';
 import { generateArtCode } from './utils/generation';
 import { findSimilarDocuments, storeDocument } from './utils/embeddings';
 import { initializeDatabase } from './utils/db';
@@ -8,23 +13,10 @@ import { executeArtCode } from './utils/codeExecution';
 import fs from 'fs';
 import path from 'path';
 
-
 const app = express();
 
 app.use(express.json());
 app.use(cors());
-
-const GenerateCodeSchema = z.object({
-  userPrompt: z.string()
-});
-
-const RunCodeSchema = z.object({
-  code: z.string()
-});
-
-const StoreCodeSchema = z.object({
-  code: z.string()
-});
 
 app.post('/generate_code', async (req, res) => {
   try {
@@ -32,7 +24,9 @@ app.post('/generate_code', async (req, res) => {
     const generatedCode = await generateArtCode(userPrompt);
     res.json({ code: generatedCode });
   } catch (error) {
-    res.status(500).json({ error: error instanceof Error ? error.message : 'Invalid request' });
+    res.status(400).json({ 
+      error: error instanceof Error ? error.message : 'Invalid request'
+    });
   }
 });
 
@@ -83,7 +77,7 @@ app.listen(PORT, () => {
 
 app.post('/find_similar', async (req, res) => {
     try {
-        const { prompt } = req.body;
+        const { prompt } = FindSimilarSchema.parse(req.body);
         const generatedCode = await generateArtCode(prompt);
         const similarCode = await findSimilarDocuments(generatedCode);
         
