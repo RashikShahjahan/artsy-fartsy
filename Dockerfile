@@ -12,17 +12,17 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy frontend and backend separately
-COPY frontend frontend/
-COPY backend backend/
-COPY shared shared/
+# Copy shared folder first
+COPY shared ./shared/
 
-# Install frontend dependencies and build
+# Copy and build frontend
+COPY frontend ./frontend/
 WORKDIR /app/frontend
 RUN bun install
 RUN bun run build
 
-# Install backend dependencies
+# Copy and setup backend
+COPY backend ./backend/
 WORKDIR /app/backend
 RUN bun install
 
