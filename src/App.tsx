@@ -11,6 +11,7 @@ function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isFinding, setIsFinding] = useState(false);
+  const [showDocs, setShowDocs] = useState(false);
 
   const generateCode = async () => {
     try {
@@ -64,11 +65,17 @@ function App() {
     <div className="flex flex-col gap-6 container mx-auto p-6">
       <header className="text-center">
         <h1 className="text-3xl font-bold mb-2">AI Drawing Generator</h1>
-        <p className="text-gray-600">
+        <p className="text-gray-600 mb-2">
           {drawMode 
-            ? "Describe what you want to draw, and let AI generate the code for you!" 
+            ? "Describe what you want to draw, and let AI generate Python code using our ArtCanvas library!" 
             : "Find similar drawings based on your description"}
         </p>
+        {drawMode && (
+          <p className="text-sm text-gray-500">
+            Your code will use the <code className="bg-gray-100 px-1 rounded">ArtCanvas</code> library to draw. 
+            Click "Show Docs" in the code editor to see available drawing commands.
+          </p>
+        )}
       </header>
 
       <div className="flex gap-4 w-full max-w-4xl mx-auto">
@@ -146,12 +153,108 @@ function App() {
             </div>
             <div className="card w-full md:w-1/2 h-[calc(100vh-20rem)] bg-base-100 shadow-xl">
               <div className="card-body">
-                <h3 className="text-lg font-semibold mb-2">Generated Code</h3>
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="text-lg font-semibold">Generated Code</h3>
+                  <button 
+                    onClick={() => setShowDocs(!showDocs)}
+                    className="btn btn-ghost btn-sm"
+                  >
+                    Show Docs
+                  </button>
+                </div>
+                
+                {showDocs && (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-base-100 p-8 rounded-lg max-w-3xl w-full max-h-[80vh] overflow-y-auto relative">
+                      <button 
+                        onClick={() => setShowDocs(false)}
+                        className="btn btn-sm btn-circle absolute right-4 top-4"
+                      >
+                        ✕
+                      </button>
+                      <h4 className="font-bold mb-6 text-2xl">ArtCanvas Documentation</h4>
+                      <div className="space-y-4">
+                        <p className="text-gray-600 mb-4">Use these commands to create your artwork:</p>
+                        <ul className="space-y-4">
+                          <li className="flex flex-col gap-1">
+                            <code className="bg-base-200 px-3 py-2 rounded-lg font-mono">canvas.set_color(r, g, b, a=1.0)</code>
+                            <span className="text-sm text-gray-600 ml-4">Set drawing color (values 0-1)</span>
+                          </li>
+                          <li className="flex flex-col gap-1">
+                            <code className="bg-base-200 px-3 py-2 rounded-lg font-mono">canvas.draw_line_to(x, y)</code>
+                            <span className="text-sm text-gray-600 ml-4">Draw line to specified point</span>
+                          </li>
+                          <li className="flex flex-col gap-1">
+                            <code className="bg-base-200 px-3 py-2 rounded-lg font-mono">canvas.draw_circle(x, y, radius, fill=False)</code>
+                            <span className="text-sm text-gray-600 ml-4">Draw circle</span>
+                          </li>
+                          <li className="flex flex-col gap-1">
+                            <code className="bg-base-200 px-3 py-2 rounded-lg font-mono">canvas.draw_rectangle(x, y, width, height, fill=False)</code>
+                            <span className="text-sm text-gray-600 ml-4">Draw rectangle</span>
+                          </li>
+                          <li className="flex flex-col gap-1">
+                            <code className="bg-base-200 px-3 py-2 rounded-lg font-mono">canvas.set_line_width(width)</code>
+                            <span className="text-sm text-gray-600 ml-4">Set stroke width</span>
+                          </li>
+                          <li className="flex flex-col gap-1">
+                            <code className="bg-base-200 px-3 py-2 rounded-lg font-mono">canvas.fill_background(r, g, b)</code>
+                            <span className="text-sm text-gray-600 ml-4">Fill background color</span>
+                          </li>
+                          <li className="flex flex-col gap-1">
+                            <code className="bg-base-200 px-3 py-2 rounded-lg font-mono">canvas.draw_polygon(points, fill=False)</code>
+                            <span className="text-sm text-gray-600 ml-4">Draw polygon from points</span>
+                          </li>
+                          <li className="flex flex-col gap-1">
+                            <code className="bg-base-200 px-3 py-2 rounded-lg font-mono">canvas.draw_text(x, y, text, font_size=16)</code>
+                            <span className="text-sm text-gray-600 ml-4">Draw text</span>
+                          </li>
+                        </ul>
+                        <div className="mt-8">
+                          <h5 className="font-bold mb-4">Example Code</h5>
+                          <pre className="bg-base-200 p-4 rounded-lg overflow-x-auto">
+                            <code className="text-sm">{`# ArtCanvas Examples
+from artcanvas import ArtCanvas
+import math
+
+def draw():
+    with ArtCanvas() as canvas:
+        # Fill background white
+        canvas.fill_background(1, 1, 1)
+        
+        # Set color (r,g,b,a) - red with 50% transparency
+        canvas.set_color(1, 0, 0, 0.5)
+        
+        # Set line width
+        canvas.set_line_width(3)
+        
+        # Draw shapes
+        canvas.draw_circle(200, 200, 50)  # Empty circle
+        canvas.draw_circle(400, 200, 50, fill=True)  # Filled circle
+        
+        # Draw polygon
+        points = [(800, 150), (900, 150), (850, 250)]
+        canvas.draw_polygon(points, fill=True)
+        
+        # Draw text
+        canvas.set_color(0, 0, 0)  # Black color
+        canvas.draw_text(100, 600, "Hello World!", font_size=24)
+
+draw()`}</code>
+                          </pre>
+                        </div>
+                        <div className="mt-6 p-4 bg-base-200 rounded-lg">
+                          <p className="text-sm text-gray-600">💡 All coordinates are relative to a 1920x1200 canvas</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <textarea 
                   value={code} 
                   onChange={(e) => setCode(e.target.value)} 
-                  placeholder="Write your code here or click Generate Code"
-                  className="textarea textarea-bordered h-full"
+                  placeholder="# Your code will appear here"
+                  className="textarea textarea-bordered h-full font-mono"
                   disabled={isRunning}
                 />
                 <div className="card-actions justify-end mt-6">
