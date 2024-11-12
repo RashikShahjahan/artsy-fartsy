@@ -128,7 +128,6 @@ function App() {
                 )}
                 <img 
                   src={image}
-                  alt="Drawing Board"
                   className="w-full h-full object-contain mb-16" 
                 />
                 <button 
@@ -151,7 +150,7 @@ function App() {
                 <textarea 
                   value={code} 
                   onChange={(e) => setCode(e.target.value)} 
-                  placeholder="Generated Code"
+                  placeholder="Write your code here or click Generate Code"
                   className="textarea textarea-bordered h-full"
                   disabled={isRunning}
                 />
