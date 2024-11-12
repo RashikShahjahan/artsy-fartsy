@@ -21,7 +21,7 @@ RUN bun install
 COPY frontend/ /app/frontend/
 WORKDIR /app/frontend
 RUN bun install
-RUN bun run build --verbose
+RUN bun run build 
 
 # Copy and setup backend
 COPY backend/ /app/backend/

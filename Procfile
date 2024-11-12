@@ -1,1 +1,0 @@
-web: cd backend && bun run index.ts 
