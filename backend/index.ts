@@ -38,7 +38,7 @@ async function executeArtCode(code: string): Promise<string> {
   const timestamp = Date.now();
   const uniqueId = crypto.randomBytes(4).toString('hex');
   const codeFilePath = path.join(__dirname, 'drawing', `generated_art_script_${timestamp}.py`);
-  const defaultOutputPath = path.join(__dirname, 'output', 'art.png');
+  const defaultOutputPath = path.join(__dirname, 'output', 'output.png');
   const finalOutputPath = path.join(__dirname, 'output', `${timestamp}_${uniqueId}.png`);
 
   await fs.promises.mkdir(path.dirname(codeFilePath), { recursive: true });
