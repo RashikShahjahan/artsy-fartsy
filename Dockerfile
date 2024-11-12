@@ -21,13 +21,12 @@ RUN bun install
 COPY frontend/ /app/frontend/
 WORKDIR /app/frontend
 RUN bun install
-RUN bun run build
+RUN bun run build --verbose
 
 # Copy and setup backend
 COPY backend/ /app/backend/
 WORKDIR /app/backend
 RUN bun install
-
 
 # Create Python virtual environment and install dependencies
 RUN python3 -m venv venv
