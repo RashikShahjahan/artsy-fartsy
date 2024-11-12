@@ -25,6 +25,6 @@
     "noPropertyAccessFromIndexSignature": false
     },
   "include": [
-    "../shared/**/*.ts"
+    "../shared/*.ts"
   ]
 }
