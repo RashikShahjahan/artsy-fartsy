@@ -182,12 +182,12 @@ function App() {
               </div>
             )}
             {similarDrawings.map((drawing, index) => (
-              <div key={index} className="card w-full md:w-1/3 h-[calc(100vh-16rem)] bg-base-100 shadow-xl">
-                <div className="card-body">
+              <div key={index} className="card w-full bg-base-100 shadow-xl">
+                <div className="card-body p-4">
                   <img 
                     src={drawing}
                     alt={`Similar Image ${index}`}
-                    className="w-full h-full object-contain" 
+                    className="w-full h-auto object-contain" 
                   />
                 </div>
               </div>
