@@ -14,6 +14,8 @@ WORKDIR /app
 
 # Copy shared folder first
 COPY shared ./shared/
+RUN bun install
+RUN bun run build
 
 # Copy and build frontend
 COPY frontend ./frontend/
@@ -25,6 +27,8 @@ RUN bun run build
 COPY backend ./backend/
 WORKDIR /app/backend
 RUN bun install
+
+
 
 # Create Python virtual environment and install dependencies
 RUN python3 -m venv venv
