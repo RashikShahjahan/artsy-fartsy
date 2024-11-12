@@ -13,21 +13,20 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy shared folder first
-COPY shared ./shared/
+COPY shared/ /app/shared/
 WORKDIR /app/shared
 RUN bun install
 
 # Copy and build frontend
-COPY frontend ./frontend/
+COPY frontend/ /app/frontend/
 WORKDIR /app/frontend
 RUN bun install
 RUN bun run build
 
 # Copy and setup backend
-COPY backend ./backend/
+COPY backend/ /app/backend/
 WORKDIR /app/backend
 RUN bun install
-
 
 
 # Create Python virtual environment and install dependencies
