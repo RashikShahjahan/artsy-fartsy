@@ -5,7 +5,7 @@ import {
   RunCodeSchema, 
   StoreCodeSchema, 
   FindSimilarSchema 
-} from '../src/schemas';
+} from '../shared/schemas';
 import { generateArtCode } from './utils/generation';
 import { findSimilarDocuments, storeDocument } from './utils/embeddings';
 import { initializeDatabase } from './utils/db';

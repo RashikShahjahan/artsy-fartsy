@@ -6,7 +6,7 @@ import {
   FindSimilarSchema,
   GenerateCodeResponseSchema,
   FindSimilarResponseSchema
-} from './schemas';
+} from '../shared/schemas';
 
 const BASE_URL = import.meta.env.VITE_NODE_ENV === 'development' 
   ? 'http://localhost:8000'
