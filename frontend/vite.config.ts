@@ -8,5 +8,10 @@ export default defineConfig({
   build: {
     outDir: 'dist', // This should be 'dist', not '../dist'
     emptyOutDir: true
+  },
+  server: {
+    proxy: {
+      '/api': 'http://localhost:8000'
+    }
   }
 })

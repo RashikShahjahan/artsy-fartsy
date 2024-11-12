@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc && vite build",
     "lint": "eslint .",
     "preview": "vite preview ",
     "start": "cd backend && bun run index.ts",
-    "heroku-postbuild": "bun run build"
+    "heroku-postbuild": "bun install && cd ../shared && bun install && cd ../frontend && bun run build"
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.12.0",

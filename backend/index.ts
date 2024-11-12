@@ -12,6 +12,8 @@ import { initializeDatabase } from './utils/db';
 import { executeArtCode } from './utils/codeExecution';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
 const app = express();
 
@@ -103,8 +105,11 @@ app.post('/find_similar', async (req, res) => {
     }
 });
 
-app.use(express.static(path.join(__dirname, '../frontend/dist')));
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+app.use(express.static(path.join(__dirname, '..', 'frontend', 'dist')));
 
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
+  res.sendFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
 });

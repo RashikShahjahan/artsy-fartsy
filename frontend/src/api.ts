@@ -8,9 +8,7 @@ import {
   FindSimilarResponseSchema
 } from '../../shared/schemas';
 
-const BASE_URL = import.meta.env.VITE_NODE_ENV === 'development' 
-  ? 'http://localhost:8000'
-  : '';
+const BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:8000';
 
 export async function retrieveArtCode(userPrompt: string) {
   const validatedData = GenerateCodeSchema.parse({ userPrompt });

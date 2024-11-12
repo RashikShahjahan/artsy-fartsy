@@ -8,29 +8,39 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     libcairo2-dev \
     pkg-config \
-    python3-dev
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy shared folder first
-COPY shared/ /app/shared/
+# Copy package files first for better caching
+COPY shared/package*.json /app/shared/
+COPY frontend/package*.json /app/frontend/
+COPY backend/package*.json /app/backend/
+
+# Install dependencies
 WORKDIR /app/shared
 RUN bun install
 
-# Copy and build frontend
-COPY frontend/ /app/frontend/
 WORKDIR /app/frontend
 RUN bun install
-RUN bun run build 
 
-# Copy and setup backend
-COPY backend/ /app/backend/
 WORKDIR /app/backend
 RUN bun install
 
-# Create Python virtual environment and install dependencies
+# Copy rest of the application
+COPY shared/ /app/shared/
+COPY frontend/ /app/frontend/
+COPY backend/ /app/backend/
+
+# Build frontend
+WORKDIR /app/frontend
+RUN bun run build
+
+# Setup Python environment
+WORKDIR /app/backend
 RUN python3 -m venv venv
-RUN venv/bin/pip install pycairo
+RUN . venv/bin/activate && pip install pycairo
 
 # Start production image
 FROM oven/bun:latest
@@ -39,22 +49,24 @@ FROM oven/bun:latest
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-venv \
-    libcairo2
+    libcairo2 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy built assets and backend
-COPY --from=builder /app/frontend/dist ./dist
+COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/backend/venv ./backend/venv
 COPY --from=builder /app/shared ./shared
 
 # Set environment variables
 ENV NODE_ENV=production
+ENV PATH="/app/backend/venv/bin:$PATH"
 ENV PORT=8000
 
 # Expose port
-EXPOSE 8000
+EXPOSE $PORT
 
 # Start the application
-CMD ["bun", "run", "backend/index.ts"]
+CMD cd backend && bun run index.ts

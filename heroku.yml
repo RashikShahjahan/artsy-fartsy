@@ -8,4 +8,4 @@ build:
   config:
     PYTHON_VERSION: 3.11.x
 run:
-  web: cd backend && bun run index.ts 
+  web: cd backend && bun run index.ts
