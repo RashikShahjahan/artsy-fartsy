@@ -14,6 +14,7 @@ WORKDIR /app
 
 # Copy shared folder first
 COPY shared ./shared/
+WORKDIR /app/shared
 RUN bun install
 RUN bun run build
 
