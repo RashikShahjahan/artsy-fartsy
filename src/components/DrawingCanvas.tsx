@@ -1,5 +1,3 @@
-import { Button } from '../common/Button/Button';
-
 interface DrawingCanvasProps {
   image: string;
   isRunning: boolean;
@@ -24,16 +22,18 @@ export const DrawingCanvas = ({ image, isRunning, isSaving, onSave }: DrawingCan
         src={image}
         className="w-full h-full object-contain mb-16" 
       />
-      <Button 
-        variant="warning"
+      <button 
         onClick={onSave}
-        isLoading={isSaving}
-        loadingText="Saving..."
-        fullWidth
-        className="absolute bottom-6 left-6 right-6"
+        className="btn btn-warning absolute bottom-6 left-6 right-6"
+        disabled={isSaving}
       >
-        Save
-      </Button>
+        {isSaving ? (
+          <>
+            <span className="loading loading-spinner"></span>
+            Saving...
+          </>
+        ) : "Save"}
+      </button>
     </div>
   </div>
 ); 

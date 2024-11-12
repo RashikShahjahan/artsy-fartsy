@@ -1,5 +1,3 @@
-import { Button } from '../common/Button/Button';
-
 interface PromptInputProps {
   prompt: string;
   onPromptChange: (value: string) => void;
@@ -31,16 +29,18 @@ export const PromptInput = ({
         </span>
       </label>
     </div>
-    <Button 
-      variant={drawMode ? 'success' : 'primary'}
+    <button 
       onClick={onSubmit}
-      isLoading={isLoading}
-      loadingText={drawMode ? "Generating..." : "Finding..."}
-      disabled={!prompt.trim()}
+      className={`btn ${drawMode ? 'btn-success' : 'btn-primary'} min-w-[120px]`}
+      disabled={isLoading || !prompt.trim()}
       title={!prompt.trim() ? "Please enter a description first" : ""}
-      className="min-w-[120px]"
     >
-      {drawMode ? "Generate Code" : "Find"}
-    </Button>
+      {isLoading ? (
+        <>
+          <span className="loading loading-spinner"></span>
+          {drawMode ? "Generating..." : "Finding..."}
+        </>
+      ) : (drawMode ? "Generate Code" : "Find")}
+    </button>
   </div>
 ); 

@@ -1,4 +1,3 @@
-import { Button } from '../common/Button/Button';
 
 interface CodeEditorProps {
   code: string;
@@ -19,13 +18,11 @@ export const CodeEditor = ({
     <div className="card-body">
       <div className="flex justify-between items-center mb-2">
         <h3 className="text-lg font-semibold">Generated Code</h3>
-        <Button 
-          variant="ghost"
-          size="sm"
+        <button 
           onClick={onToggleDocs}
         >
           Show Docs
-        </Button>
+        </button>
       </div>
       
       <textarea 
@@ -36,14 +33,13 @@ export const CodeEditor = ({
         disabled={isRunning}
       />
       <div className="card-actions justify-end mt-6">
-        <Button 
+        <button 
           onClick={onRun}
-          isLoading={isRunning}
-          loadingText="Running..."
-          fullWidth
+          className="btn btn-primary w-full"
+          disabled={isRunning}
         >
           Run Code
-        </Button>
+        </button>
       </div>
     </div>
   </div>

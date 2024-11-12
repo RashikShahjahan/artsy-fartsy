@@ -1,12 +1,11 @@
 import { useState} from 'react';
 import { findSimilarDrawing, retrieveArtCode, runDrawingCode, storeCode } from './api';
-import { Header } from './components/Header/Header';
-import { PromptInput } from './components/PromptInput/PromptInput';
-import { DrawingCanvas } from './components/DrawingCanvas/DrawingCanvas';
-import { CodeEditor } from './components/CodeEditor/CodeEditor';
-import { DocumentationModal } from './components/DocumentationModal/DocumentationModal';
-import { SimilarDrawings } from './components/SimilarDrawings/SimilarDrawings';
-import { Button } from './components/common/Button/Button';
+import { Header } from './components/Header';
+import { PromptInput } from './components/PromptInput';
+import { DrawingCanvas } from './components/DrawingCanvas';
+import { CodeEditor } from './components/CodeEditor';
+import { DocumentationModal } from './components/DocumentationModal';
+import { SimilarDrawings } from './components/SimilarDrawings';
 
 function App() {
   const [code, setCode] = useState('');
@@ -109,13 +108,12 @@ function App() {
         )}
       </div>
 
-      <Button 
-        variant="secondary"
-        onClick={() => setDrawMode(!drawMode)}
-        className="max-w-xs mx-auto"
+      <button 
+        onClick={() => {setDrawMode(!drawMode)}}
+        className="btn btn-secondary w-full max-w-xs mx-auto"
       >
         {drawMode ? "Search for similar drawings" : "Back to Drawing"}
-      </Button>
+      </button>
     </div>
   );
 }
