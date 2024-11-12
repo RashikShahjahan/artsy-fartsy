@@ -1,8 +1,11 @@
 import axios from 'axios';
 
+const BASE_URL = import.meta.env.VITE_NODE_ENV === 'development' 
+  ? 'http://localhost:8000'
+  : '';
 
 export async function retrieveArtCode(userPrompt: string) {
-  const response = await axios.post(`/generate_code`, 
+  const response = await axios.post(`${BASE_URL}/generate_code`, 
     { userPrompt },
     { 
       headers: { 
@@ -14,7 +17,7 @@ export async function retrieveArtCode(userPrompt: string) {
 }
 
 export async function runDrawingCode(code: string) {
-  const response = await axios.post(`/run_code`, 
+  const response = await axios.post(`${BASE_URL}/run_code`, 
     { code },
     { 
       responseType: 'blob'
@@ -24,7 +27,7 @@ export async function runDrawingCode(code: string) {
 }
 
 export async function storeCode(code: string) {
-  const response = await axios.post(`/store_code`, 
+  const response = await axios.post(`${BASE_URL}/store_code`, 
     { code },
     { headers: { 'Content-Type': 'application/json' } }
   );
@@ -32,7 +35,7 @@ export async function storeCode(code: string) {
 }
 
 export async function findSimilarDrawing(prompt: string): Promise<string[]> {
-  const response = await axios.post(`/find_similar`, 
+  const response = await axios.post(`${BASE_URL}/find_similar`, 
     { prompt },
     { headers: { 'Content-Type': 'application/json' } }
   );
