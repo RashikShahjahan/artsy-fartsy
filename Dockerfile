@@ -16,7 +16,6 @@ WORKDIR /app
 COPY shared ./shared/
 WORKDIR /app/shared
 RUN bun install
-RUN bun run build
 
 # Copy and build frontend
 COPY frontend ./frontend/
