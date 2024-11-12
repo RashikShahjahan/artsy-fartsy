@@ -12,23 +12,23 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-COPY backend/package*.json ./backend/
+# Copy frontend and backend separately
+COPY frontend frontend/
+COPY backend backend/
+COPY shared shared/
 
-# Install dependencies
+# Install frontend dependencies and build
+WORKDIR /app/frontend
 RUN bun install
-RUN cd backend && bun install
+RUN bun run build
 
-# Copy source code
-COPY . .
+# Install backend dependencies
+WORKDIR /app/backend
+RUN bun install
 
 # Create Python virtual environment and install dependencies
-RUN python3 -m venv backend/venv
-RUN backend/venv/bin/pip install pycairo
-
-# Build frontend
-RUN bun run build
+RUN python3 -m venv venv
+RUN venv/bin/pip install pycairo
 
 # Start production image
 FROM oven/bun:latest
@@ -42,9 +42,10 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy built assets and backend
-COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/frontend/dist ./dist
 COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/backend/venv ./backend/venv
+COPY --from=builder /app/shared ./shared
 
 # Set environment variables
 ENV NODE_ENV=production
@@ -54,5 +55,4 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Start the application
-CMD ["bun", "run", "backend/index.ts", "&&", "bun", "run", "start"] 
-
+CMD ["bun", "run", "backend/index.ts"]
