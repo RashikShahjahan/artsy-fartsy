@@ -35,13 +35,14 @@ const StoreCodeSchema = z.object({
 });
 
 async function executeArtCode(code: string): Promise<string> {
-  // Generate random file names to prevent conflicts and predictable paths
-  const randomId = crypto.randomBytes(16).toString('hex');
-  const codeFilePath = path.join(__dirname, 'drawing', `generated_art_script_${randomId}.py`);
-  const outputPath = path.join(__dirname, 'output', `${randomId}.png`);
+  const timestamp = Date.now();
+  const uniqueId = crypto.randomBytes(4).toString('hex');
+  const codeFilePath = path.join(__dirname, 'drawing', `generated_art_script_${timestamp}.py`);
+  const defaultOutputPath = path.join(__dirname, 'output', 'art.png');
+  const finalOutputPath = path.join(__dirname, 'output', `${timestamp}_${uniqueId}.png`);
 
   await fs.promises.mkdir(path.dirname(codeFilePath), { recursive: true });
-  await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
+  await fs.promises.mkdir(path.dirname(defaultOutputPath), { recursive: true });
 
   if (containsMaliciousCode(code)) {
     throw new Error('Potentially malicious code detected');
@@ -67,14 +68,16 @@ async function executeArtCode(code: string): Promise<string> {
         HOME: undefined,
         USER: undefined,
       },
-      cwd: path.dirname(outputPath)
+      cwd: path.dirname(finalOutputPath)
     });
 
-    if (!fs.existsSync(outputPath)) {
+    if (!fs.existsSync(defaultOutputPath)) {
       throw new Error('Image was not generated');
     }
 
-    return outputPath;
+    await fs.promises.rename(defaultOutputPath, finalOutputPath);
+
+    return finalOutputPath;
   } finally {
     try {
       if (fs.existsSync(codeFilePath)) {
