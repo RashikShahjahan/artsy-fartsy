@@ -20,5 +20,4 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "../shared"]
-}
+"include": ["src", "../shared/**/*.ts"]}
