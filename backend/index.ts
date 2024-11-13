@@ -24,7 +24,7 @@ app.post('/generate_code', async (req, res) => {
   try {
     const { userPrompt } = GenerateCodeSchema.parse(req.body);
     const generatedCode = await generateArtCode(userPrompt);
-    res.json({ code: generatedCode });
+    res.status(200).json({ code: generatedCode });
   } catch (error) {
     res.status(400).json({ 
       error: error instanceof Error ? error.message : 'Invalid request'
@@ -38,6 +38,7 @@ app.post('/run_code', async (req, res) => {
     
     const outputPath = await executeArtCode(code);
     
+    res.status(200);
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Content-Disposition', `attachment; filename="${outputPath}"`);
     
@@ -64,7 +65,7 @@ app.post('/store_code', async (req, res) => {
         await initializeDatabase();
         const { code } = StoreCodeSchema.parse(req.body);
         await storeDocument(code);
-        res.json({ success: true });
+        res.status(200);
     } catch (error) {
         res.status(500).json({ 
             error: error instanceof Error ? error.message : 'Server error'
@@ -96,7 +97,7 @@ app.post('/find_similar', async (req, res) => {
             );
         }
         
-        res.json({ images });
+        res.status(200).json({ images });
         
     } catch (error) {
         res.status(500).json({ 

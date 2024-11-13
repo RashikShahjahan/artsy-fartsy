@@ -6,6 +6,7 @@ import { DrawingCanvas } from './components/DrawingCanvas';
 import { CodeEditor } from './components/CodeEditor';
 import { DocumentationModal } from './components/DocumentationModal';
 import { SimilarDrawings } from './components/SimilarDrawings';
+import { Alert } from './components/Alert';
 
 function App() {
   const [code, setCode] = useState('');
@@ -18,6 +19,7 @@ function App() {
   const [isSaving, setIsSaving] = useState(false);
   const [isFinding, setIsFinding] = useState(false);
   const [showDocs, setShowDocs] = useState(false);
+  const [alert, setAlert] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const generateCode = async () => {
     try {
@@ -26,7 +28,10 @@ function App() {
       setCode(newCode.code);
       setImage('');
     } catch (error) {
-      alert('Failed to generate code: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      setAlert({
+        message: 'Failed to generate code: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        type: 'error'
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -38,7 +43,10 @@ function App() {
       const image = await runDrawingCode(code);  
       setImage(image);
     } catch (error) {
-      alert('Failed to run code: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      setAlert({
+        message: 'Failed to run code: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        type: 'error'
+      });
     } finally {
       setIsRunning(false);
     }
@@ -50,7 +58,10 @@ function App() {
       const response = await findSimilarDrawing(prompt);
       setSimilarDrawings(response);
     } catch (error) {
-      alert('Failed to find similar drawings: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      setAlert({
+        message: 'Failed to find similar drawings: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        type: 'error'
+      });
     } finally {
       setIsFinding(false);
     }
@@ -59,9 +70,20 @@ function App() {
   const saveDrawing = async () => {
     try {
       setIsSaving(true);
-      await storeCode(code);
+      const success = await storeCode(code);
+      if (success) {
+        setAlert({
+          message: 'Drawing saved successfully',
+          type: 'success'
+        });
+      } else {
+        throw new Error('Server returned an unsuccessful status code');
+      }
     } catch (error) {
-      alert('Failed to save drawing: ' + (error instanceof Error ? error.message : 'Unknown error'));
+      setAlert({
+        message: 'Failed to save drawing: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        type: 'error'
+      });
     } finally {
       setIsSaving(false);
     }
@@ -69,6 +91,14 @@ function App() {
 
   return (
     <div className="flex flex-col gap-6 container mx-auto p-6">
+      {alert && (
+        <Alert
+          message={alert.message}
+          type={alert.type}
+          onClose={() => setAlert(null)}
+        />
+      )}
+      
       <Header drawMode={drawMode} />
       
       <PromptInput 

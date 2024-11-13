@@ -24,9 +24,10 @@ export async function runDrawingCode(code: string): Promise<string> {
   return URL.createObjectURL(response.data);
 }
 
-export async function storeCode(code: string): Promise<void> {
+export async function storeCode(code: string): Promise<boolean> {
   const validatedData = StoreCodeSchema.parse({ code });
-  await axios.post(`${BASE_URL}/store_code`, validatedData);
+  const response = await axios.post(`${BASE_URL}/store_code`, validatedData);
+  return response.status === 200;
 }
 
 export async function findSimilarDrawing(prompt: string): Promise<string[]> {
