@@ -65,7 +65,7 @@ app.post('/store_code', async (req, res) => {
         await initializeDatabase();
         const { code } = StoreCodeSchema.parse(req.body);
         await storeDocument(code);
-        res.status(200);
+        res.status(200).json({ success: true });
     } catch (error) {
         res.status(500).json({ 
             error: error instanceof Error ? error.message : 'Server error'
