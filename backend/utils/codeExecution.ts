@@ -12,12 +12,13 @@ const execAsync = promisify(exec);
 export async function executeArtCode(code: string): Promise<string> {
   const timestamp = Date.now();
   const uniqueId = crypto.randomBytes(4).toString('hex');
+  const outputDir = path.join(__dirname, '..', 'output', `${timestamp}_${uniqueId}`);
   const codeFilePath = path.join(__dirname, '..', 'drawing', `generated_art_script_${timestamp}.py`);
-  const defaultOutputPath = path.join(__dirname, '..', 'output', 'output.png');
-  const finalOutputPath = path.join(__dirname, '..', 'output', `${timestamp}_${uniqueId}.png`);
+  const defaultOutputPath = path.join(outputDir, 'output.png');
+  const finalOutputPath = path.join(outputDir, 'final.png');
 
   await fs.promises.mkdir(path.dirname(codeFilePath), { recursive: true });
-  await fs.promises.mkdir(path.dirname(defaultOutputPath), { recursive: true });
+  await fs.promises.mkdir(outputDir, { recursive: true });
 
   if (containsMaliciousCode(code)) {
     throw new Error('Potentially malicious code detected');
