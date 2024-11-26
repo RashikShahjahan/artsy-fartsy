@@ -27,9 +27,24 @@ function App() {
       const newCode = await retrieveArtCode(prompt);  
       setCode(newCode.code);
       setImage('');
-      const image = await runDrawingCode(newCode.code);
-      setImage(image);
-    } catch (error) {
+      
+      try {
+        setIsRunning(true);
+        const image = await runDrawingCode(newCode.code);
+        setImage(image);
+      } catch (error: any) {
+        const message = error.type === 'malicious_code'
+          ? 'This code contains potentially unsafe operations and cannot be executed'
+          : 'Failed to run generated code: ' + (error instanceof Error ? error.message : 'Unknown error');
+        
+        setAlert({
+          message,
+          type: 'error'
+        });
+      } finally {
+        setIsRunning(false);
+      }
+    } catch (error: any) {
       setAlert({
         message: 'Failed to generate code: ' + (error instanceof Error ? error.message : 'Unknown error'),
         type: 'error'
@@ -44,9 +59,11 @@ function App() {
       setIsRunning(true);
       const image = await runDrawingCode(code);  
       setImage(image);
-    } catch (error) {
+    } catch (error: any) {
+      const message =  'Failed to run code: ' + (error instanceof Error ? error.message : 'Unknown error');
+      
       setAlert({
-        message: 'Failed to run code: ' + (error instanceof Error ? error.message : 'Unknown error'),
+        message,
         type: 'error'
       });
     } finally {
