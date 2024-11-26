@@ -38,7 +38,7 @@ WORKDIR /app/frontend
 RUN bun run build
 
 # Setup Python environment
-WORKDIR /app/backend
+WORKDIR /app/backend/src
 RUN python3 -m venv venv
 RUN . venv/bin/activate && pip install pycairo
 
@@ -57,7 +57,7 @@ WORKDIR /app
 # Copy built assets and backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY --from=builder /app/backend ./backend
-COPY --from=builder /app/backend/src/venv ./backend/venv
+COPY --from=builder /app/backend/src/venv ./backend/src/venv
 COPY --from=builder /app/shared ./shared
 
 # Set environment variables
