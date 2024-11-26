@@ -13,7 +13,7 @@ export const pool = new Pool(
         user: "postgres",
         password: "postgres",
         host: "localhost",
-        port: 5432,
+        port: 15432,
         database: "codeart",
       }
 );
@@ -27,7 +27,8 @@ export async function initializeDatabase() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS documents (
         id SERIAL PRIMARY KEY,
-        content TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        code TEXT NOT NULL,
         embedding vector(1536)
       )
     `);

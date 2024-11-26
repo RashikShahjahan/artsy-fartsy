@@ -24,8 +24,8 @@ export async function runDrawingCode(code: string): Promise<string> {
   return URL.createObjectURL(response.data);
 }
 
-export async function storeCode(code: string): Promise<boolean> {
-  const validatedData = StoreCodeSchema.parse({ code });
+export async function storeCode(prompt: string, code: string): Promise<boolean> {
+  const validatedData = StoreCodeSchema.parse({ prompt, code });
   const response = await axios.post(`${BASE_URL}/store_code`, validatedData);
   return response.status === 200;
 }
