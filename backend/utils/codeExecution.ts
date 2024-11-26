@@ -35,7 +35,7 @@ export async function executeArtCode(code: string): Promise<string> {
 
   try {
     const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
-    const { stdout, stderr } = await execAsync(`"${pythonPath}" "${codeFilePath}"`, {
+    await execAsync(`"${pythonPath}" "${codeFilePath}"`, {
       timeout: 30000,
       maxBuffer: 1024 * 1024, // 1MB output limit
       env: {
