@@ -114,18 +114,19 @@ function App() {
       <div className="flex flex-col md:flex-row items-start justify-center gap-8">
         {drawMode ? (
           <>
-            <DrawingCanvas 
-              image={image}
-              isRunning={isRunning}
-              isSaving={isSaving}
-              onSave={saveDrawing}
-            />
+
             <CodeEditor 
               code={code}
               onCodeChange={setCode}
               isRunning={isRunning}
               onRun={runCode}
               onToggleDocs={() => setShowDocs(!showDocs)}
+            />
+                        <DrawingCanvas 
+              image={image}
+              isRunning={isRunning}
+              isSaving={isSaving}
+              onSave={saveDrawing}
             />
             <DocumentationModal 
               isOpen={showDocs}

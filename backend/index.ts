@@ -54,6 +54,7 @@ app.post('/run_code', async (req, res) => {
     });
 
   } catch (error) {
+    console.error('Error running code:', error);
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Server error'
     });
