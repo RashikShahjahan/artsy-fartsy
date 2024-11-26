@@ -93,7 +93,7 @@ app.post('/find_similar', async (req, res) => {
         const generatedCode = await generateArtCode(prompt);
         const similarCode = await findSimilarDocuments(generatedCode);
         
-        const images = [];
+        const images: string[] = [];
         
         for (const code of similarCode) {
             const outputPath = await executeArtCode(code);
