@@ -9,6 +9,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const execAsync = promisify(exec);
 
+export class MaliciousCodeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MaliciousCodeError';
+  }
+}
+
 export async function executeArtCode(code: string): Promise<string> {
   const timestamp = Date.now();
   const uniqueId = crypto.randomBytes(4).toString('hex');
@@ -21,7 +28,7 @@ export async function executeArtCode(code: string): Promise<string> {
   await fs.promises.mkdir(outputDir, { recursive: true });
 
   if (containsMaliciousCode(code)) {
-    throw new Error('Potentially malicious code detected');
+    throw new MaliciousCodeError('Code contains potentially unsafe operations');
   }
 
   await fs.promises.writeFile(codeFilePath, code);

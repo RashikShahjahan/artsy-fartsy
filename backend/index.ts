@@ -9,7 +9,7 @@ import {
 import { generateArtCode } from './utils/generation';
 import { findSimilarDocuments, storeDocument } from './utils/embeddings';
 import { initializeDatabase } from './utils/db';
-import { executeArtCode } from './utils/codeExecution';
+import { executeArtCode, MaliciousCodeError } from './utils/codeExecution';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -35,7 +35,6 @@ app.post('/generate_code', async (req, res) => {
 app.post('/run_code', async (req, res) => {
   try {
     const { code } = RunCodeSchema.parse(req.body);
-    
     const outputPath = await executeArtCode(code);
     
     res.status(200);
@@ -55,8 +54,17 @@ app.post('/run_code', async (req, res) => {
 
   } catch (error) {
     console.error('Error running code:', error);
+    
+    if (error instanceof MaliciousCodeError) {
+      res.status(400).json({ 
+        error: error.message,
+        type: 'malicious_code'
+      });
+    }
+    
     res.status(500).json({ 
-      error: error instanceof Error ? error.message : 'Server error'
+      error: error instanceof Error ? error.message : 'Server error',
+      type: 'server_error'
     });
   }
 });
