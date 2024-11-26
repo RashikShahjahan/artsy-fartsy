@@ -60,8 +60,8 @@ async function generateArtCode(prompt: string): Promise<string> {
         ],
     });
 
-    // Extract only Python code by removing any explanatory text
-    const code = message.content[0].text;
+    // Extract text from the first content block
+    const code = message.content[0].type === 'text' ? message.content[0].text : '';
     // Remove code block markers and any non-code text
     return code
         .split('\n')
@@ -94,7 +94,8 @@ Return the complete modified Python code.
         ],
     });
 
-    const code = message.content[0].text;
+    // Extract text from the first content block
+    const code = message.content[0].type === 'text' ? message.content[0].text : '';
     return code
         .split('\n')
         .filter((line: string) => 

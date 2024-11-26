@@ -5,7 +5,7 @@ import {
   RunCodeSchema, 
   StoreCodeSchema, 
   FindSimilarSchema 
-} from '../shared/schemas';
+} from '../../shared/schemas';
 import { generateArtCode } from './utils/generation';
 import { findSimilarDocuments, storeDocument } from './utils/embeddings';
 import { initializeDatabase } from './utils/db';
@@ -72,8 +72,8 @@ app.post('/run_code', async (req, res) => {
 app.post('/store_code', async (req, res) => {
     try {
         await initializeDatabase();
-        const { code } = StoreCodeSchema.parse(req.body);
-        await storeDocument(code);
+        const { prompt, code } = StoreCodeSchema.parse(req.body);
+        await storeDocument(prompt, code);
         res.status(200).json({ success: true });
     } catch (error) {
         res.status(500).json({ 
@@ -89,11 +89,11 @@ app.listen(PORT, () => {
 
 app.post('/find_similar', async (req, res) => {
     try {
+        await initializeDatabase();
         const { prompt } = FindSimilarSchema.parse(req.body);
-        const generatedCode = await generateArtCode(prompt);
-        const similarCode = await findSimilarDocuments(generatedCode);
+        const similarCode = await findSimilarDocuments(prompt);
         
-        const images = [];
+        const images: string[] = [];
         
         for (const code of similarCode) {
             const outputPath = await executeArtCode(code);
@@ -109,6 +109,7 @@ app.post('/find_similar', async (req, res) => {
         res.status(200).json({ images });
         
     } catch (error) {
+        console.error('Error finding similar documents:', error);
         res.status(500).json({ 
             error: error instanceof Error ? error.message : 'Server error'
         });

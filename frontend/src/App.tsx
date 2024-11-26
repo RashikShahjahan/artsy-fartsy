@@ -89,7 +89,7 @@ function App() {
   const saveDrawing = async () => {
     try {
       setIsSaving(true);
-      const success = await storeCode(code);
+      const success = await storeCode(prompt, code);
       if (success) {
         setAlert({
           message: 'Drawing saved successfully',

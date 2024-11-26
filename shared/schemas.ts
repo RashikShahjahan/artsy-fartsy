@@ -9,6 +9,7 @@ export const RunCodeSchema = z.object({
 });
 
 export const StoreCodeSchema = z.object({
+  prompt: z.string().min(1, "Prompt is required"),
   code: z.string().min(1, "Code is required")
 });
 

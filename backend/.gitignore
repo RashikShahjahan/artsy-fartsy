@@ -176,3 +176,5 @@ dist
 
 # Python venv
 venv/
+
+output/
