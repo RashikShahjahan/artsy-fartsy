@@ -27,6 +27,8 @@ function App() {
       const newCode = await retrieveArtCode(prompt);  
       setCode(newCode.code);
       setImage('');
+      const image = await runDrawingCode(newCode.code);
+      setImage(image);
     } catch (error) {
       setAlert({
         message: 'Failed to generate code: ' + (error instanceof Error ? error.message : 'Unknown error'),
