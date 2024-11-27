@@ -14,12 +14,16 @@ const GUIDES = {
 
 
 
-async function generateArtCode(prompt: string, art_type: string): Promise<string> {
+async function generateArtCode(prompt: string, artType: string): Promise<string> {
+    if (!GUIDES[artType]) {
+        throw new Error(`Unsupported art type: ${artType}`);
+    }
+
     const message = await client.messages.create({
         model: "claude-3-5-sonnet-20241022",
         max_tokens: 1024,
         messages: [
-            { role: "user", content: GUIDES[art_type] },
+            { role: "user", content: GUIDES[artType] },
             { role: "user", content: `${prompt} Only respond with code as plain text without code block syntax around it` }
         ],
     });
