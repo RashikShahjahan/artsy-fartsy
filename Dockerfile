@@ -40,7 +40,7 @@ RUN bun run build
 # Setup Python environment
 WORKDIR /app/backend/art_libraries
 RUN python3 -m venv venv
-RUN . venv/bin/activate && pip install pycairo
+RUN . venv/bin/activate && pip install pycairo && pip install musicpy
 
 # Start production image
 FROM oven/bun:latest
