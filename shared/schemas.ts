@@ -1,20 +1,24 @@
 import { z } from 'zod';
 
 export const GenerateCodeSchema = z.object({
-  userPrompt: z.string().min(1, "Prompt is required")
+  userPrompt: z.string().min(1, "Prompt is required"),
+  artType: z.string().min(1, "Art type is required")
 });
 
 export const RunCodeSchema = z.object({
-  code: z.string().min(1, "Code is required")
+  code: z.string().min(1, "Code is required"),
+  artType: z.string().min(1, "Art type is required")
 });
 
 export const StoreCodeSchema = z.object({
   prompt: z.string().min(1, "Prompt is required"),
-  code: z.string().min(1, "Code is required")
+  code: z.string().min(1, "Code is required"),
+  artType: z.string().min(1, "Art type is required")
 });
 
 export const FindSimilarSchema = z.object({
-  prompt: z.string().min(1, "Prompt is required")
+  prompt: z.string().min(1, "Prompt is required"),
+  artType: z.string().min(1, "Art type is required")
 });
 
 // Response schemas

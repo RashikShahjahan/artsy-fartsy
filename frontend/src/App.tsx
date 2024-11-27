@@ -1,5 +1,5 @@
 import { useState} from 'react';
-import { findSimilarDrawing, retrieveArtCode, runDrawingCode, storeCode } from './api';
+import { findSimilarArt, retrieveArtCode, runArtCode, storeCode } from './api';
 import { Header } from './components/Header';
 import { PromptInput } from './components/PromptInput';
 import { DrawingCanvas } from './components/DrawingCanvas';
@@ -24,13 +24,13 @@ function App() {
   const generateCode = async () => {
     try {
       setIsGenerating(true);
-      const newCode = await retrieveArtCode(prompt);  
+      const newCode = await retrieveArtCode(prompt, 'drawing');  
       setCode(newCode.code);
       setImage('');
       
       try {
         setIsRunning(true);
-        const image = await runDrawingCode(newCode.code);
+        const image = await runArtCode(newCode.code, 'drawing');
         setImage(image);
       } catch (error: any) {
         const message = error.type === 'malicious_code'
@@ -57,7 +57,7 @@ function App() {
   const runCode = async () => {
     try {
       setIsRunning(true);
-      const image = await runDrawingCode(code);  
+      const image = await runArtCode(code, 'drawing');  
       setImage(image);
     } catch (error: any) {
       const message =  'Failed to run code: ' + (error instanceof Error ? error.message : 'Unknown error');
@@ -74,7 +74,7 @@ function App() {
   const findSimilar = async () => {
     try {
       setIsFinding(true);
-      const response = await findSimilarDrawing(prompt);
+      const response = await findSimilarArt(prompt, 'drawing');
       setSimilarDrawings(response);
     } catch (error) {
       setAlert({
@@ -89,7 +89,7 @@ function App() {
   const saveDrawing = async () => {
     try {
       setIsSaving(true);
-      const success = await storeCode(prompt, code);
+      const success = await storeCode(prompt, code, 'drawing');
       if (success) {
         setAlert({
           message: 'Drawing saved successfully',
