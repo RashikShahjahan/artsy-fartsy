@@ -26,7 +26,7 @@ class Chord:
 
     def lower_pitch(self, semitones: int) -> None:
         """Lower the pitch of the chord by a specified number of semitones.
-        
+
         Args:
             semitones (int): Number of semitones to lower the pitch
         """
@@ -72,7 +72,7 @@ class ChordProgression:
         chord = Chord(root_note, chord_type)
         self.chords.append(chord)
     
-    def save(self, filename: str = "output/progression.mid") -> None:
+    def save(self, filename: str = "output.mid") -> None:
         """Save the chord progression as a MIDI file.
         
         Args:
