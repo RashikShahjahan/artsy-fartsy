@@ -30,7 +30,7 @@ export class MaliciousCodeError extends Error {
 export async function executeArtCode(code: string, artType: string): Promise<string> {
   const timestamp = Date.now();
   const uniqueId = crypto.randomBytes(4).toString('hex');
-  const config = ART_TYPE_CONFIGS["music"];
+  const config = ART_TYPE_CONFIGS[artType];
   
   const outputDir = path.join(__dirname, '..','..', 'art_libraries','output', `${timestamp}_${uniqueId}`);
   const codeFilePath = path.join(__dirname, '..', '..', 'art_libraries', `generated_art_script_${timestamp}${config.extension}`);

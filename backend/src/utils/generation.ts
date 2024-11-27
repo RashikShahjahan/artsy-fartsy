@@ -23,7 +23,7 @@ async function generateArtCode(prompt: string, artType: string): Promise<string>
         model: "claude-3-5-sonnet-20241022",
         max_tokens: 1024,
         messages: [
-            { role: "user", content: GUIDES["music"] },
+            { role: "user", content: GUIDES[artType] },
             { role: "user", content: `${prompt} Only respond with code as plain text without code block syntax around it` }
         ],
     });
