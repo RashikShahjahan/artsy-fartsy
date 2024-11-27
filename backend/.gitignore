@@ -178,3 +178,4 @@ dist
 venv/
 
 output/
+*.mid

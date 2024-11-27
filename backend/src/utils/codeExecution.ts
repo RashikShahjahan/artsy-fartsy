@@ -19,8 +19,8 @@ export class MaliciousCodeError extends Error {
 export async function executeArtCode(code: string): Promise<string> {
   const timestamp = Date.now();
   const uniqueId = crypto.randomBytes(4).toString('hex');
-  const outputDir = path.join(__dirname, '..', 'output', `${timestamp}_${uniqueId}`);
-  const codeFilePath = path.join(__dirname, '..', 'drawing', `generated_art_script_${timestamp}.py`);
+  const outputDir = path.join(__dirname, '..','..', 'art_libraries','output', `${timestamp}_${uniqueId}`);
+  const codeFilePath = path.join(__dirname, '..', '..', 'art_libraries', `generated_art_script_${timestamp}.py`);
   const defaultOutputPath = path.join(outputDir, 'output.png');
   const finalOutputPath = path.join(outputDir, 'final.png');
 
@@ -39,8 +39,8 @@ export async function executeArtCode(code: string): Promise<string> {
       timeout: 30000,
       maxBuffer: 1024 * 1024, // 1MB output limit
       env: {
-        PATH: path.join(__dirname, '..', 'venv', 'bin'),
-        PYTHONPATH: path.join(__dirname, '..', 'drawing'),
+        PATH: path.join(__dirname, '..',  'venv', 'bin'),
+        PYTHONPATH: path.join(__dirname, '..', '..', 'art_libraries'),
         PYTHONIOENCODING: 'utf-8',
         PYTHONUTF8: '1',
         PYTHONUNBUFFERED: '1',
