@@ -9,6 +9,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const execAsync = promisify(exec);
 
+interface ArtTypeConfig {
+  extension: string;
+  outputFile: string;
+}
+
+const ART_TYPE_CONFIGS: Record<string, ArtTypeConfig> = {
+  drawing: { extension: '.py', outputFile: 'output.png' },
+  music: { extension: '.py', outputFile: 'output.mid' }
+  // Add more art types as needed
+};
+
 export class MaliciousCodeError extends Error {
   constructor(message: string) {
     super(message);
@@ -16,13 +27,15 @@ export class MaliciousCodeError extends Error {
   }
 }
 
-export async function executeArtCode(code: string): Promise<string> {
+export async function executeArtCode(code: string, artType: string): Promise<string> {
   const timestamp = Date.now();
   const uniqueId = crypto.randomBytes(4).toString('hex');
+  const config = ART_TYPE_CONFIGS["music"];
+  
   const outputDir = path.join(__dirname, '..','..', 'art_libraries','output', `${timestamp}_${uniqueId}`);
-  const codeFilePath = path.join(__dirname, '..', '..', 'art_libraries', `generated_art_script_${timestamp}.py`);
-  const defaultOutputPath = path.join(outputDir, 'output.png');
-  const finalOutputPath = path.join(outputDir, 'final.png');
+  const codeFilePath = path.join(__dirname, '..', '..', 'art_libraries', `generated_art_script_${timestamp}${config.extension}`);
+  const defaultOutputPath = path.join(outputDir, config.outputFile);
+  const finalOutputPath = path.join(outputDir, `final${path.extname(config.outputFile)}`);
 
   await fs.promises.mkdir(path.dirname(codeFilePath), { recursive: true });
   await fs.promises.mkdir(outputDir, { recursive: true });
@@ -34,12 +47,12 @@ export async function executeArtCode(code: string): Promise<string> {
   await fs.promises.writeFile(codeFilePath, code);
 
   try {
-    const pythonPath = path.join(__dirname, '..', 'venv', 'bin', 'python');
+    const pythonPath = path.join(__dirname, '..', '..', 'art_libraries', 'venv', 'bin', 'python');
     await execAsync(`"${pythonPath}" "${codeFilePath}"`, {
       timeout: 30000,
       maxBuffer: 1024 * 1024, // 1MB output limit
       env: {
-        PATH: path.join(__dirname, '..',  'venv', 'bin'),
+        PATH: path.join(__dirname, '..', '..', 'art_libraries', 'venv', 'bin'),
         PYTHONPATH: path.join(__dirname, '..', '..', 'art_libraries'),
         PYTHONIOENCODING: 'utf-8',
         PYTHONUTF8: '1',
@@ -55,7 +68,7 @@ export async function executeArtCode(code: string): Promise<string> {
     });
 
     if (!fs.existsSync(defaultOutputPath)) {
-      throw new Error('Image was not generated');
+      throw new Error('Art was not generated');
     }
 
     await fs.promises.rename(defaultOutputPath, finalOutputPath);

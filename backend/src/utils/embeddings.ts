@@ -6,7 +6,7 @@ const client = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
 async function generateEmbedding(text: string): Promise<number[]> {
     const response = await client.embed({
         input: text,
-        model: "voyage-code-2",
+        model: "voyage-3",
     });
     
     if (!response.data) {
