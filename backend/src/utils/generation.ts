@@ -67,40 +67,6 @@ async function generateArtCode(prompt: string): Promise<string> {
         .split('\n')
         .filter((line: string) => 
             !line.startsWith('```') && // Remove code block markers
-            !line.startsWith('#') &&   // Remove comments
-            line.trim()                // Remove empty lines
-        )
-        .join('\n')
-        .trim();
-}
-
-async function modifyArtCode(existingCode: string, modificationPrompt: string): Promise<string> {
-    const modificationGuide = `
-${ARTCANVAS_GUIDE}
-
-Below is the existing drawing code:
-${existingCode}
-
-Modify this code according to the user's request while maintaining the overall structure.
-Return the complete modified Python code.
-`.trim();
-
-    const message = await client.messages.create({
-        model: "claude-3-5-sonnet-20241022",
-        max_tokens: 1024,
-        messages: [
-            { role: "user", content: modificationGuide },
-            { role: "user", content: `Only respond with code as plain text without code block syntax around it: ${modificationPrompt}` }
-        ],
-    });
-
-    // Extract text from the first content block
-    const code = message.content[0].type === 'text' ? message.content[0].text : '';
-    return code
-        .split('\n')
-        .filter((line: string) => 
-            !line.startsWith('```') && // Remove code block markers
-            !line.startsWith('#') &&   // Remove comments
             line.trim()                // Remove empty lines
         )
         .join('\n')
@@ -108,4 +74,5 @@ Return the complete modified Python code.
 }
 
 
-export { generateArtCode, modifyArtCode};
+
+export { generateArtCode};
