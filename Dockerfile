@@ -38,7 +38,7 @@ WORKDIR /app/frontend
 RUN bun run build
 
 # Setup Python environment
-WORKDIR /app/backend/src
+WORKDIR /app/backend/art_libraries
 RUN python3 -m venv venv
 RUN . venv/bin/activate && pip install pycairo
 
