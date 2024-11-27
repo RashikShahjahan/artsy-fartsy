@@ -23,7 +23,7 @@ app.use(cors());
 app.post('/generate_code', async (req, res) => {
   try {
     const { userPrompt } = GenerateCodeSchema.parse(req.body);
-    const generatedCode = await generateArtCode(userPrompt);
+    const generatedCode = await generateArtCode(userPrompt, 'music');
     res.status(200).json({ code: generatedCode });
   } catch (error) {
     res.status(400).json({ 
