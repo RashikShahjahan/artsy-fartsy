@@ -22,8 +22,8 @@ app.use(cors());
 
 app.post('/generate_code', async (req, res) => {
   try {
-    const { userPrompt } = GenerateCodeSchema.parse(req.body);
-    const generatedCode = await generateArtCode(userPrompt, 'music');
+    const { userPrompt, artType } = GenerateCodeSchema.parse(req.body);
+    const generatedCode = await generateArtCode(userPrompt, artType);
     res.status(200).json({ code: generatedCode });
   } catch (error) {
     res.status(400).json({ 
@@ -34,8 +34,8 @@ app.post('/generate_code', async (req, res) => {
 
 app.post('/run_code', async (req, res) => {
   try {
-    const { code } = RunCodeSchema.parse(req.body);
-    const outputPath = await executeArtCode(code);
+    const { code, artType } = RunCodeSchema.parse(req.body);
+    const outputPath = await executeArtCode(code, artType);
     
     res.status(200);
     res.setHeader('Content-Type', 'image/png');
@@ -72,8 +72,8 @@ app.post('/run_code', async (req, res) => {
 app.post('/store_code', async (req, res) => {
     try {
         await initializeDatabase();
-        const { prompt, code } = StoreCodeSchema.parse(req.body);
-        await storeDocument(prompt, code);
+        const { prompt, code, artType } = StoreCodeSchema.parse(req.body);
+        await storeDocument(prompt, code, artType);
         res.status(200).json({ success: true });
     } catch (error) {
         res.status(500).json({ 
@@ -96,7 +96,7 @@ app.post('/find_similar', async (req, res) => {
         const images: string[] = [];
         
         for (const code of similarCode) {
-            const outputPath = await executeArtCode(code);
+            const outputPath = await executeArtCode(code, 'drawing');
             const imageBuffer = await fs.promises.readFile(outputPath);
             const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`;
             images.push(base64Image);

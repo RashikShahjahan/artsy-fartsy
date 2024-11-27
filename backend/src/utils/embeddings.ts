@@ -6,7 +6,7 @@ const client = new VoyageAIClient({ apiKey: process.env.VOYAGE_API_KEY });
 async function generateEmbedding(text: string): Promise<number[]> {
     const response = await client.embed({
         input: text,
-        model: "voyage-3",
+        model: "voyage-3-lite",
     });
     
     if (!response.data) {
@@ -29,12 +29,12 @@ function arrayToVector(arr: number[]): string {
   return `[${formattedNumbers.join(',')}]`;
 }
 
-export async function storeDocument(prompt: string, code: string): Promise<void> {
+export async function storeDocument(prompt: string, code: string, artType: string): Promise<void> {
   const embedding = await generateEmbedding(prompt);
   const vectorString = arrayToVector(embedding);
   await pool.query(
-    'INSERT INTO documents (prompt, code, embedding) VALUES ($1, $2, $3::vector)',
-    [prompt, code, vectorString]
+    'INSERT INTO documents (prompt, code, art_type, embedding) VALUES ($1, $2, $3, $4::vector)',
+    [prompt, code, artType, vectorString]
   );
 }
 

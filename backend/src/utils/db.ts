@@ -29,7 +29,8 @@ export async function initializeDatabase() {
         id SERIAL PRIMARY KEY,
         prompt TEXT NOT NULL,
         code TEXT NOT NULL,
-        embedding vector(1536)
+        art_type TEXT NOT NULL,
+        embedding vector(512)
       )
     `);
   } finally {
