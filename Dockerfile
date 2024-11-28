@@ -57,12 +57,12 @@ WORKDIR /app
 # Copy built assets and backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY --from=builder /app/backend ./backend
-COPY --from=builder /app/backend/src/venv ./backend/src/venv
+COPY --from=builder /app/backend/art_libraries/venv ./backend/art_libraries/venv
 COPY --from=builder /app/shared ./shared
 
 # Set environment variables
 ENV NODE_ENV=production
-ENV PATH="/app/backend/src/venv/bin:$PATH"
+ENV PATH="/app/backend/art_libraries/venv/bin:$PATH"
 ENV PORT=8000
 
 # Expose port
