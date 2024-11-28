@@ -3,19 +3,27 @@ interface PromptInputProps {
   onPromptChange: (value: string) => void;
   onSubmit: () => void;
   isLoading: boolean;
-  drawMode: boolean;
-  editMode: boolean;
-  onReset: () => void;
+  placeholder: string;
+  helperText: string;
+  submitButtonText: string;
+  loadingText: string;
+  showResetButton?: boolean;
+  onReset?: () => void;
+  submitButtonClass?: string;
 }
 
 export const PromptInput = ({ 
   prompt, 
   onPromptChange, 
   onSubmit, 
-  isLoading, 
-  drawMode,
-  editMode,
-  onReset
+  isLoading,
+  placeholder,
+  helperText,
+  submitButtonText,
+  loadingText,
+  showResetButton = false,
+  onReset,
+  submitButtonClass = 'btn-primary'
 }: PromptInputProps) => (
   <div className="flex gap-4 w-full max-w-4xl mx-auto">
     <div className="form-control flex-grow">
@@ -23,28 +31,29 @@ export const PromptInput = ({
         type="text"
         value={prompt}
         onChange={(e) => onPromptChange(e.target.value)}
-        placeholder={
-          editMode 
-            ? "Type your message..." 
-            : drawMode 
-              ? "E.g., 'A sunset over mountains'" 
-              : "E.g., 'Abstract art with circles'"
-        }
+        placeholder={placeholder}
         className="input input-bordered w-full"
         disabled={isLoading}
       />
       <label className="label">
-        <span className="label-text-alt text-gray-500">
-          {editMode 
-            ? "Ask to make edits to your drawing" 
-            : drawMode 
-              ? "Be specific with your description for better results" 
-              : "Enter keywords to find similar artwork"}
-        </span>
+        <span className="label-text-alt text-gray-500">{helperText}</span>
       </label>
     </div>
     <div className="flex gap-2">
-      {editMode && (
+      <button 
+        onClick={onSubmit}
+        className={`btn ${submitButtonClass} min-w-[120px]`}
+        disabled={isLoading || !prompt.trim()}
+        title={!prompt.trim() ? "Please enter a message first" : ""}
+      >
+        {isLoading ? (
+          <>
+            <span className="loading loading-spinner"></span>
+            {loadingText}
+          </>
+        ) : submitButtonText}
+      </button>
+      {showResetButton && onReset && (
         <button
           onClick={onReset}
           className="btn btn-warning"
@@ -54,19 +63,6 @@ export const PromptInput = ({
           Reset
         </button>
       )}
-      <button 
-        onClick={onSubmit}
-        className={`btn ${editMode ? 'btn-info' : drawMode ? 'btn-success' : 'btn-primary'} min-w-[120px]`}
-        disabled={isLoading || !prompt.trim()}
-        title={!prompt.trim() ? "Please enter a message first" : ""}
-      >
-        {isLoading ? (
-          <>
-            <span className="loading loading-spinner"></span>
-            {editMode ? "Editing..." : drawMode ? "Generating..." : "Finding..."}
-          </>
-        ) : (editMode ? "Edit" : drawMode ? "Generate Code" : "Find")}
-      </button>
     </div>
   </div>
 ); 
