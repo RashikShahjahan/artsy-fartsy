@@ -1,4 +1,3 @@
-
 interface CodeEditorProps {
   code: string;
   onCodeChange: (code: string) => void;
@@ -20,6 +19,7 @@ export const CodeEditor = ({
         <h3 className="text-lg font-semibold">Generated Code</h3>
         <button 
           onClick={onToggleDocs}
+          className="btn btn-ghost"
         >
           Show Docs
         </button>
@@ -29,16 +29,21 @@ export const CodeEditor = ({
         value={code} 
         onChange={(e) => onCodeChange(e.target.value)} 
         placeholder="# Your code will appear here"
-        className="textarea textarea-bordered h-full font-mono"
+        className="textarea textarea-bordered h-[calc(100%-4rem)] font-mono mb-4"
         disabled={isRunning}
       />
-      <div className="card-actions justify-end mt-6">
+      <div className="card-actions justify-end">
         <button 
           onClick={onRun}
           className="btn btn-primary w-full"
           disabled={isRunning}
         >
-          Run Code
+          {isRunning ? (
+            <>
+              <span className="loading loading-spinner"></span>
+              Running...
+            </>
+          ) : "Run Code"}
         </button>
       </div>
     </div>
