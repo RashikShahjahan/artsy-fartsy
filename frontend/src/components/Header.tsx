@@ -16,5 +16,8 @@ export const Header = ({ drawMode }: HeaderProps) => (
         Click "Show Docs" in the code editor to see available drawing commands.
       </p>
     )}
+    <p className="text-sm text-gray-500 mt-2">
+      Best suited for: icons, logos, geometric patterns, embroidery design and simple illustrations.
+    </p>
   </header>
 ); 

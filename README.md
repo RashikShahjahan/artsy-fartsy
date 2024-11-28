@@ -1,6 +1,6 @@
 # AI Drawing Application
 
-An interactive web application that allows users to generate and manipulate drawings using AI, with features to save drawings and find similar artwork.
+An interactive web application that allows users to generate and manipulate vector graphics using AI. This application excels in creating geometrically precise and intricate vector drawings, making it ideal for technical illustrations, architectural designs, and other use cases where precision is key.
 
 ## Tech Stack
 
