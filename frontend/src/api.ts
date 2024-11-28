@@ -5,15 +5,17 @@ import {
   StoreCodeSchema, 
   FindSimilarSchema,
   GenerateCodeResponseSchema,
-  FindSimilarResponseSchema
+  FindSimilarResponseSchema,
+  EditCodeSchema,
+  EditCodeResponseSchema
 } from '../../shared/schemas';
 
 const BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:8000';
 
-export async function retrieveArtCode(userPrompt: string, artType: string) {
+export async function retrieveArtCode(userPrompt: string, artType: string): Promise<string> {
   const validatedData = GenerateCodeSchema.parse({ userPrompt, artType });
   const response = await axios.post(`${BASE_URL}/generate_code`, validatedData);
-  return GenerateCodeResponseSchema.parse(response.data);
+  return GenerateCodeResponseSchema.parse(response.data).code;
 }
 
 export async function runArtCode(code: string, artType: string): Promise<string> {
@@ -34,4 +36,10 @@ export async function findSimilarArt(prompt: string, artType: string): Promise<s
   const validatedData = FindSimilarSchema.parse({ prompt, artType });
   const response = await axios.post(`${BASE_URL}/find_similar`, validatedData);
   return FindSimilarResponseSchema.parse(response.data).images;
+}
+
+export async function editArtCode(prompt: string, code: string, artType: string): Promise<string> {
+  const validatedData = EditCodeSchema.parse({ prompt, code, artType });
+  const response = await axios.post(`${BASE_URL}/edit_code`, validatedData);
+  return EditCodeResponseSchema.parse(response.data).code;
 }
