@@ -4,9 +4,10 @@ import {
   GenerateCodeSchema, 
   RunCodeSchema, 
   StoreCodeSchema, 
-  FindSimilarSchema 
+  FindSimilarSchema,
+  EditCodeSchema
 } from '../../shared/schemas';
-import { generateArtCode } from './utils/generation';
+import { editArtCode, generateArtCode } from './utils/generation';
 import { findSimilarDocuments, storeDocument } from './utils/embeddings';
 import { initializeDatabase } from './utils/db';
 import { executeArtCode, MaliciousCodeError } from './utils/codeExecution';
@@ -25,6 +26,18 @@ app.post('/generate_code', async (req, res) => {
     const { userPrompt, artType } = GenerateCodeSchema.parse(req.body);
     const generatedCode = await generateArtCode(userPrompt, artType);
     res.status(200).json({ code: generatedCode });
+  } catch (error) {
+    res.status(400).json({ 
+      error: error instanceof Error ? error.message : 'Invalid request'
+    });
+  }
+});
+
+app.post('/edit_code', async (req, res) => {
+  try {
+    const { prompt, code, artType } = EditCodeSchema.parse(req.body);
+    const editedCode = await editArtCode(prompt, code, artType);
+    res.status(200).json({ code: editedCode });
   } catch (error) {
     res.status(400).json({ 
       error: error instanceof Error ? error.message : 'Invalid request'
