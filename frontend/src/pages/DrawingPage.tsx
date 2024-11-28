@@ -29,6 +29,7 @@ function DrawingPage() {
       const newCode = await retrieveArtCode(currentPrompt, 'drawing');  
       setCode(newCode);
       setImage('');
+      setEditMode(true);
       
       try {
         setIsRunning(true);
@@ -53,7 +54,6 @@ function DrawingPage() {
       });
     } finally {
       setIsGenerating(false);
-      setEditMode(true);
     }
   };
 
