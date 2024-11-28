@@ -21,7 +21,7 @@ async function generateArtCode(prompt: string, artType: string): Promise<string>
 
     const message = await client.messages.create({
         model: "claude-3-5-sonnet-20241022",
-        max_tokens: 1024,
+        max_tokens: 8192,
         messages: [
             { role: "user", content: GUIDES[artType] },
             { role: "user", content: `${prompt} Only respond with code as plain text without code block syntax around it` }
