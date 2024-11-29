@@ -7,7 +7,8 @@ export const GenerateCodeSchema = z.object({
 
 export const RunCodeSchema = z.object({
   code: z.string().min(1, "Code is required"),
-  artType: z.string().min(1, "Art type is required")
+  artType: z.string().min(1, "Art type is required"),
+  ranByAI: z.boolean()
 });
 
 export const StoreCodeSchema = z.object({

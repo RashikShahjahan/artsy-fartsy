@@ -21,6 +21,8 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+await initializeDatabase();
+
 app.post('/generate_code', async (req, res) => {
   try {
     const { userPrompt, artType } = GenerateCodeSchema.parse(req.body);
@@ -47,8 +49,9 @@ app.post('/edit_code', async (req, res) => {
 
 app.post('/run_code', async (req, res) => {
   try {
-    const { code, artType } = RunCodeSchema.parse(req.body);
-    const outputPath = await executeArtCode(code, artType);
+    const { code, artType, ranByAI } = RunCodeSchema.parse(req.body);
+    
+    const outputPath = await executeArtCode(code, artType, ranByAI);
     
     res.status(200);
     res.setHeader('Content-Type', 'image/png');
@@ -67,6 +70,8 @@ app.post('/run_code', async (req, res) => {
 
   } catch (error) {
     console.error('Error running code:', error);
+
+    
     
     if (error instanceof MaliciousCodeError) {
       res.status(400).json({ 
@@ -74,7 +79,6 @@ app.post('/run_code', async (req, res) => {
         type: 'malicious_code'
       });
     }
-    
     res.status(500).json({ 
       error: error instanceof Error ? error.message : 'Server error',
       type: 'server_error'
@@ -84,7 +88,6 @@ app.post('/run_code', async (req, res) => {
 
 app.post('/store_code', async (req, res) => {
     try {
-        await initializeDatabase();
         const { prompt, code, artType } = StoreCodeSchema.parse(req.body);
         await storeDocument(prompt, code, artType);
         res.status(200).json({ success: true });
@@ -102,14 +105,13 @@ app.listen(PORT, () => {
 
 app.post('/find_similar', async (req, res) => {
     try {
-        await initializeDatabase();
         const { prompt } = FindSimilarSchema.parse(req.body);
         const similarCode = await findSimilarDocuments(prompt);
         
         const images: string[] = [];
         
         for (const code of similarCode) {
-            const outputPath = await executeArtCode(code, 'drawing');
+            const outputPath = await executeArtCode(code, 'drawing', false);
             const imageBuffer = await fs.promises.readFile(outputPath);
             const base64Image = `data:image/png;base64,${imageBuffer.toString('base64')}`;
             images.push(base64Image);

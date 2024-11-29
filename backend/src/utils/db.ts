@@ -33,6 +33,14 @@ export async function initializeDatabase() {
         embedding vector(512)
       )
     `);
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS errors (
+        id SERIAL PRIMARY KEY,
+        code TEXT NOT NULL,
+        error TEXT NOT NULL
+      )
+    `);
   } finally {
     client.release();
   }

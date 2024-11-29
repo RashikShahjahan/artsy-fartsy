@@ -18,8 +18,8 @@ export async function retrieveArtCode(userPrompt: string, artType: string): Prom
   return GenerateCodeResponseSchema.parse(response.data).code;
 }
 
-export async function runArtCode(code: string, artType: string): Promise<string> {
-  const validatedData = RunCodeSchema.parse({ code, artType });
+export async function runArtCode(code: string, artType: string, ranByAI: boolean): Promise<string> {
+  const validatedData = RunCodeSchema.parse({ code, artType, ranByAI });
   const response = await axios.post(`${BASE_URL}/run_code`, validatedData, { 
     responseType: 'blob'
   });

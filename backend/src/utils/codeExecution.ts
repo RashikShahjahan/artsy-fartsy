@@ -4,10 +4,13 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { fileURLToPath } from 'url';
+import { pool } from './db';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const execAsync = promisify(exec);
+
 
 interface ArtTypeConfig {
   extension: string;
@@ -20,6 +23,7 @@ const ART_TYPE_CONFIGS: Record<string, ArtTypeConfig> = {
   // Add more art types as needed
 };
 
+
 export class MaliciousCodeError extends Error {
   constructor(message: string) {
     super(message);
@@ -27,7 +31,12 @@ export class MaliciousCodeError extends Error {
   }
 }
 
-export async function executeArtCode(code: string, artType: string): Promise<string> {
+
+export async function storeError(code: string, error: string) {
+  await pool.query(`INSERT INTO errors (code, error) VALUES ($1, $2)`, [code, error]);
+}
+
+export async function executeArtCode(code: string, artType: string, ranByAI: boolean): Promise<string> {
   const timestamp = Date.now();
   const uniqueId = crypto.randomBytes(4).toString('hex');
   const config = ART_TYPE_CONFIGS[artType];
@@ -67,6 +76,7 @@ export async function executeArtCode(code: string, artType: string): Promise<str
       cwd: path.dirname(finalOutputPath)
     });
 
+
     if (!fs.existsSync(defaultOutputPath)) {
       throw new Error('Art was not generated');
     }
@@ -74,6 +84,12 @@ export async function executeArtCode(code: string, artType: string): Promise<str
     await fs.promises.rename(defaultOutputPath, finalOutputPath);
 
     return finalOutputPath;
+    
+  } catch (error) {
+    if (ranByAI) {
+      await storeError(code, error.message);
+    }
+    throw error;
   } finally {
     try {
       if (fs.existsSync(codeFilePath)) {
