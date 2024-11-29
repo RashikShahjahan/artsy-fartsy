@@ -33,7 +33,7 @@ function DrawingPage() {
       
       try {
         setIsRunning(true);
-        const image = await runArtCode(newCode, 'drawing');
+        const image = await runArtCode(newCode, 'drawing', true);
         setImage(image);
       } catch (error: any) {
         const message = error.type === 'malicious_code'
@@ -60,7 +60,7 @@ function DrawingPage() {
   const runCode = async () => {
     try {
       setIsRunning(true);
-      const image = await runArtCode(code, 'drawing');  
+      const image = await runArtCode(code, 'drawing', false);  
       setImage(image);
     } catch (error: any) {
       const message =  'Failed to run code: ' + (error instanceof Error ? error.message : 'Unknown error');
@@ -105,7 +105,7 @@ function DrawingPage() {
       
       try {
         setIsRunning(true);
-        const image = await runArtCode(newCode, 'drawing');
+        const image = await runArtCode(newCode, 'drawing', true);
         setImage(image);
       } catch (error: any) {
         const message = error.type === 'malicious_code'
