@@ -1,6 +1,5 @@
 import { ARTCANVAS_EDIT_GUIDE, ARTCANVAS_GUIDE } from './prompts/drawing';
 import { MUSIC_GUIDE } from './prompts/music';
-import 'dotenv/config';
 
 import OpenAI from "openai";
 
