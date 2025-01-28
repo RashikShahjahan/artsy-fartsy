@@ -1,1 +1,1 @@
-{ "dependencies": { "openai": "^4.80.1" } }
+{ "dependencies": { "dotenv": "^16.4.7", "openai": "^4.80.1" } }
