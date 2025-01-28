@@ -1,9 +1,12 @@
-import { Anthropic } from '@anthropic-ai/sdk';
 import { ARTCANVAS_EDIT_GUIDE, ARTCANVAS_GUIDE } from './prompts/drawing';
 import { MUSIC_GUIDE } from './prompts/music';
+import 'dotenv'
 
-const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY // You'll need to add your API key
+import OpenAI from "openai";
+
+const client = new OpenAI({
+        baseURL: 'https://api.deepseek.com',
+        apiKey: process.env.DEEPSEEK_API_KEY
 });
 
 const GUIDES = {
@@ -23,9 +26,9 @@ async function generateArtCode(prompt: string, artType: string): Promise<string>
         throw new Error(`Unsupported art type: ${artType}`);
     }
 
-    const message = await client.messages.create({
-        model: "claude-3-5-sonnet-20241022",
-        max_tokens: 8192,
+    const message = await client.chat.completions.create({
+        model: "deepseek-reasoner",
+        max_tokens: 8000,
         messages: [
             { role: "user", content: GUIDES[artType] },
             { role: "user", content: `${prompt} Only respond with code as plain text without code block syntax around it` }
@@ -33,7 +36,7 @@ async function generateArtCode(prompt: string, artType: string): Promise<string>
     });
 
     // Extract text from the first content block
-    const code = message.content[0].type === 'text' ? message.content[0].text : '';
+    const code = message.choices[0].message.content??'';
     // Remove code block markers and any non-code text
     return code
         .split('\n')
@@ -50,9 +53,9 @@ async function editArtCode(prompt: string, code: string, artType: string): Promi
         throw new Error(`Unsupported art type: ${artType}`);
     }
 
-    const message = await client.messages.create({
-        model: "claude-3-5-sonnet-20241022",
-        max_tokens: 8192,
+    const message = await client.chat.completions.create({
+        model: "deepseek-reasoner",
+        max_tokens: 8000,
         messages: [
             { role: "user", content: EDIT_GUIDES[artType] },
             { role: "user", content: `${prompt} Only respond with code as plain text without code block syntax around it` },
@@ -62,7 +65,7 @@ async function editArtCode(prompt: string, code: string, artType: string): Promi
 
 
     // Extract text from the first content block
-    const editedCode = message.content[0].type === 'text' ? message.content[0].text : '';
+    const editedCode =  message.choices[0].message.content??'';
     // Remove code block markers and any non-code text
     return editedCode
         .split('\n')
