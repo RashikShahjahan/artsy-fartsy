@@ -29,8 +29,7 @@ async function generateArtCode(prompt: string, artType: string): Promise<string>
         model: "deepseek-reasoner",
         max_tokens: 8000,
         messages: [
-            { role: "system", content: GUIDES[artType] },
-            { role: "user", content: `${prompt} Only respond with code as plain text without code block syntax around it` }
+            { role: "user", content: `${GUIDES[artType]} ${prompt} Only respond with code as plain text without code block syntax around it` }
         ],
     });
 
@@ -58,9 +57,7 @@ async function editArtCode(prompt: string, code: string, artType: string): Promi
         model: "deepseek-reasoner",
         max_tokens: 8000,
         messages: [
-            { role: "user", content: EDIT_GUIDES[artType] },
-            { role: "user", content: `${prompt} Only respond with code as plain text without code block syntax around it` },
-            { role: "user", content: code }
+            { role: "user", content: `${EDIT_GUIDES[artType]} ${prompt} Only respond with code as plain text without code block syntax around it ${code}` },
         ],
     });
 
