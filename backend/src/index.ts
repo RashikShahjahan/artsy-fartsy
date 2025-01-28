@@ -29,8 +29,8 @@ app.post('/generate_code', async (req, res) => {
     const generatedCode = await generateArtCode(userPrompt, artType);
     res.status(200).json({ code: generatedCode });
   } catch (error) {
-    res.status(400).json({ 
-      error: error instanceof Error ? error.message : 'Invalid request'
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Failed to generate code'
     });
   }
 });
@@ -41,8 +41,8 @@ app.post('/edit_code', async (req, res) => {
     const editedCode = await editArtCode(prompt, code, artType);
     res.status(200).json({ code: editedCode });
   } catch (error) {
-    res.status(400).json({ 
-      error: error instanceof Error ? error.message : 'Invalid request'
+    res.status(500).json({ 
+      error: error instanceof Error ? error.message : 'Failed to generate code'
     });
   }
 });
