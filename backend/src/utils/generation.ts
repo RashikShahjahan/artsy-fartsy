@@ -29,13 +29,15 @@ async function generateArtCode(prompt: string, artType: string): Promise<string>
         model: "deepseek-reasoner",
         max_tokens: 8000,
         messages: [
-            { role: "user", content: GUIDES[artType] },
+            { role: "system", content: GUIDES[artType] },
             { role: "user", content: `${prompt} Only respond with code as plain text without code block syntax around it` }
         ],
     });
 
     // Extract text from the first content block
     const code = message.choices[0].message.content??'';
+
+
     // Remove code block markers and any non-code text
     return code
         .split('\n')
