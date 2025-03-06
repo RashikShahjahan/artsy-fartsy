@@ -1,12 +1,13 @@
 import { ARTCANVAS_EDIT_GUIDE, ARTCANVAS_GUIDE } from './prompts/drawing';
 import { MUSIC_GUIDE } from './prompts/music';
+import Anthropic from '@anthropic-ai/sdk';
 
-import OpenAI from "openai";
-
-const client = new OpenAI({
-        baseURL: 'https://api.deepseek.com',
-        apiKey: process.env.DEEPSEEK_API_KEY
+const anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
 });
+
+
+
 
 const GUIDES = {
     drawing: ARTCANVAS_GUIDE,
@@ -25,17 +26,22 @@ async function generateArtCode(prompt: string, artType: string): Promise<string>
         throw new Error(`Unsupported art type: ${artType}`);
     }
 
-    const message = await client.chat.completions.create({
-        model: "deepseek-reasoner",
+    const message = await anthropic.messages.create({
+        model: "claude-3-7-sonnet",
         max_tokens: 8000,
         messages: [
             { role: "user", content: `${GUIDES[artType]} ${prompt} Only respond with code as plain text without code block syntax around it` }
         ],
     });
 
-    // Extract text from the first content block
-    const code = message.choices[0].message.content??'';
-
+    // Extract text from content blocks
+    let code = '';
+    for (const block of message.content) {
+        if (block.type === 'text') {
+            code = block.text;
+            break;
+        }
+    }
 
     // Remove code block markers and any non-code text
     return code
@@ -53,8 +59,8 @@ async function editArtCode(prompt: string, code: string, artType: string): Promi
         throw new Error(`Unsupported art type: ${artType}`);
     }
 
-    const message = await client.chat.completions.create({
-        model: "deepseek-reasoner",
+    const message = await anthropic.messages.create({
+        model: "claude-3-7-sonnet",
         max_tokens: 8000,
         messages: [
             { role: "user", content: `${EDIT_GUIDES[artType]} ${prompt} Only respond with code as plain text without code block syntax around it ${code}` },
@@ -62,8 +68,15 @@ async function editArtCode(prompt: string, code: string, artType: string): Promi
     });
 
 
-    // Extract text from the first content block
-    const editedCode =  message.choices[0].message.content??'';
+    // Extract text from content blocks
+    let editedCode = '';
+    for (const block of message.content) {
+        if (block.type === 'text') {
+            editedCode = block.text;
+            break;
+        }
+    }
+    
     // Remove code block markers and any non-code text
     return editedCode
         .split('\n')
