@@ -27,7 +27,7 @@ async function generateArtCode(prompt: string, artType: string): Promise<string>
     }
 
     const message = await anthropic.messages.create({
-        model: "claude-3-7-sonnet",
+        model: "claude-3-7-sonnet-20250219",
         max_tokens: 8000,
         messages: [
             { role: "user", content: `${GUIDES[artType]} ${prompt} Only respond with code as plain text without code block syntax around it` }
