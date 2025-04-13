@@ -18,3 +18,8 @@ primary_region = "yyz"
 [[statics]]
   guest_path = "/app/frontend/dist"
   url_prefix = "/"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024

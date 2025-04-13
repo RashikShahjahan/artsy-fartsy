@@ -18,21 +18,44 @@ export const pool = new Pool(
       }
 );
 
+// Flag to track if vector extension is available
+export let vectorExtensionAvailable = false;
 
 export async function initializeDatabase() {
   const client = await pool.connect();
   try {
-    await client.query("CREATE EXTENSION IF NOT EXISTS vector");
+    try {
+      await client.query("CREATE EXTENSION IF NOT EXISTS vector");
+      vectorExtensionAvailable = true;
+      console.log("Vector extension is available and enabled");
+    } catch (error) {
+      console.error("Vector extension is not available:", error.message);
+      console.log("Application will run with limited functionality - similarity search will be disabled");
+      vectorExtensionAvailable = false;
+    }
 
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS documents (
-        id SERIAL PRIMARY KEY,
-        prompt TEXT NOT NULL,
-        code TEXT NOT NULL,
-        art_type TEXT NOT NULL,
-        embedding vector(512)
-      )
-    `);
+    // Create tables regardless of vector extension status
+    if (vectorExtensionAvailable) {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS documents (
+          id SERIAL PRIMARY KEY,
+          prompt TEXT NOT NULL,
+          code TEXT NOT NULL,
+          art_type TEXT NOT NULL,
+          embedding vector(512)
+        )
+      `);
+    } else {
+      // Create table without vector column if extension isn't available
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS documents (
+          id SERIAL PRIMARY KEY,
+          prompt TEXT NOT NULL,
+          code TEXT NOT NULL,
+          art_type TEXT NOT NULL
+        )
+      `);
+    }
 
     await client.query(`
       CREATE TABLE IF NOT EXISTS errors (
