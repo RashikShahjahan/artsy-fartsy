@@ -60,7 +60,7 @@ async function editArtCode(prompt: string, code: string, artType: string): Promi
     }
 
     const message = await anthropic.messages.create({
-        model: "claude-3-7-sonnet",
+        model: "claude-3-7-sonnet-20250219",
         max_tokens: 8000,
         messages: [
             { role: "user", content: `${EDIT_GUIDES[artType]} ${prompt} Only respond with code as plain text without code block syntax around it ${code}` },
