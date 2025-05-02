@@ -28,7 +28,7 @@ export const AnalyticsProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   
   const trackEvent = (eventType: string, properties: Partial<EventBase> = {}) => {
     const event: EventBase = {
-      service: 'web-client',
+      service: 'artsy',
       event: eventType,
       path: location.pathname,
       referrer: document.referrer,
