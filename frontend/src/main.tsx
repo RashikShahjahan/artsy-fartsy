@@ -5,16 +5,19 @@ import './index.css'
 import App from './App'
 import DrawingPage from './pages/DrawingPage'
 import SearchPage from './pages/SearchPage'
+import { AnalyticsProvider } from './components/AnalyticsProvider'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<App />}>
-          <Route index element={<DrawingPage />} />
-          <Route path="search" element={<SearchPage />} />
-        </Route>
-      </Routes>
+      <AnalyticsProvider>
+        <Routes>
+          <Route path="/" element={<App />}>
+            <Route index element={<DrawingPage />} />
+            <Route path="search" element={<SearchPage />} />
+          </Route>
+        </Routes>
+      </AnalyticsProvider>
     </BrowserRouter>
   </StrictMode>
 )
