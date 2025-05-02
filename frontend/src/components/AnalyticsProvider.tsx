@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect } from 'react';
 import axios from 'axios';
 import { useLocation } from 'react-router-dom';
 
-const ANALYTICS_ENDPOINT = 'http://analytics.rashik.sh/api';
+const ANALYTICS_ENDPOINT = 'https://analytics.rashik.sh/api';
 
 type Properties = Record<string, any>;
 
