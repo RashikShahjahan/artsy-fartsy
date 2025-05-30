@@ -4,6 +4,7 @@ import { findSimilarArt } from '../api';
 import { PromptInput } from '../components/PromptInput';
 import { SimilarDrawings } from '../components/SimilarDrawings';
 import { Alert } from '../components/Alert';
+import { useAnalytics } from 'rashik-analytics-provider';
 
 function SearchPage() {
   const [prompt, setPrompt] = useState('');
@@ -12,17 +13,34 @@ function SearchPage() {
   const [alert, setAlert] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   
   const navigate = useNavigate();
+  const { trackEvent } = useAnalytics();
 
   const findSimilar = async () => {
     setIsFinding(true);
+    trackEvent('search_drawings', { search_prompt: prompt });
+    
     try {
       const drawings = await findSimilarArt(prompt,'drawing');
       setSimilarDrawings(drawings);
+      trackEvent('search_success', { 
+        search_prompt: prompt,
+        results_count: drawings.length
+      });
     } catch (error) {
+      trackEvent('search_error', {
+        search_prompt: prompt,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      
       setAlert({ message: 'Error finding similar drawings', type: 'error' });
     } finally {
       setIsFinding(false);
     }
+  };
+
+  const navigateToDrawing = () => {
+    trackEvent('navigate_to_drawing');
+    navigate('/');
   };
 
   return (
@@ -31,7 +49,10 @@ function SearchPage() {
         <Alert
           message={alert.message}
           type={alert.type}
-          onClose={() => setAlert(null)}
+          onClose={() => {
+            trackEvent('close_alert', { alert_type: alert.type });
+            setAlert(null);
+          }}
         />
       )}
       
@@ -53,7 +74,7 @@ function SearchPage() {
       />
 
       <button 
-        onClick={() => navigate('/')}
+        onClick={navigateToDrawing}
         className="btn btn-secondary w-full max-w-xs mx-auto"
       >
         Back to Drawing

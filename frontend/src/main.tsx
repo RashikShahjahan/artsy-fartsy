@@ -5,12 +5,15 @@ import './index.css'
 import App from './App'
 import DrawingPage from './pages/DrawingPage'
 import SearchPage from './pages/SearchPage'
-import { AnalyticsProvider } from './components/AnalyticsProvider'
+import { AnalyticsProvider } from 'rashik-analytics-provider';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <AnalyticsProvider>
+      <AnalyticsProvider 
+        serviceName="artsy"
+        endpoint="https://analytics.rashik.sh/api"
+      >
         <Routes>
           <Route path="/" element={<App />}>
             <Route index element={<DrawingPage />} />

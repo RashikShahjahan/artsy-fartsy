@@ -1,0 +1,23 @@
+# robots.txt for artsy.rashik.sh 
+
+# Allow all web crawlers
+User-agent: *
+Allow: /
+
+# Crawl delay (optional - helps prevent server overload)
+Crawl-delay: 1
+
+# Sitemap location (update this URL when you add a sitemap)
+Sitemap: https://artsy.rashik.sh/sitemap.xml
+
+
+
+# Allow common assets
+Allow: /*.css$
+Allow: /*.js$
+Allow: /*.png$
+Allow: /*.jpg$
+Allow: /*.jpeg$
+Allow: /*.gif$
+Allow: /*.svg$
+Allow: /*.pdf$ 

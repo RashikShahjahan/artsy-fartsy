@@ -1,1 +1,1 @@
-{ "dependencies": { "dotenv": "^16.4.7", "openai": "^4.80.1" } }
+{ "dependencies": { "dotenv": "^16.4.7", "openai": "^4.80.1", "rashik-analytics-provider": "^1.2.0" }, "devDependencies": { "@types/react": "^19.1.2", "@types/react-dom": "^19.1.3" } }
