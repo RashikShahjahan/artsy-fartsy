@@ -46,6 +46,7 @@ export interface SandboxPaths {
   hostOutputDirectoryPath: string;
   hostOutputFilePath: string;
   sandboxCodePath: string;
+  useUserNamespace: boolean;
 }
 
 export interface ArtExecution {
@@ -217,6 +218,7 @@ function getSandboxPaths(
     hostOutputDirectoryPath,
     hostOutputFilePath,
     sandboxCodePath: `${SANDBOX_CODE_PATH_PREFIX}/${path.basename(hostCodePath)}`,
+    useUserNamespace: process.env.SANDBOX_SETUID !== 'true',
   };
 }
 
@@ -228,13 +230,12 @@ export function buildSandboxInvocation(paths: SandboxPaths): SandboxInvocation {
   ].join(';');
 
   const bwrapArgs = [
-    '--unshare-user',
+    ...(paths.useUserNamespace ? ['--unshare-user', '--disable-userns'] : []),
     '--unshare-ipc',
     '--unshare-pid',
     '--unshare-net',
     '--unshare-uts',
     '--unshare-cgroup-try',
-    '--disable-userns',
     '--die-with-parent',
     '--new-session',
     '--clearenv',

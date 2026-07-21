@@ -81,6 +81,7 @@ describe('sandbox invocation', () => {
       hostOutputDirectoryPath: '/app/output',
       hostOutputFilePath: '/app/output/output.png',
       sandboxCodePath: '/program/code-00000000-0000-0000-0000-000000000000.py',
+      useUserNamespace: true,
     };
 
     const invocation = buildSandboxInvocation(paths);
@@ -92,6 +93,26 @@ describe('sandbox invocation', () => {
     expect(invocation.args).toContain('--as=268435456:268435456');
     expect(invocation.args).toContain('/usr/local/bin/artsy-sandbox-init');
     expect(invocation.args).not.toContain('--share-net');
+  });
+
+  test('uses Bubblewrap setuid mode without nested user namespaces', () => {
+    const paths: SandboxPaths = {
+      bwrapPath: '/usr/bin/bwrap',
+      prlimitPath: '/usr/bin/prlimit',
+      sandboxInitPath: '/usr/local/bin/artsy-sandbox-init',
+      hostPythonEnvironmentPath: '/app/venv',
+      hostArtCanvasPath: '/app/artcanvas.py',
+      hostCodePath: '/app/code.py',
+      hostOutputDirectoryPath: '/app/output',
+      hostOutputFilePath: '/app/output/output.png',
+      sandboxCodePath: '/program/code.py',
+      useUserNamespace: false,
+    };
+
+    const invocation = buildSandboxInvocation(paths);
+    expect(invocation.args).not.toContain('--unshare-user');
+    expect(invocation.args).not.toContain('--disable-userns');
+    expect(invocation.args).toContain('--unshare-net');
   });
 });
 

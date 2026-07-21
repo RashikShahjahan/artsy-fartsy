@@ -51,6 +51,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     util-linux \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
+    && chmod 4755 /usr/bin/bwrap \
     && /usr/bin/bwrap --version \
     && /usr/bin/prlimit --version
 
@@ -68,6 +69,7 @@ RUN groupadd --system --gid 10001 artsy \
 
 ENV NODE_ENV=production
 ENV PORT=8000
+ENV SANDBOX_SETUID=true
 
 EXPOSE 8000
 

@@ -116,7 +116,7 @@ docker run --rm -p 8000:8000 --security-opt seccomp=unconfined \
   artsy-fartsy
 ```
 
-The container host must permit unprivileged user namespaces. Docker's default outer seccomp profile commonly blocks Bubblewrap setup, so the example disables that outer profile; untrusted Python still runs under the inner seccomp filter and unprivileged Bubblewrap namespaces. Never run this image with `--privileged`. The backend performs a real sandboxed drawing during startup and fails closed if the host cannot provide the isolation boundary.
+The image uses Bubblewrap's setuid-helper mode because Fly and many Docker hosts disable unprivileged user namespaces. Only the audited Bubblewrap setup helper gains privileges; the web process and sandboxed Python run unprivileged, and Python remains constrained by the inner seccomp filter. Docker's default outer seccomp profile commonly blocks namespace setup, so the example disables that outer profile. Never run this image with `--privileged`. The backend performs a real sandboxed drawing during startup and fails closed if the host cannot provide the isolation boundary.
 
 Set `TRUST_PROXY_HOPS=1` only when exactly one trusted reverse proxy sits in front of the backend, as in the included Fly configuration. Direct Docker deployments leave proxy trust disabled so clients cannot spoof rate-limit identities with `X-Forwarded-For`.
 
