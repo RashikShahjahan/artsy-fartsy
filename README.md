@@ -99,6 +99,8 @@ DATABASE_SSL=true
 DATABASE_CA_CERT="-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----"
 ```
 
+The included Fly configuration disables PostgreSQL TLS only for its private `flycast` database endpoint; that traffic stays inside Fly's encrypted WireGuard 6PN. External database endpoints should keep verified TLS enabled.
+
 ## Docker Deployment
 
 The production image installs Bubblewrap, runs the application as an unprivileged user, and applies CPU, memory, process, file-size, and wall-clock limits to every drawing execution.
