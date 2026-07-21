@@ -1,15 +1,29 @@
-# backend
+# Backend
 
-To install dependencies:
+Install dependencies:
 
 ```bash
 bun install
 ```
 
-To run:
+Create the drawing environment from the repository root:
 
 ```bash
-bun run index.ts
+python3 -m venv backend/art_libraries/venv
+backend/art_libraries/venv/bin/pip install pycairo
 ```
 
-This project was created using `bun init` in bun v1.1.29. [Bun](https://bun.sh) is a fast all-in-one JavaScript runtime.
+Create `backend/.env` as described in the root README, then run:
+
+```bash
+bun run src/index.ts
+```
+
+Python execution requires Bubblewrap, `prlimit`, and the seccomp launcher on Linux. Build the launcher from the repository root:
+
+```bash
+cc -O2 -Wall -Wextra -Werror backend/sandbox/sandbox-init.c -lseccomp -o /tmp/artsy-sandbox-init
+sudo install -m 0755 /tmp/artsy-sandbox-init /usr/local/bin/artsy-sandbox-init
+```
+
+Execution fails closed if any sandbox component is unavailable.

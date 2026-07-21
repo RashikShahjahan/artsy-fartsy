@@ -1,92 +1,71 @@
+import { OpenRouter } from '@openrouter/sdk';
 import { ARTCANVAS_EDIT_GUIDE, ARTCANVAS_GUIDE } from './prompts/drawing';
-import { MUSIC_GUIDE } from './prompts/music';
-import Anthropic from '@anthropic-ai/sdk';
 
-const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-});
+const MODEL = 'openrouter/free';
 
+let openrouter: OpenRouter | undefined;
 
+function getOpenRouter(): OpenRouter {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error('OPENROUTER_API_KEY is required');
+  }
 
+  openrouter ??= new OpenRouter({
+    apiKey,
+    httpReferer: process.env.APP_URL,
+    appTitle: 'Artsy Fartsy',
+    timeoutMs: 60_000,
+    retryConfig: { strategy: 'none' },
+  });
 
-const GUIDES = {
-    drawing: ARTCANVAS_GUIDE,
-    music: MUSIC_GUIDE
+  return openrouter;
 }
 
-const EDIT_GUIDES = {
-    drawing: ARTCANVAS_EDIT_GUIDE
+function cleanGeneratedCode(code: string): string {
+  return code
+    .split('\n')
+    .filter((line) => !line.trimStart().startsWith('```') && line.trim())
+    .join('\n')
+    .trim();
 }
-
-
-
 
 async function generateArtCode(prompt: string, artType: string): Promise<string> {
-    if (!GUIDES[artType]) {
-        throw new Error(`Unsupported art type: ${artType}`);
-    }
+  if (artType !== 'drawing') {
+    throw new Error(`Unsupported art type: ${artType}`);
+  }
 
-    const message = await anthropic.messages.create({
-        model: "claude-3-7-sonnet-20250219",
-        max_tokens: 8000,
-        messages: [
-            { role: "user", content: `${GUIDES[artType]} ${prompt} Only respond with code as plain text without code block syntax around it` }
-        ],
-    });
+  const result = getOpenRouter().callModel({
+    model: MODEL,
+    maxOutputTokens: 8000,
+    input: `${ARTCANVAS_GUIDE} ${prompt} Only respond with code as plain text without code block syntax around it`,
+  });
 
-    // Extract text from content blocks
-    let code = '';
-    for (const block of message.content) {
-        if (block.type === 'text') {
-            code = block.text;
-            break;
-        }
-    }
+  const code = cleanGeneratedCode(await result.getText());
+  if (!code) {
+    throw new Error('OpenRouter returned an empty response');
+  }
 
-    // Remove code block markers and any non-code text
-    return code
-        .split('\n')
-        .filter((line: string) => 
-            !line.startsWith('```') && // Remove code block markers
-            line.trim()                // Remove empty lines
-        )
-        .join('\n')
-        .trim();
+  return code;
 }
 
 async function editArtCode(prompt: string, code: string, artType: string): Promise<string> {
-    if (!EDIT_GUIDES[artType]) {
-        throw new Error(`Unsupported art type: ${artType}`);
-    }
+  if (artType !== 'drawing') {
+    throw new Error(`Unsupported art type: ${artType}`);
+  }
 
-    const message = await anthropic.messages.create({
-        model: "claude-3-7-sonnet-20250219",
-        max_tokens: 8000,
-        messages: [
-            { role: "user", content: `${EDIT_GUIDES[artType]} ${prompt} Only respond with code as plain text without code block syntax around it ${code}` },
-        ],
-    });
+  const result = getOpenRouter().callModel({
+    model: MODEL,
+    maxOutputTokens: 8000,
+    input: `${ARTCANVAS_EDIT_GUIDE} ${prompt} Only respond with code as plain text without code block syntax around it ${code}`,
+  });
 
+  const editedCode = cleanGeneratedCode(await result.getText());
+  if (!editedCode) {
+    throw new Error('OpenRouter returned an empty response');
+  }
 
-    // Extract text from content blocks
-    let editedCode = '';
-    for (const block of message.content) {
-        if (block.type === 'text') {
-            editedCode = block.text;
-            break;
-        }
-    }
-    
-    // Remove code block markers and any non-code text
-    return editedCode
-        .split('\n')
-        .filter((line: string) => 
-            !line.startsWith('```') && // Remove code block markers
-            line.trim()                // Remove empty lines
-        )
-        .join('\n')
-        .trim();
+  return editedCode;
 }
 
-
-export { generateArtCode, editArtCode };
+export { editArtCode, generateArtCode };

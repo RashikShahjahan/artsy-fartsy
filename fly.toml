@@ -12,12 +12,9 @@ primary_region = "yyz"
   min_machines_running = 0
   processes = ["app"]
 
-[[http_service.domains]]
-  domain = "artsy.rashik.sh"
-  type = "primary"
-
 [env]
   PORT = "8000"
+  TRUST_PROXY_HOPS = "1"
 
 [[statics]]
   guest_path = "/app/frontend/dist"

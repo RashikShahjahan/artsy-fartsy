@@ -12,22 +12,39 @@ import {
 
 const BASE_URL = import.meta.env.PROD ? '' : 'http://localhost:8000';
 
+export interface RunArtResult {
+  imageUrl: string;
+  executionToken: string;
+}
+
 export async function retrieveArtCode(userPrompt: string, artType: string): Promise<string> {
   const validatedData = GenerateCodeSchema.parse({ userPrompt, artType });
   const response = await axios.post(`${BASE_URL}/generate_code`, validatedData);
   return GenerateCodeResponseSchema.parse(response.data).code;
 }
 
-export async function runArtCode(code: string, artType: string, ranByAI: boolean): Promise<string> {
-  const validatedData = RunCodeSchema.parse({ code, artType, ranByAI });
+export async function runArtCode(code: string, artType: string): Promise<RunArtResult> {
+  const validatedData = RunCodeSchema.parse({ code, artType });
   const response = await axios.post(`${BASE_URL}/run_code`, validatedData, { 
     responseType: 'blob'
   });
-  return URL.createObjectURL(response.data);
+  const executionToken = response.headers['x-execution-token'];
+  if (typeof executionToken !== 'string' || !executionToken) {
+    throw new Error('Server did not confirm the drawing execution');
+  }
+  return {
+    imageUrl: URL.createObjectURL(response.data),
+    executionToken,
+  };
 }
 
-export async function storeCode(prompt: string, code: string, artType: string): Promise<boolean> {
-  const validatedData = StoreCodeSchema.parse({ prompt, code, artType });
+export async function storeCode(
+  prompt: string,
+  code: string,
+  artType: string,
+  executionToken: string,
+): Promise<boolean> {
+  const validatedData = StoreCodeSchema.parse({ prompt, code, artType, executionToken });
   const response = await axios.post(`${BASE_URL}/store_code`, validatedData);
   return response.status === 200;
 }

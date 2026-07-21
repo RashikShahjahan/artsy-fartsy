@@ -10,9 +10,9 @@ CREATE TABLE IF NOT EXISTS documents (
   embedding vector(512)
 );
 
--- Create the errors table
-CREATE TABLE IF NOT EXISTS errors (
-  id SERIAL PRIMARY KEY,
-  code TEXT NOT NULL,
-  error TEXT NOT NULL
-); 
+-- Persist vectors that still need to be replicated to Upstash.
+CREATE TABLE IF NOT EXISTS vector_outbox (
+  document_id INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+  embedding JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

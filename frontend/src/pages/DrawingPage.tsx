@@ -1,17 +1,20 @@
-import { useState} from 'react';
-import { editArtCode, retrieveArtCode, runArtCode, storeCode } from '../api';
-import { Header } from '../components/Header';
-import { PromptInput } from '../components/PromptInput';
-import { DrawingCanvas } from '../components/DrawingCanvas';
-import { CodeEditor } from '../components/CodeEditor';
-import { DocumentationModal } from '../components/DocumentationModal';
-import { Alert } from '../components/Alert';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAnalytics } from 'rashik-analytics-provider';
+import { editArtCode, retrieveArtCode, runArtCode, storeCode, type RunArtResult } from '../api';
+import { Alert } from '../components/Alert';
+import { CodeEditor } from '../components/CodeEditor';
+import { DocumentationModal } from '../components/DocumentationModal';
+import { DrawingCanvas } from '../components/DrawingCanvas';
+import { Header } from '../components/Header';
+import { PromptInput } from '../components/PromptInput';
+
 function DrawingPage() {
   const [code, setCode] = useState('');
   const [image, setImage] = useState('');
-  const [currentPrompt, setCurrentPrompt] = useState(''); 
+  const [renderedCode, setRenderedCode] = useState('');
+  const [executionToken, setExecutionToken] = useState('');
+  const [currentPrompt, setCurrentPrompt] = useState('');
   const [editMode, setEditMode] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
@@ -20,184 +23,194 @@ function DrawingPage() {
   const [showDocs, setShowDocs] = useState(false);
   const [initialPrompt, setInitialPrompt] = useState('');
   const [alert, setAlert] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const operationId = useRef(0);
   const navigate = useNavigate();
   const { trackEvent } = useAnalytics();
 
+  useEffect(() => {
+    return () => {
+      operationId.current += 1;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (image) URL.revokeObjectURL(image);
+    };
+  }, [image]);
+
+  const clearRenderedResult = () => {
+    setImage('');
+    setRenderedCode('');
+    setExecutionToken('');
+  };
+
+  const acceptRenderedResult = (result: RunArtResult, executedCode: string, requestId: number): boolean => {
+    if (operationId.current !== requestId) {
+      URL.revokeObjectURL(result.imageUrl);
+      return false;
+    }
+    setImage(result.imageUrl);
+    setRenderedCode(executedCode);
+    setExecutionToken(result.executionToken);
+    return true;
+  };
+
   const generateCode = async () => {
+    const requestId = ++operationId.current;
+    const prompt = currentPrompt.trim();
+    setIsGenerating(true);
+    trackEvent('generate_code', { prompt });
+
     try {
-      setIsGenerating(true);
-      setInitialPrompt(currentPrompt);
-      trackEvent('generate_code', { prompt: currentPrompt });
-      const newCode = await retrieveArtCode(currentPrompt, 'drawing');  
+      const newCode = await retrieveArtCode(prompt, 'drawing');
+      if (operationId.current !== requestId) return;
+
       setCode(newCode);
-      setImage('');
+      setInitialPrompt(prompt);
       setEditMode(true);
-      
+      clearRenderedResult();
+
       try {
         setIsRunning(true);
-        trackEvent('auto_run_code', { prompt: currentPrompt });
-        const image = await runArtCode(newCode, 'drawing', true);
-        setImage(image);
-        trackEvent('code_execution_success', { prompt: currentPrompt });
-      } catch (error: any) {
-        const message = error.type === 'malicious_code'
-          ? 'This code contains potentially unsafe operations and cannot be executed'
-          : 'Failed to run generated code: ' + (error instanceof Error ? error.message : 'Unknown error');
-        
-        trackEvent('code_execution_error', { 
-          prompt: currentPrompt,
-          error: message,
-          error_type: error.type || 'unknown'
-        });
-        
-        setAlert({
-          message,
-          type: 'error'
-        });
+        trackEvent('auto_run_code', { prompt });
+        const result = await runArtCode(newCode, 'drawing');
+        if (acceptRenderedResult(result, newCode, requestId)) {
+          trackEvent('code_execution_success', { prompt });
+        }
+      } catch (error) {
+        if (operationId.current !== requestId) return;
+        const message = `Failed to run generated code: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        trackEvent('code_execution_error', { prompt, error: message });
+        setAlert({ message, type: 'error' });
       } finally {
-        setIsRunning(false);
+        if (operationId.current === requestId) setIsRunning(false);
       }
-    } catch (error: any) {
-      trackEvent('code_generation_error', { 
-        prompt: currentPrompt,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-      
-      setAlert({
-        message: 'Failed to generate code: ' + (error instanceof Error ? error.message : 'Unknown error'),
-        type: 'error'
-      });
+    } catch (error) {
+      if (operationId.current !== requestId) return;
+      const message = `Failed to generate code: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      trackEvent('code_generation_error', { prompt, error: message });
+      setAlert({ message, type: 'error' });
     } finally {
-      setIsGenerating(false);
+      if (operationId.current === requestId) setIsGenerating(false);
     }
   };
 
   const runCode = async () => {
+    const requestId = ++operationId.current;
+    const codeToRun = code;
+    clearRenderedResult();
+    setIsRunning(true);
+    trackEvent('manual_run_code', { code_length: codeToRun.length });
+
     try {
-      setIsRunning(true);
-      trackEvent('manual_run_code', { code_length: code.length });
-      const image = await runArtCode(code, 'drawing', false);  
-      setImage(image);
-      trackEvent('manual_code_execution_success', { code_length: code.length });
-    } catch (error: any) {
-      const message =  'Failed to run code: ' + (error instanceof Error ? error.message : 'Unknown error');
-      
-      trackEvent('manual_code_execution_error', { 
-        error: message,
-        code_length: code.length
-      });
-      
-      setAlert({
-        message,
-        type: 'error'
-      });
+      const result = await runArtCode(codeToRun, 'drawing');
+      if (acceptRenderedResult(result, codeToRun, requestId)) {
+        trackEvent('manual_code_execution_success', { code_length: codeToRun.length });
+      }
+    } catch (error) {
+      if (operationId.current !== requestId) return;
+      const message = `Failed to run code: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      trackEvent('manual_code_execution_error', { error: message, code_length: codeToRun.length });
+      setAlert({ message, type: 'error' });
     } finally {
-      setIsRunning(false);
+      if (operationId.current === requestId) setIsRunning(false);
     }
   };
 
   const saveDrawing = async () => {
+    if (!executionToken || !renderedCode || renderedCode !== code) {
+      setAlert({ message: 'Run the current code successfully before saving', type: 'error' });
+      return;
+    }
+
+    const codeToSave = renderedCode;
+    const tokenToSave = executionToken;
+    const promptToSave = initialPrompt;
+    setIsSaving(true);
+    trackEvent('save_drawing', { prompt: promptToSave });
+
     try {
-      setIsSaving(true);
-      trackEvent('save_drawing', { prompt: initialPrompt });
-      const success = await storeCode(initialPrompt, code, 'drawing');
-      if (success) {
-        trackEvent('save_drawing_success', { prompt: initialPrompt });
-        setAlert({
-          message: 'Drawing saved successfully',
-          type: 'success'
-        });
-      } else {
-        throw new Error('Server returned an unsuccessful status code');
-      }
+      const success = await storeCode(promptToSave, codeToSave, 'drawing', tokenToSave);
+      if (!success) throw new Error('Server returned an unsuccessful status code');
+      trackEvent('save_drawing_success', { prompt: promptToSave });
+      setAlert({ message: 'Drawing saved successfully', type: 'success' });
     } catch (error) {
-      trackEvent('save_drawing_error', { 
-        prompt: initialPrompt,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-      
-      setAlert({
-        message: 'Failed to save drawing: ' + (error instanceof Error ? error.message : 'Unknown error'),
-        type: 'error'
-      });
+      const message = `Failed to save drawing: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      trackEvent('save_drawing_error', { prompt: promptToSave, error: message });
+      setAlert({ message, type: 'error' });
     } finally {
       setIsSaving(false);
     }
   };
 
   const editCode = async () => {
+    const requestId = ++operationId.current;
+    const prompt = currentPrompt.trim();
+    const originalCode = code;
+    setIsEditing(true);
+    trackEvent('edit_code', { prompt, original_code_length: originalCode.length });
+
     try {
-      setIsEditing(true);
-      trackEvent('edit_code', { prompt: currentPrompt, original_code_length: code.length });
-      const newCode = await editArtCode(currentPrompt, code, 'drawing');  
+      const newCode = await editArtCode(prompt, originalCode, 'drawing');
+      if (operationId.current !== requestId) return;
+
       setCode(newCode);
-      setImage('');
-      
+      clearRenderedResult();
+
       try {
         setIsRunning(true);
-        trackEvent('run_edited_code', { prompt: currentPrompt });
-        const image = await runArtCode(newCode, 'drawing', true);
-        setImage(image);
-        trackEvent('edited_code_execution_success', { prompt: currentPrompt });
-      } catch (error: any) {
-        const message = error.type === 'malicious_code'
-          ? 'This code contains potentially unsafe operations and cannot be executed'
-          : 'Failed to run generated code: ' + (error instanceof Error ? error.message : 'Unknown error');
-        
-        trackEvent('edited_code_execution_error', { 
-          prompt: currentPrompt,
-          error: message,
-          error_type: error.type || 'unknown'
-        });
-        
-        setAlert({
-          message,
-          type: 'error'
-        });
+        trackEvent('run_edited_code', { prompt });
+        const result = await runArtCode(newCode, 'drawing');
+        if (acceptRenderedResult(result, newCode, requestId)) {
+          trackEvent('edited_code_execution_success', { prompt });
+        }
+      } catch (error) {
+        if (operationId.current !== requestId) return;
+        const message = `Failed to run edited code: ${error instanceof Error ? error.message : 'Unknown error'}`;
+        trackEvent('edited_code_execution_error', { prompt, error: message });
+        setAlert({ message, type: 'error' });
       } finally {
-        setIsRunning(false);
+        if (operationId.current === requestId) setIsRunning(false);
       }
-    } catch (error: any) {
-      trackEvent('code_edit_error', { 
-        prompt: currentPrompt,
-        error: error instanceof Error ? error.message : 'Unknown error'
-      });
-      
-      setAlert({
-        message: 'Failed to generate code: ' + (error instanceof Error ? error.message : 'Unknown error'),
-        type: 'error'
-      });
+    } catch (error) {
+      if (operationId.current !== requestId) return;
+      const message = `Failed to edit code: ${error instanceof Error ? error.message : 'Unknown error'}`;
+      trackEvent('code_edit_error', { prompt, error: message });
+      setAlert({ message, type: 'error' });
     } finally {
-      setIsEditing(false);
+      if (operationId.current === requestId) setIsEditing(false);
     }
-  }
-
-  const navigateToSearch = () => {
-    trackEvent('navigate_to_search');
-    navigate('/search');
   };
 
   const handleCodeChange = (newCode: string) => {
     if (code && newCode !== code) {
-      trackEvent('manual_code_edit', { 
-        changed_length: Math.abs(newCode.length - code.length)
-      });
+      trackEvent('manual_code_edit', { changed_length: Math.abs(newCode.length - code.length) });
     }
+    operationId.current += 1;
     setCode(newCode);
-  };
-
-  const handleToggleDocs = () => {
-    trackEvent('toggle_documentation', { showing: !showDocs });
-    setShowDocs(!showDocs);
+    clearRenderedResult();
   };
 
   const handleReset = () => {
+    operationId.current += 1;
     trackEvent('reset_drawing');
     setInitialPrompt('');
+    setCurrentPrompt('');
     setCode('');
-    setImage('');
+    clearRenderedResult();
     setEditMode(false);
   };
+
+  const promptIsLoading = isGenerating || isEditing || isRunning || isSaving;
+  const canSave = Boolean(
+    image
+    && executionToken
+    && renderedCode
+    && renderedCode === code
+    && initialPrompt.trim()
+    && !promptIsLoading,
+  );
 
   return (
     <div className="flex flex-col gap-6 container mx-auto p-6">
@@ -211,69 +224,60 @@ function DrawingPage() {
           }}
         />
       )}
-      
+
       <Header drawMode={true} />
-      
-      <PromptInput 
+
+      <PromptInput
         prompt={currentPrompt}
         onPromptChange={setCurrentPrompt}
-        onSubmit={() => {
-          if (editMode) {
-            editCode();
-          } else {
-            generateCode();
-          }
-        }}
-        isLoading={isGenerating || isEditing}
-        placeholder={
-          editMode 
-            ? "Type your message..."
-            : "E.g., 'A sunset over mountains'"
-        }
-        helperText={
-          editMode
-            ? "Ask to make edits to your drawing"
-            : "Be specific with your description for better results"
-        }
-        submitButtonText={editMode ? "Edit" : "Generate Code"}
-        loadingText={editMode ? "Editing..." : "Generating..."}
+        onSubmit={editMode ? editCode : generateCode}
+        isLoading={promptIsLoading}
+        placeholder={editMode ? 'Type your message...' : "E.g., 'A sunset over mountains'"}
+        helperText={editMode ? 'Ask to make edits to your drawing' : 'Be specific with your description for better results'}
+        submitButtonText={editMode ? 'Edit' : 'Generate Code'}
+        loadingText={editMode ? 'Editing...' : 'Generating...'}
         showResetButton={editMode}
         onReset={handleReset}
         submitButtonClass={editMode ? 'btn-info' : 'btn-success'}
       />
 
       <div className="flex flex-col md:flex-row items-start justify-center gap-8">
-        <>
-            <CodeEditor 
-              code={code}
-              onCodeChange={handleCodeChange}
-              isRunning={isRunning}
-              onRun={runCode}
-              onToggleDocs={handleToggleDocs}
-            />
-            <DrawingCanvas 
-              image={image}
-              isRunning={isRunning}
-              isSaving={isSaving}
-              onSave={saveDrawing}
-            />
-            <DocumentationModal 
-              isOpen={showDocs}
-              onClose={() => {
-                trackEvent('close_documentation');
-                setShowDocs(false);
-              }}
-            />
-        </>
+        <CodeEditor
+          code={code}
+          onCodeChange={handleCodeChange}
+          isRunning={promptIsLoading}
+          onRun={runCode}
+          onToggleDocs={() => {
+            trackEvent('toggle_documentation', { showing: !showDocs });
+            setShowDocs(!showDocs);
+          }}
+        />
+        <DrawingCanvas
+          image={image}
+          isRunning={isRunning}
+          isSaving={isSaving}
+          canSave={canSave}
+          onSave={saveDrawing}
+        />
+        <DocumentationModal
+          isOpen={showDocs}
+          onClose={() => {
+            trackEvent('close_documentation');
+            setShowDocs(false);
+          }}
+        />
       </div>
 
-      <button   
-        onClick={navigateToSearch}
+      <button
+        onClick={() => {
+          trackEvent('navigate_to_search');
+          navigate('/search');
+        }}
         className="btn btn-secondary w-full max-w-xs mx-auto"
+        disabled={promptIsLoading}
       >
         Search for similar drawings
       </button>
-      
     </div>
   );
 }

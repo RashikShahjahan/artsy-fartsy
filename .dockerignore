@@ -1,0 +1,15 @@
+.git
+.env*
+**/.env*
+**/*.local
+**/*.pem
+**/*.key
+**/*.crt
+**/node_modules
+**/dist
+**/venv
+**/output
+**/*.tsbuildinfo
+*.log
+**/test-results
+**/playwright-report

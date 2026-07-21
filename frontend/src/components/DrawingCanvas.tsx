@@ -5,10 +5,11 @@ interface DrawingCanvasProps {
   image: string;
   isRunning: boolean;
   isSaving: boolean;
+  canSave: boolean;
   onSave: () => void;
 }
 
-export const DrawingCanvas = ({ image, isRunning, isSaving, onSave }: DrawingCanvasProps) => {
+export const DrawingCanvas = ({ image, isRunning, isSaving, canSave, onSave }: DrawingCanvasProps) => {
   const { trackEvent } = useAnalytics();
 
   useEffect(() => {
@@ -35,17 +36,21 @@ export const DrawingCanvas = ({ image, isRunning, isSaving, onSave }: DrawingCan
               </div>
             </div>
           )}
-          <img 
-            src={image}
-            className="w-full h-full object-contain border rounded-lg border-base-300" 
-          />
+          {image && (
+            <img
+              src={image}
+              alt="Rendered drawing"
+              className="w-full h-full object-contain border rounded-lg border-base-300"
+            />
+          )}
         </div>
 
         <div className="card-actions justify-end">
           <button 
             onClick={onSave}
             className="btn btn-warning w-full"
-            disabled={isSaving}
+            disabled={isSaving || !canSave}
+            title={!canSave ? 'Run the current code successfully before saving' : ''}
           >
             {isSaving ? (
               <>
@@ -58,4 +63,4 @@ export const DrawingCanvas = ({ image, isRunning, isSaving, onSave }: DrawingCan
       </div>
     </div>
   );
-} 
+}
