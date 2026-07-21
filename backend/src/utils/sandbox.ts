@@ -272,12 +272,9 @@ export function buildSandboxInvocation(paths: SandboxPaths): SandboxInvocation {
     '/proc',
     '--dev',
     '/dev',
-    '--size',
-    '16777216',
-    '--perms',
-    '0700',
-    '--tmpfs',
-    '/tmp',
+    ...(paths.useUserNamespace
+      ? ['--size', '16777216', '--perms', '0700', '--tmpfs', '/tmp']
+      : ['--dir', '/tmp']),
     '--dir',
     '/runtime',
     '--ro-bind',

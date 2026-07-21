@@ -112,6 +112,7 @@ describe('sandbox invocation', () => {
     const invocation = buildSandboxInvocation(paths);
     expect(invocation.args).not.toContain('--unshare-user');
     expect(invocation.args).not.toContain('--disable-userns');
+    expect(invocation.args).not.toContain('--size');
     expect(invocation.args).toContain('--unshare-net');
   });
 });
