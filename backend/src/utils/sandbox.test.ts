@@ -91,6 +91,7 @@ describe('sandbox invocation', () => {
     expect(invocation.args).toContain('--clearenv');
     expect(invocation.args).toContain('--disable-userns');
     expect(invocation.args).toContain('--as=268435456:268435456');
+    expect(invocation.args).toContain('--nproc=64:64');
     expect(invocation.args).toContain('/usr/local/bin/artsy-sandbox-init');
     expect(invocation.args).not.toContain('--share-net');
   });

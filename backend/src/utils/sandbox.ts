@@ -331,7 +331,7 @@ export function buildSandboxInvocation(paths: SandboxPaths): SandboxInvocation {
       '--cpu=10:10',
       '--as=268435456:268435456',
       `--fsize=${MAX_OUTPUT_BYTES}:${MAX_OUTPUT_BYTES}`,
-      '--nproc=4:4',
+      '--nproc=64:64',
       '--nofile=64:64',
       '--core=0:0',
       '--',
