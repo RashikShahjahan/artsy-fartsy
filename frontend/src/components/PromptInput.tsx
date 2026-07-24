@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAnalytics } from 'rashik-analytics-provider';
+import { useAnalytics } from '../analytics';
 
 interface PromptInputProps {
   prompt: string;
@@ -103,4 +103,4 @@ export const PromptInput = ({
       </div>
     </div>
   );
-} 
+}

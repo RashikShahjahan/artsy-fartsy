@@ -1,4 +1,4 @@
-import { useAnalytics } from 'rashik-analytics-provider';
+import { useAnalytics } from '../analytics';
 
 interface CodeEditorProps {
   code: string;
@@ -59,4 +59,4 @@ export const CodeEditor = ({
       </div>
     </div>
   );
-} 
+}

@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useAnalytics } from 'rashik-analytics-provider';
+import { useAnalytics } from '../analytics';
 
 interface SimilarDrawingsProps {
   drawings: string[];
@@ -46,4 +46,4 @@ export const SimilarDrawings = ({ drawings, isFinding }: SimilarDrawingsProps) =
       ))}
     </div>
   );
-} 
+}

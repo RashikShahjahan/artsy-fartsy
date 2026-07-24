@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useAnalytics } from 'rashik-analytics-provider';
+import { useAnalytics } from '../analytics';
 
 interface DrawingCanvasProps {
   image: string;

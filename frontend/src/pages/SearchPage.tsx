@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAnalytics } from '../analytics';
 import { findSimilarArt } from '../api';
 import { PromptInput } from '../components/PromptInput';
 import { SimilarDrawings } from '../components/SimilarDrawings';
 import { Alert } from '../components/Alert';
-import { useAnalytics } from 'rashik-analytics-provider';
 
 function SearchPage() {
   const [prompt, setPrompt] = useState('');
@@ -83,4 +83,4 @@ function SearchPage() {
   );
 }
 
-export default SearchPage; 
+export default SearchPage;

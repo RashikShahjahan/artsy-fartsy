@@ -18,7 +18,10 @@ test('renders, locks controls, saves the rendered code, and invalidates edited c
   });
   let storedRequest: Record<string, unknown> | undefined;
 
-  await page.route('https://analytics.rashik.sh/**', (route) => route.fulfill({ status: 204 }));
+  await page.route('https://umami-production-e0ba.up.railway.app/script.js', (route) => route.fulfill({
+    contentType: 'application/javascript',
+    body: 'window.umami = { track() {} };',
+  }));
   await page.route('http://localhost:8000/**', async (route) => {
     const request = route.request();
     if (request.method() === 'OPTIONS') {

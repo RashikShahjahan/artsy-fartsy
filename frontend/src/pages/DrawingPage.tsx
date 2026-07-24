@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAnalytics } from 'rashik-analytics-provider';
+import { useAnalytics } from '../analytics';
 import { editArtCode, retrieveArtCode, runArtCode, storeCode, type RunArtResult } from '../api';
 import { Alert } from '../components/Alert';
 import { CodeEditor } from '../components/CodeEditor';
