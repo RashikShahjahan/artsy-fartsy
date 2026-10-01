@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from artsy_harness.harness import run_episode, validate_png
+from artsy_harness.harness import MAX_LOG_BYTES, _collect, run_episode, validate_png
 
 
 class EpisodeTests(unittest.TestCase):
@@ -68,6 +68,20 @@ class EpisodeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_png(buffer.getvalue())
 
+    def test_logs_are_drained_but_bounded(self):
+        stream = io.BytesIO(b"x" * (MAX_LOG_BYTES * 2))
+        output = bytearray()
+        _collect(stream, output)
+        self.assertEqual(output, b"x" * MAX_LOG_BYTES)
+        self.assertTrue(stream.closed)
+
+    def test_invalid_timeout_creates_no_episode(self):
+        with tempfile.TemporaryDirectory() as root:
+            for timeout in (0, -1, 31):
+                with self.assertRaises(ValueError):
+                    run_episode("", root, timeout=timeout)
+            self.assertEqual(list(Path(root).iterdir()), [])
+
 
 @unittest.skipUnless(os.environ.get("ARTSY_DOCKER_TESTS") == "1", "Opt-in real Docker tests")
 class DockerTests(unittest.TestCase):
@@ -77,7 +91,18 @@ class DockerTests(unittest.TestCase):
             directory, record = run_episode(fixture, root)
             self.assertEqual(record["status"], "success", record)
             self.assertEqual(record["image"]["width"], 256)
+            self.assertEqual(
+                record["image"]["sha256"],
+                "61279ba2d13404232b678b999ad6a3bb2ac136c6ae4b197b97b31be742a7ac73",
+            )
             self.assertTrue((directory / "image.png").exists())
+            command = record["renderer"]["command"]
+            limits = record["limits"]
+            for option, key in (("memory", "memory_bytes"), ("memory-swap", "memory_bytes"),
+                                ("cpus", "cpus"), ("pids-limit", "pids")):
+                self.assertIn(f"--{option}={limits[key]}", command)
+            for option, key in (("cpu", "cpu_seconds"), ("fsize", "file_bytes")):
+                self.assertIn(f"{option}={limits[key]}:{limits[key]}", command)
 
     def test_real_failure(self):
         with tempfile.TemporaryDirectory() as root:

@@ -17,8 +17,14 @@ from PIL import Image
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_LOG_BYTES = 64 * 1024
-LIMITS = {"wall_seconds": 30, "cpu_seconds": 10, "memory_bytes": 256 * 1024 * 1024,
-          "cpus": 1, "pids": 32, "file_bytes": MAX_IMAGE_BYTES}
+LIMITS = {
+    "wall_seconds": 30,
+    "cpu_seconds": 10,
+    "memory_bytes": 256 * 1024 * 1024,
+    "cpus": 1,
+    "pids": 32,
+    "file_bytes": MAX_IMAGE_BYTES,
+}
 
 
 def validate_png(data):
@@ -35,14 +41,18 @@ def validate_png(data):
             image.verify()
         with Image.open(io.BytesIO(data)) as image:
             image.load()
-    return {"width": width, "height": height,
-            "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)}
+    return {
+        "width": width,
+        "height": height,
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
+    }
 
 
 def _collect(stream, target):
     # Drain pipes continuously, but never keep unbounded attacker output.
     while chunk := stream.read(8192):
-        target.extend(chunk[:max(0, MAX_LOG_BYTES - len(target))])
+        target.extend(chunk[: max(0, MAX_LOG_BYTES - len(target))])
     stream.close()
 
 
@@ -55,14 +65,17 @@ def _render(program, image, timeout):
         source.write_text(program)
         source.chmod(0o444)
         output = root / "output"
-        output.mkdir(mode=0o777)
+        output.mkdir()
+        # mkdir's mode is masked by the host umask; the container UID needs access.
         output.chmod(0o777)
         command = [
             "docker", "run", "--name", name, "--pull=never", "--network=none",
             "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
-            "--user=65534:65534", "--pids-limit=32", "--memory=256m",
-            "--memory-swap=256m", "--cpus=1", "--ulimit", "cpu=10:10",
-            "--ulimit", f"fsize={MAX_IMAGE_BYTES}:{MAX_IMAGE_BYTES}",
+            "--user=65534:65534", f"--pids-limit={LIMITS['pids']}",
+            f"--memory={LIMITS['memory_bytes']}",
+            f"--memory-swap={LIMITS['memory_bytes']}", f"--cpus={LIMITS['cpus']}",
+            "--ulimit", f"cpu={LIMITS['cpu_seconds']}:{LIMITS['cpu_seconds']}",
+            "--ulimit", f"fsize={LIMITS['file_bytes']}:{LIMITS['file_bytes']}",
             "--ulimit", "nofile=64:64", "--log-driver=none",
             "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
             "--mount", f"type=bind,src={source},dst=/input/program.py,readonly",
@@ -73,8 +86,10 @@ def _render(program, image, timeout):
         try:
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = bytearray(), bytearray()
-            threads = [threading.Thread(target=_collect, args=(process.stdout, stdout)),
-                       threading.Thread(target=_collect, args=(process.stderr, stderr))]
+            threads = [
+                threading.Thread(target=_collect, args=(process.stdout, stdout)),
+                threading.Thread(target=_collect, args=(process.stderr, stderr)),
+            ]
             for thread in threads:
                 thread.start()
             try:
@@ -85,9 +100,11 @@ def _render(program, image, timeout):
                 process.wait()
             for thread in threads:
                 thread.join()
-            result.update(returncode=process.returncode,
-                          stdout=stdout.decode("utf-8", errors="replace"),
-                          stderr=stderr.decode("utf-8", errors="replace"))
+            result.update(
+                returncode=process.returncode,
+                stdout=stdout.decode("utf-8", errors="replace"),
+                stderr=stderr.decode("utf-8", errors="replace"),
+            )
         finally:
             # Killing the Docker client alone does not stop its container.
             subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=15)
@@ -102,7 +119,7 @@ def _render(program, image, timeout):
         return result, data
 
 
-def run_episode(program, episodes, *, image="artsy-renderer:0.1.0", timeout=30):
+def run_episode(program, episodes, *, image="artsy-renderer:0.1.0", timeout=LIMITS["wall_seconds"]):
     if not 0 < timeout <= LIMITS["wall_seconds"]:
         raise ValueError("Timeout must be between 0 and 30 seconds")
     episode_id = uuid.uuid4().hex
@@ -110,16 +127,24 @@ def run_episode(program, episodes, *, image="artsy-renderer:0.1.0", timeout=30):
     directory.mkdir(parents=True, exist_ok=False)
     with (directory / "program.py").open("x") as handle:
         handle.write(program)
-    record = {"schema_version": 1, "episode_id": episode_id,
-              "created_at": datetime.now(timezone.utc).isoformat(),
-              "source": "hand_written", "program": "program.py",
-              "program_sha256": hashlib.sha256(program.encode()).hexdigest(),
-              "renderer_image": image, "limits": {**LIMITS, "wall_seconds": timeout},
-              "status": "execution_failed", "renderer": None, "image": None}
+    record = {
+        "schema_version": 1,
+        "episode_id": episode_id,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "source": "hand_written",
+        "program": "program.py",
+        "program_sha256": hashlib.sha256(program.encode()).hexdigest(),
+        "renderer_image": image,
+        "limits": {**LIMITS, "wall_seconds": timeout},
+        "status": "execution_failed",
+        "renderer": None,
+        "image": None,
+    }
     try:
-        inspection = subprocess.run(["docker", "image", "inspect", image,
-                                     "--format", "{{.Id}}"],
-                                    capture_output=True, text=True, timeout=15, check=True)
+        inspection = subprocess.run(
+            ["docker", "image", "inspect", image, "--format", "{{.Id}}"],
+            capture_output=True, text=True, timeout=15, check=True,
+        )
         record["renderer_image_id"] = inspection.stdout.strip()
         result, data = _render(program, record["renderer_image_id"], timeout)
         record["renderer"] = result
