@@ -1,7 +1,8 @@
 # Artsy standalone Python harness
 
-First vertical slice: hand-written ArtCanvas program → Docker-restricted execution
-→ validated PNG → local append-only episode. No backend, UI, database, or model API.
+Drawing prompt → local Ollama → ArtCanvas program → Docker-restricted execution
+→ validated PNG → local append-only episode. Also accepts hand-written programs.
+No backend, UI, database, or hosted-provider fallback.
 The original ArtCanvas behavior lives in `src/artsy_harness/artcanvas.py`.
 
 ## Run
@@ -21,7 +22,59 @@ Use `--program path/to/drawing.py` for a different hand-written program,
 `--episodes path/to/episodes` for storage, or `--image` for the renderer image.
 Programs import `ArtCanvas` from `artcanvas` and save `/output/output.png`.
 
-Each invocation creates a new UUID directory with `program.py`, `record.json`,
+## Generate with Ollama
+
+Start a local server and install the model (macOS with Homebrew):
+
+```bash
+brew install ollama
+ollama serve
+# In another terminal:
+ollama pull qwen3.5:9b-q4_K_M
+```
+
+Then generate a drawing:
+
+```bash
+.venv/bin/artsy-harness --prompt "Draw a blue circle on a white background"
+```
+
+The model defaults to `qwen3.5:9b-q4_K_M` (4-bit Q4_K_M); `--model` overrides it.
+Thinking is explicitly enabled by default; `--think` enables it and `--no-think`
+disables it. This setting is saved in the episode's generation request along with
+the decoding options. The exact HTTP body retains any separate thinking field;
+only Ollama's `response` field is used verbatim as the program.
+`--ollama-url`
+defaults to `http://localhost:11434`. Decoding options are `--seed` (0),
+`--temperature` (0.2), `--top-p` (0.9), and `--num-predict` (8192).
+`--num-ctx` (16384) sets the loaded context size. Thinking and final code share
+the generation budget; context must accommodate both the prompt and generation.
+`--model-timeout` (600 seconds) bounds the HTTP call, not Docker rendering.
+These larger limits permit longer thinking, not guaranteed valid code, and may
+increase generation time and memory use. All sent settings are recorded.
+`--prompt` and `--program` are mutually exclusive. The CLI connects to an existing
+server; it does not start one or download models.
+
+Each generated episode records the versioned prompt, endpoint, requested model,
+returned model/digest when available, and every sent request parameter. It saves
+the exact HTTP body in `response.body`, decoded response text in `generated.txt`,
+and the same text verbatim in `program.py`. There is no fence removal, stripping,
+or repair. Empty output and Python syntax errors are recorded without rendering;
+syntax checking does not execute code on the host. Connection, HTTP/protocol,
+syntax, execution, and PNG-validation failures remain separate statuses.
+
+Model tags can move; Ollama may not return a digest. A seed does not guarantee
+bit-for-bit reproducibility across models, runtimes, or hardware.
+
+To run the opt-in live generation test (requires Ollama, model, and Docker):
+
+```bash
+ARTSY_OLLAMA_TESTS=1 .venv/bin/python -m unittest discover -s tests -v
+```
+
+This test keeps its episode under `episodes/`, including failures.
+
+Each invocation creates a new UUID directory with `record.json`, `program.py` when available,
 and, on success, `image.png`. Existing episodes are never reused or modified by
 the harness. Failures also get records and exit status 1. Records include exact
 source, source/image hashes, Docker image ID, runner limits, bounded stdout/stderr,
