@@ -24,9 +24,7 @@ class ModelTests(unittest.TestCase):
         model = Ollama()
         with tempfile.TemporaryDirectory() as root:
             with patch("artsy_harness.models.urlopen", return_value=FakeResponse(body)) as call, \
-                 patch("artsy_harness.harness.subprocess.run") as inspect, \
                  patch("artsy_harness.harness._render", return_value=render) as renderer:
-                inspect.return_value.stdout = "sha256:test\n"
                 directory, record = run_episode(None, root, model=model, prompt="A blue circle")
             self.assertEqual((directory / "response.body").read_bytes(), body)
             self.assertEqual(json.loads((directory / "record.json").read_bytes()), record)
@@ -137,7 +135,7 @@ class ModelTests(unittest.TestCase):
         self.assertEqual(model.timeout, 600)
 
 
-@unittest.skipUnless(os.environ.get("ARTSY_OLLAMA_TESTS") == "1", "Opt-in Ollama + Docker smoke test")
+@unittest.skipUnless(os.environ.get("ARTSY_OLLAMA_TESTS") == "1", "Opt-in Ollama smoke test")
 class LiveModelTests(unittest.TestCase):
     def test_live_generated_episode(self):
         directory, record = run_episode(

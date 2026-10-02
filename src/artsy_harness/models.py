@@ -1,4 +1,4 @@
-"""Model calls return evidence; only the Docker runner executes programs."""
+"""Model calls return evidence; the local Python runner executes programs."""
 
 import json
 from dataclasses import dataclass
@@ -6,17 +6,17 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 DEFAULT_MODEL = "qwen3.5:9b-q4_K_M"
-PROMPT_VERSION = "artcanvas-v1"
+PROMPT_VERSION = "artcanvas-v2"
 PROMPT_TEMPLATE = """Write a Python program that draws the requested image using ArtCanvas.
 Return only Python source, without Markdown fences or explanations.
-Import ArtCanvas from artcanvas. Use a 256 by 256 canvas and save /output/output.png.
+Import ArtCanvas from artcanvas. Use a 256 by 256 canvas and save output.png in the current directory.
 Available methods: set_color(r,g,b,a=1), set_line_width(width),
 fill_background(r,g,b), draw_circle(x,y,radius,fill=False),
 draw_rectangle(x,y,width,height,fill=False), draw_polygon(points,fill=False),
 move_brush_to(x,y), draw_line_to(x,y), draw_arc(xc,yc,radius,start_angle,end_angle),
 draw_text(x,y,text,font_size=16,font_family="Sans"), save().
 Coordinates are pixels, colors are between 0 and 1, angles are radians.
-Use `with ArtCanvas(256, 256, "/output/output.png") as canvas:` to save on exit.
+Use `with ArtCanvas(256, 256, "output.png") as canvas:` to save on exit.
 
 Drawing request:
 """

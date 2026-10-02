@@ -1,12 +1,14 @@
-"""Host-side episode storage, Docker execution, and untrusted PNG validation."""
+"""Episode storage, local Python execution, and PNG validation (not a sandbox)."""
 
 import ast
 import hashlib
 import io
 import json
 import os
+import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import threading
 import uuid
@@ -22,11 +24,6 @@ MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_LOG_BYTES = 64 * 1024
 LIMITS = {
     "wall_seconds": 30,
-    "cpu_seconds": 10,
-    "memory_bytes": 256 * 1024 * 1024,
-    "cpus": 1,
-    "pids": 32,
-    "file_bytes": MAX_IMAGE_BYTES,
 }
 
 
@@ -59,35 +56,20 @@ def _collect(stream, target):
     stream.close()
 
 
-def _render(program, image, timeout):
-    name = "artsy-" + uuid.uuid4().hex
+def _render(program, timeout):
     result = {"returncode": None, "stdout": "", "stderr": "", "timed_out": False}
     with tempfile.TemporaryDirectory(prefix="artsy-") as temporary:
         root = Path(temporary)
         source = root / "program.py"
         source.write_text(program)
-        source.chmod(0o444)
         output = root / "output"
         output.mkdir()
-        # mkdir's mode is masked by the host umask; the container UID needs access.
-        output.chmod(0o777)
-        command = [
-            "docker", "run", "--name", name, "--pull=never", "--network=none",
-            "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges",
-            "--user=65534:65534", f"--pids-limit={LIMITS['pids']}",
-            f"--memory={LIMITS['memory_bytes']}",
-            f"--memory-swap={LIMITS['memory_bytes']}", f"--cpus={LIMITS['cpus']}",
-            "--ulimit", f"cpu={LIMITS['cpu_seconds']}:{LIMITS['cpu_seconds']}",
-            "--ulimit", f"fsize={LIMITS['file_bytes']}:{LIMITS['file_bytes']}",
-            "--ulimit", "nofile=64:64", "--log-driver=none",
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
-            "--mount", f"type=bind,src={source},dst=/input/program.py,readonly",
-            "--mount", f"type=bind,src={output},dst=/output",
-            image,
-        ]
+        command = [sys.executable, "-B", str(source)]
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(Path(__file__).resolve().parent)
         result["command"] = command
-        try:
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        with subprocess.Popen(command, cwd=output, env=env, start_new_session=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
             stdout, stderr = bytearray(), bytearray()
             threads = [
                 threading.Thread(target=_collect, args=(process.stdout, stdout)),
@@ -99,7 +81,12 @@ def _render(program, image, timeout):
                 process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 result["timed_out"] = True
-                process.kill()
+            finally:
+                # Also stop children that inherited the output pipes.
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 process.wait()
             for thread in threads:
                 thread.join()
@@ -108,9 +95,6 @@ def _render(program, image, timeout):
                 stdout=stdout.decode("utf-8", errors="replace"),
                 stderr=stderr.decode("utf-8", errors="replace"),
             )
-        finally:
-            # Killing the Docker client alone does not stop its container.
-            subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=15)
         if result["returncode"] != 0 or result["timed_out"]:
             return result, None
         # Refuse symlinks, directories, and special files produced by the program.
@@ -126,21 +110,21 @@ def _render(program, image, timeout):
         return result, data
 
 
-def run_episode(program, episodes, *, image="artsy-renderer:0.1.0",
-                timeout=LIMITS["wall_seconds"], model=None, prompt=None):
+def run_episode(program, episodes, *, timeout=LIMITS["wall_seconds"], model=None, prompt=None):
     if not 0 < timeout <= LIMITS["wall_seconds"]:
         raise ValueError("Timeout must be between 0 and 30 seconds")
     episode_id = uuid.uuid4().hex
     directory = Path(episodes) / episode_id
     directory.mkdir(parents=True, exist_ok=False)
     record = {
-        "schema_version": 1,
+        "schema_version": 2,
         "episode_id": episode_id,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "source": "model_generated" if model else "hand_written",
         "program": None,
         "program_sha256": None,
-        "renderer_image": image,
+        "execution": {"backend": "local_python", "sandboxed": False,
+                      "python": sys.executable, "python_version": sys.version},
         "limits": {**LIMITS, "wall_seconds": timeout},
         "status": "execution_failed",
         "renderer": None,
@@ -182,12 +166,7 @@ def run_episode(program, episodes, *, image="artsy-renderer:0.1.0",
             ast.parse(program, filename="program.py")
             record["generation"]["syntax"] = "valid"
         record["status"] = "execution_failed"
-        inspection = subprocess.run(
-            ["docker", "image", "inspect", image, "--format", "{{.Id}}"],
-            capture_output=True, text=True, timeout=15, check=True,
-        )
-        record["renderer_image_id"] = inspection.stdout.strip()
-        result, data = _render(program, record["renderer_image_id"], timeout)
+        result, data = _render(program, timeout)
         record["renderer"] = result
         if result.get("output_error"):
             record["status"] = "validation_failed"

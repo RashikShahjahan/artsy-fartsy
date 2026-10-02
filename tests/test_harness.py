@@ -1,6 +1,5 @@
 import io
 import json
-import os
 import tempfile
 import unittest
 from importlib.resources import files
@@ -18,11 +17,9 @@ class EpisodeTests(unittest.TestCase):
         Image.new("RGB", (256, 256), "blue").save(buffer, format="PNG")
         fixture = files("artsy_harness").joinpath("fixtures/drawing.py").read_text()
         with tempfile.TemporaryDirectory() as root:
-            with patch("artsy_harness.harness.subprocess.run") as inspect, \
-                 patch("artsy_harness.harness._render", return_value=(
+            with patch("artsy_harness.harness._render", return_value=(
                      {"returncode": 0, "stdout": "", "stderr": "", "timed_out": False},
                      buffer.getvalue())):
-                inspect.return_value.stdout = "sha256:test\n"
                 first, record = run_episode(fixture, root)
                 original = (first / "record.json").read_bytes()
                 second, _ = run_episode(fixture, root)
@@ -35,28 +32,24 @@ class EpisodeTests(unittest.TestCase):
 
     def test_execution_failure_is_recorded(self):
         with tempfile.TemporaryDirectory() as root:
-            with patch("artsy_harness.harness.subprocess.run") as inspect, \
-                 patch("artsy_harness.harness._render", return_value=(
+            with patch("artsy_harness.harness._render", return_value=(
                      {"returncode": 1, "stderr": "RuntimeError: fixture failure"}, None)):
-                inspect.return_value.stdout = "sha256:test\n"
                 directory, record = run_episode("raise RuntimeError('fixture failure')", root)
             self.assertEqual(record["status"], "execution_failed")
             self.assertTrue((directory / "record.json").exists())
             self.assertFalse((directory / "image.png").exists())
 
-    def test_missing_docker_fails_closed(self):
+    def test_missing_python_is_recorded(self):
         with tempfile.TemporaryDirectory() as root:
-            with patch("artsy_harness.harness.subprocess.run", side_effect=FileNotFoundError("docker")):
-                directory, record = run_episode("print('never run on host')", root)
+            with patch("artsy_harness.harness.subprocess.Popen", side_effect=FileNotFoundError("python")):
+                directory, record = run_episode("print('not executed')", root)
             self.assertEqual(record["status"], "execution_failed")
-            self.assertIn("docker", record["error"])
+            self.assertIn("python", record["error"])
             self.assertTrue((directory / "record.json").exists())
 
     def test_invalid_png_is_recorded(self):
         with tempfile.TemporaryDirectory() as root:
-            with patch("artsy_harness.harness.subprocess.run") as inspect, \
-                 patch("artsy_harness.harness._render", return_value=({"returncode": 0}, b"not PNG")):
-                inspect.return_value.stdout = "sha256:test\n"
+            with patch("artsy_harness.harness._render", return_value=({"returncode": 0}, b"not PNG")):
                 _, record = run_episode("invalid output", root)
             self.assertEqual(record["status"], "validation_failed")
 
@@ -83,26 +76,25 @@ class EpisodeTests(unittest.TestCase):
             self.assertEqual(list(Path(root).iterdir()), [])
 
 
-@unittest.skipUnless(os.environ.get("ARTSY_DOCKER_TESTS") == "1", "Opt-in real Docker tests")
-class DockerTests(unittest.TestCase):
+class LocalRenderingTests(unittest.TestCase):
+    def test_real_png_output(self):
+        program = "from PIL import Image\nImage.new('RGB', (32, 32), 'blue').save('output.png')\n"
+        with tempfile.TemporaryDirectory() as root:
+            directory, record = run_episode(program, root)
+            self.assertEqual(record["status"], "success", record)
+            self.assertEqual(record["image"]["width"], 32)
+            self.assertTrue((directory / "image.png").exists())
+
     def test_real_fixture(self):
         fixture = files("artsy_harness").joinpath("fixtures/drawing.py").read_text()
         with tempfile.TemporaryDirectory() as root:
             directory, record = run_episode(fixture, root)
             self.assertEqual(record["status"], "success", record)
             self.assertEqual(record["image"]["width"], 256)
-            self.assertEqual(
-                record["image"]["sha256"],
-                "61279ba2d13404232b678b999ad6a3bb2ac136c6ae4b197b97b31be742a7ac73",
-            )
             self.assertTrue((directory / "image.png").exists())
-            command = record["renderer"]["command"]
-            limits = record["limits"]
-            for option, key in (("memory", "memory_bytes"), ("memory-swap", "memory_bytes"),
-                                ("cpus", "cpus"), ("pids-limit", "pids")):
-                self.assertIn(f"--{option}={limits[key]}", command)
-            for option, key in (("cpu", "cpu_seconds"), ("fsize", "file_bytes")):
-                self.assertIn(f"{option}={limits[key]}:{limits[key]}", command)
+            self.assertEqual(record["execution"]["backend"], "local_python")
+            self.assertFalse(record["execution"]["sandboxed"])
+            self.assertEqual(record["limits"], {"wall_seconds": 30})
 
     def test_real_failure(self):
         with tempfile.TemporaryDirectory() as root:
@@ -111,24 +103,21 @@ class DockerTests(unittest.TestCase):
             self.assertEqual(record["renderer"]["returncode"], 1, record)
             self.assertIn("fixture failure", record["renderer"]["stderr"])
 
-    def test_readonly_and_network_restrictions(self):
-        program = """import socket
-try:
-    open('/renderer/escape', 'w').write('bad')
-except OSError:
-    pass
-else:
-    raise RuntimeError('root filesystem was writable')
-try:
-    socket.create_connection(('1.1.1.1', 443), timeout=1)
-except OSError:
-    pass
-else:
-    raise RuntimeError('external networking available')
-""" + files("artsy_harness").joinpath("fixtures/drawing.py").read_text()
+    def test_symlink_output_is_rejected(self):
+        program = "from pathlib import Path\nPath('output.png').symlink_to('missing.png')\n"
         with tempfile.TemporaryDirectory() as root:
             _, record = run_episode(program, root)
-            self.assertEqual(record["status"], "success", record)
+            self.assertEqual(record["status"], "validation_failed", record)
+
+    def test_missing_output_is_recorded(self):
+        with tempfile.TemporaryDirectory() as root:
+            _, record = run_episode("pass", root)
+            self.assertEqual(record["status"], "validation_failed", record)
+
+    def test_large_logs_are_bounded(self):
+        with tempfile.TemporaryDirectory() as root:
+            _, record = run_episode(f"print('x' * {MAX_LOG_BYTES * 2})", root)
+            self.assertEqual(len(record["renderer"]["stdout"]), MAX_LOG_BYTES)
 
     def test_timeout(self):
         with tempfile.TemporaryDirectory() as root:

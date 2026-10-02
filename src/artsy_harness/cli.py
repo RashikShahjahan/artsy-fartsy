@@ -8,12 +8,11 @@ from .models import DEFAULT_MODEL, Ollama
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Render and record one restricted episode")
+    parser = argparse.ArgumentParser(description="Render and record one local episode (not sandboxed)")
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--program", type=Path, help="Defaults to the fixed drawing fixture")
     source.add_argument("--prompt", help="Generate a drawing program with Ollama")
     parser.add_argument("--episodes", type=Path, default=Path("episodes"))
-    parser.add_argument("--image", default="artsy-renderer:0.1.0")
     parser.add_argument("--ollama-url", default="http://localhost:11434")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--think", action=argparse.BooleanOptionalAction, default=True,
@@ -37,7 +36,7 @@ def main():
         program = args.program.read_text()
     else:
         program = files("artsy_harness").joinpath("fixtures/drawing.py").read_text()
-    directory, record = run_episode(program, args.episodes, image=args.image,
+    directory, record = run_episode(program, args.episodes,
                                     model=model, prompt=args.prompt)
     print(json.dumps({"episode": str(directory), **record}, indent=2))
     return 0 if record["status"] == "success" else 1

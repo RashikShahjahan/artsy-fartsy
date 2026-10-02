@@ -1,1 +1,1 @@
-"""Standalone drawing harness; Cairo is needed only inside the container."""
+"""Standalone drawing harness with local Python/Cairo rendering."""
