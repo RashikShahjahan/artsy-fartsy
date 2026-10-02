@@ -1,4 +1,4 @@
-"""Model calls return evidence; the local Python runner executes programs."""
+"""Model calls return evidence, never executable approvals."""
 
 import json
 from dataclasses import dataclass
@@ -30,6 +30,7 @@ class ModelResponse:
     model: str | None = None
     digest: str | None = None
     error: str | None = None
+    thinking: str | None = None
 
 
 class Ollama:
@@ -65,11 +66,14 @@ class Ollama:
                 raise ValueError("Expected a JSON object")
             result.model = body.get("model")
             result.digest = body.get("digest") or body.get("model_digest")
+            if isinstance(body.get("response"), str):
+                result.text = body["response"]
+            if isinstance(body.get("thinking"), str):
+                result.thinking = body["thinking"]
             if body.get("error"):
                 raise ValueError(str(body["error"]))
             if body.get("done") is not True or not isinstance(body.get("response"), str):
                 raise ValueError("Expected a completed, non-streaming response with text")
-            result.text = body["response"]
         except (ValueError, UnicodeError) as error:
             result.error = str(error)
         return result
