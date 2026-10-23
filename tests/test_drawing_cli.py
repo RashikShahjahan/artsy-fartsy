@@ -135,12 +135,25 @@ class DrawingCliTests(unittest.TestCase):
         standard_b = self.run_cli(*standard_args)
         self.assertEqual(standard_a.returncode, 0, standard_a.stderr)
         self.assertEqual(standard_a.stdout, standard_b.stdout)
+        standard_rows = [json.loads(line) for line in standard_a.stdout.splitlines()]
+        self.assertEqual(len(standard_rows), 2)
+        self.assertTrue(all("split" not in row for row in standard_rows))
+        self.assertTrue(all(row["expectedOutcome"] == "drawing" for row in standard_rows))
+
+        eval_args = ("--dry-run", "--count", "20", "--seed", "123")
+        eval_result = self.run_cli(*eval_args)
+        self.assertEqual(eval_result.returncode, 0, eval_result.stderr)
+        eval_rows = [json.loads(line) for line in eval_result.stdout.splitlines()]
+        self.assertEqual(len(eval_rows), 20)
+        self.assertTrue(all("split" not in row for row in eval_rows))
+        self.assertEqual(len({row["id"] for row in eval_rows}), 20)
 
         repair_args = ("--dry-run", "--curriculum", "repair", "--pool-size", "16", "--seed", "42")
         repair_a = self.run_cli(*repair_args)
         repair_b = self.run_cli(*repair_args)
         self.assertEqual(repair_a.returncode, 0, repair_a.stderr)
         self.assertEqual(repair_a.stdout, repair_b.stdout)
+        self.assertTrue(all("split" not in json.loads(line) for line in repair_a.stdout.splitlines()))
 
         unknown = self.run_cli("--not-a-real-option")
         self.assertNotEqual(unknown.returncode, 0)
