@@ -12,7 +12,7 @@ from pathlib import Path
 from inspect_ai import eval
 from inspect_ai.model import get_model
 
-from .harness import BASE_MODEL, ROOT, drawing_task, load_specs, model_from_env
+from .harness import BASE_MODEL, ROOT, drawing_task, inspect_swe_model_auth, load_specs, model_from_env
 
 
 def positive(value: str) -> int:
@@ -108,12 +108,13 @@ def main() -> int:
                 responses_api=False)
         else:
             roles[f"{role}_grader"] = get_model(model)
-    logs = eval(
-        drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
-                     args.safety_judge_model, args.threshold),
-        model=model_from_env(args.model), model_roles=roles,
-        log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=1,
-    )
+    with inspect_swe_model_auth():
+        logs = eval(
+            drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
+                         args.safety_judge_model, args.threshold),
+            model=model_from_env(args.model), model_roles=roles,
+            log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=1,
+        )
     samples = [sample for log in logs for sample in (log.samples or [])]
     errors = sum(sample.error is not None for sample in samples)
     summary = {**plan, "completed_samples": len(samples), "sample_errors": errors,
