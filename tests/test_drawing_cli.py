@@ -138,7 +138,7 @@ class DrawingCliTests(unittest.TestCase):
         standard_rows = [json.loads(line) for line in standard_a.stdout.splitlines()]
         self.assertEqual(len(standard_rows), 2)
         self.assertTrue(all("split" not in row for row in standard_rows))
-        self.assertTrue(all(row["expectedOutcome"] == "drawing" for row in standard_rows))
+        self.assertTrue(all("expectedOutcome" not in row for row in standard_rows))
 
         eval_args = ("--dry-run", "--count", "20", "--seed", "123")
         eval_result = self.run_cli(*eval_args)
