@@ -1,4 +1,4 @@
-"""Deterministic, versioned dataset curriculum and prompt validation."""
+"""Dataset specification validation and legacy deterministic curriculum."""
 
 from __future__ import annotations
 
@@ -14,6 +14,25 @@ FAMILIES = [
     ("rows", "train"), ("columns", "train"), ("landscapes", "train"), ("flowers", "train"),
     ("grids", "validation"), ("houses", "test"), ("rings", "validation"), ("orbits", "test"),
 ]
+# Orthogonal to the scene family: a prompt can exercise several skills.
+# Used to plan/stratify datasets, never as requirements sent to an evaluator.
+SKILL_TAXONOMY = {
+    "primitives": "Basic shapes, paths, fills, and strokes",
+    "counting": "Exact quantities, repetition, and grouping",
+    "positioning": "Absolute placement, spacing, and alignment",
+    "relative_geometry": "Tangency, containment, distances, and relative sizes",
+    "layering": "Occlusion and draw order",
+    "transformations": "Translation, rotation, reflection, and scaling",
+    "symmetry": "Mirror and rotational symmetry",
+    "curves": "Arcs, Bezier paths, and smooth contours",
+    "procedural_geometry": "Algorithmic patterns, randomness, and tiling",
+    "composition": "Multi-object scenes and visual hierarchy",
+    "constraint_following": "Simultaneous explicit visual conditions",
+    "artistic_quality": "Color harmony, gradients, and visual finish",
+    "negative_constraints": "Explicitly forbidden visual elements",
+    "robustness": "Edge cases, clipping, density, and degeneracy",
+}
+
 COLORS = ["red", "blue", "green", "orange", "purple", "teal"]
 BACKGROUNDS = ["white", "light gray", "cream"]
 
@@ -75,6 +94,18 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
                           "seed": row["seed"]}
         if repair is not None:
             normalized_row["repairTask"] = copy.deepcopy(repair)
+        skills = row.get("skills")
+        if skills is not None:
+            if (not isinstance(skills, list) or not 1 <= len(skills) <= 5
+                    or any(not isinstance(skill, str) or skill not in SKILL_TAXONOMY for skill in skills)
+                    or len(set(skills)) != len(skills)):
+                raise ValueError("Skills must be 1-5 unique taxonomy labels")
+            normalized_row["skills"] = list(skills)
+        case_type = row.get("caseType")
+        if case_type is not None:
+            if case_type not in ("standard", "repair"):
+                raise ValueError("caseType must be standard or repair")
+            normalized_row["caseType"] = case_type
         result.append(normalized_row)
     return result
 

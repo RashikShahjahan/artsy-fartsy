@@ -1,4 +1,4 @@
-"""Command line entry point for deterministic dataset generation."""
+"""Command line entry point for LLM-authored drawing datasets."""
 from __future__ import annotations
 
 import argparse
@@ -12,10 +12,10 @@ from typing import Any
 HELP = """Python dataset generation
   --output DIR          Dataset directory (default: datasets/pilot)
   --count N             Structured prompts to generate (default: 20)
-  --seed N              Curriculum seed (default: 42)
+  --seed N              Taxonomy/slot seed (default: 42; prompt text is model-generated)
   --input FILE          Custom JSONL specs instead of the built-in curriculum
-  --curriculum MODE     standard (default) or repair (challenging natural failures)
-  --pool-size N         Hard-task pool for repair sampling, 16–512 (default: 128)
+  --curriculum MODE     standard (default, 25% repair-oriented) or repair (all challenging)
+  --pool-size N         Hard-task pool for repair/warmup, 16–512 (default: 128)
   --natural-repairs-from DIR  Reuse verified natural repairs from a previous run
   --drafts-from DIR     Reuse unmodified model drafts (repeatable)
   --image-observations  Inspect actual PNGs and include them in visual repairs
@@ -25,20 +25,27 @@ HELP = """Python dataset generation
   --repairs N           Repairs per candidate, 0–2 (default: 2)
   --max-tokens N        Teacher tokens per request (default: 4096; repair: 8192)
   --threshold N         Minimum score for EVERY requirement (default: 0.85)
-  --teacher-model ID    Required, or set ARTSY_TEACHER_MODEL
+  --prompt-model ID     Prompt-writing LLM (defaults to teacher model)
+  --prompt-url URL      Prompt-writing endpoint (defaults to teacher URL)
+  --prompt-batch-size N Prompts per LLM request, 1–8 (default: 5)
+  --prompt-max-tokens N Prompt-writer output tokens per request (default: 4096)
+  --prompt-retries N    Validation attempts per batch, 1–5 (default: 3)
+  --teacher-model ID    Required for rendering, or set ARTSY_TEACHER_MODEL
   --teacher-url URL     Chat base URL (default: http://127.0.0.1:8080/v1)
   --judge-model ID      Optional vision evaluator, or ARTSY_JUDGE_MODEL
   --judge-url URL       Evaluator base URL (defaults to teacher URL)
   --timeout-ms N        Per-request deadline (default: 60000)
-  --dry-run             Print prompt JSONL without split labels or model calls/rendering
+  --dry-run             LLM-generate prompt JSONL (no rendering, no split labels)
   --retry-errors        Retry checkpointed infrastructure failures on resume
   --retry-rejected      Retry rejected repair candidates for still-missing tasks
   --help, -h            Show this help
 
-Credentials: ARTSY_TEACHER_API_KEY and ARTSY_JUDGE_API_KEY environment variables.
+Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_JUDGE_API_KEY.
 No judge: executable examples go to review.jsonl; accepted/train/validation/test
 remain empty. Repeating the same command resumes completed candidate records.
-Generated Python runs locally with your current permissions, as with the drawing CLI."""
+Generated Python runs locally with your current permissions, as with the drawing CLI.
+The prompt plan is saved before rendering and reused on resume. The legacy
+--warmup-from selection remains frozen to preserve existing training examples."""
 
 
 def _load_env_file(path: Path = Path(".env")) -> None:
@@ -82,6 +89,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repairs", default="2")
     parser.add_argument("--max-tokens")
     parser.add_argument("--threshold", default="0.85")
+    parser.add_argument("--prompt-model")
+    parser.add_argument("--prompt-url")
+    parser.add_argument("--prompt-batch-size", default="5")
+    parser.add_argument("--prompt-max-tokens", default="4096")
+    parser.add_argument("--prompt-retries", default="3")
     parser.add_argument("--teacher-model")
     parser.add_argument("--teacher-url")
     parser.add_argument("--judge-model")
@@ -107,14 +119,14 @@ def _read_specs(path: str) -> list[dict[str, Any]]:
 
 async def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    if args.warmup_from:
-        _load_env_file()
     if args.help:
         print(HELP)
         return 0
-    from .dataset_prompts import generate_prompts, validate_specs
-    from .repair_prompts import generate_repair_prompts
+    _load_env_file()
+    from .dataset_prompts import compact_json, sha256, validate_specs
+    from .llm_prompts import GENERATOR_VERSION, generate_llm_prompts
     from .warmup_dataset import generate_warmup_dataset, warmup_plan
+    from .dataset_client import chat_client
 
     warmup_source = args.warmup_from
     repair_mode = bool(warmup_source) or args.curriculum == "repair"
@@ -123,17 +135,59 @@ async def main(argv: list[str] | None = None) -> int:
     if args.input and repair_mode:
         raise ValueError("--input cannot be combined with the built-in repair/warmup curriculum")
     if repair_mode and args.count:
-        raise ValueError("Use --pool-size for the natural-repair prompt pool; the warmup selects 16 repairs")
+        raise ValueError("Use --pool-size for the repair prompt pool; the warmup selects 16 repairs")
     seed, pool_size = int(args.seed), int(args.pool_size)
+    if repair_mode and not 16 <= pool_size <= 512:
+        raise ValueError("pool-size must be between 16 and 512")
+    count = pool_size if repair_mode else int(args.count or 20)
+    output = args.output or ("datasets/sft-warmup-100" if warmup_source else "datasets/pilot")
     plan = await warmup_plan(warmup_source, seed, pool_size) if warmup_source else None
+
+    source_manifest = json.loads((Path(warmup_source) / "manifest.json").read_text(encoding="utf-8")) if warmup_source else {}
+    model = args.teacher_model or os.getenv("ARTSY_TEACHER_MODEL") or (source_manifest.get("teacher") or {}).get("model")
+    base_url = args.teacher_url or os.getenv("ARTSY_TEACHER_URL") or (source_manifest.get("teacher") or {}).get("baseUrl") or "http://127.0.0.1:8080/v1"
+    prompt_model = args.prompt_model or os.getenv("ARTSY_PROMPT_MODEL") or model
+    prompt_url = args.prompt_url or os.getenv("ARTSY_PROMPT_URL") or base_url
+    prompt_config = {
+        "version": GENERATOR_VERSION, "mode": "repair" if repair_mode else "standard",
+        "count": count, "seed": seed, "model": prompt_model, "baseUrl": prompt_url,
+        "batchSize": int(args.prompt_batch_size), "maxTokens": int(args.prompt_max_tokens),
+        "retries": int(args.prompt_retries),
+    }
+    prompt_generation = None
     if plan:
         specs = plan["specs"]
     elif args.input:
         specs = validate_specs(_read_specs(args.input))
-    elif repair_mode:
-        specs = generate_repair_prompts(seed, pool_size)
     else:
-        specs = generate_prompts(int(args.count or 20), seed)
+        if not prompt_model:
+            raise ValueError("Set --prompt-model or ARTSY_PROMPT_MODEL (or a teacher model) to generate prompts")
+        plan_path = Path(output) / "prompt-plan.json"
+        if not args.dry_run and plan_path.exists():
+            saved = json.loads(plan_path.read_text(encoding="utf-8"))
+            if saved.get("config") != prompt_config:
+                raise ValueError("Prompt generator configuration changed; use a new output directory")
+            specs = validate_specs(saved["specs"])
+            if len(specs) != count or sha256(compact_json(specs)) != saved.get("specsHash"):
+                raise ValueError("Stored prompt plan was modified; use a new output directory")
+        else:
+            if not args.dry_run and (Path(output) / "manifest.json").exists():
+                raise ValueError("Existing dataset has no LLM prompt plan; use a new output directory")
+            prompt_key = os.getenv("ARTSY_PROMPT_API_KEY")
+            if prompt_url == base_url and not prompt_key:
+                prompt_key = os.getenv("ARTSY_TEACHER_API_KEY") or os.getenv("TEACHER_API_KEY")
+            prompt_client = chat_client({"model": prompt_model, "baseUrl": prompt_url,
+                "apiKey": prompt_key, "timeoutMs": int(args.timeout_ms)})
+            generated = await generate_llm_prompts(prompt_client, count, seed,
+                mode=prompt_config["mode"], batch_size=prompt_config["batchSize"],
+                max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"])
+            specs = generated["specs"]
+            if not args.dry_run:
+                Path(output).mkdir(parents=True, exist_ok=True)
+                from .dataset import _write_json
+                _write_json(plan_path, {"config": prompt_config, "specs": specs,
+                    "specsHash": sha256(compact_json(specs)), "batches": generated["batches"]})
+        prompt_generation = {**prompt_config, "specsHash": sha256(compact_json(specs))}
     if args.dry_run:
         if plan:
             print(json.dumps({"version": plan["version"],
@@ -145,7 +199,6 @@ async def main(argv: list[str] | None = None) -> int:
                 print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
         return 0
 
-    output = args.output or ("datasets/sft-warmup-100" if warmup_source else "datasets/pilot")
     natural_repairs_from = args.natural_repairs_from
     drafts_from = args.drafts_from
     if warmup_source and not natural_repairs_from:
@@ -162,11 +215,8 @@ async def main(argv: list[str] | None = None) -> int:
             drafts_from = [str((Path(output) / "generated" / s["directory"]).resolve()) for s in previous.get("draftSources", [])]
         except FileNotFoundError:
             pass
-    source_manifest = json.loads((Path(warmup_source) / "manifest.json").read_text(encoding="utf-8")) if warmup_source else {}
-    model = args.teacher_model or os.getenv("ARTSY_TEACHER_MODEL") or (source_manifest.get("teacher") or {}).get("model")
     if not model:
         raise ValueError("Set --teacher-model or ARTSY_TEACHER_MODEL to your stronger teacher model")
-    base_url = args.teacher_url or os.getenv("ARTSY_TEACHER_URL") or (source_manifest.get("teacher") or {}).get("baseUrl") or "http://127.0.0.1:8080/v1"
     image_observations = args.image_observations if args.image_observations is not None else bool(warmup_source)
     judge_model = args.judge_model or os.getenv("ARTSY_JUDGE_MODEL") or (model if image_observations else None)
     judge_url = args.judge_url or os.getenv("ARTSY_JUDGE_URL") or base_url
@@ -174,7 +224,6 @@ async def main(argv: list[str] | None = None) -> int:
     timeout_ms = int(args.timeout_ms)
     if timeout_ms < 1 or timeout_ms > 300_000:
         raise ValueError("timeout-ms must be an integer from 1 to 300000")
-    from .dataset_client import chat_client
     teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms})
     judge = chat_client({"model": judge_model, "baseUrl": judge_url,
         "apiKey": os.getenv("ARTSY_JUDGE_API_KEY") or (teacher_key if judge_url == base_url else None), "timeoutMs": timeout_ms}) if judge_model else None
@@ -183,6 +232,7 @@ async def main(argv: list[str] | None = None) -> int:
         "threshold": float(args.threshold), "workers": int(args.workers or (4 if warmup_source else 1)),
         "retryErrors": args.retry_errors, "retryRejected": args.retry_rejected, "imageObservations": image_observations,
         "draftsFrom": drafts_from, "teacher": teacher, "judge": judge,
+        "promptGenerator": prompt_generation,
         "onRecord": lambda record: print(f"{record['id']} {record['status']}: {record['reason']}", file=sys.stderr)}
     if warmup_source:
         summary = await generate_warmup_dataset({**options, "source": warmup_source, "seed": seed,

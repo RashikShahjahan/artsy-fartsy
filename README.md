@@ -219,116 +219,105 @@ Use `--dataset path/to/prompts.jsonl` for custom drawing test specs with `id`,
 
 ## Generate a dataset
 
-Preview the seeded curriculum without model requests or code execution:
+The default prompt planner uses an LLM, rather than parameterized drawing templates.
+It assigns a scene family and a primary skill from a 14-label taxonomy, then asks
+a prompt-writing model for original, natural-language drawing requests. Prompts
+can have multiple `skills` labels (e.g. `symmetry`, `relative_geometry`,
+`constraint_following`). These labels are for curriculum balancing and
+per-skill analysis; the correctness evaluator judges **only the original prompt
+and rendered output**, not a hidden `requirements` or `expectedOutcome` field.
+
+**Generate 20 evaluation prompts (15 standard, 5 repair-oriented):**
 
 ```sh
-.venv/bin/python -m drawing.generate_dataset --dry-run --count 20 --seed 42
-```
+# Choose a capable prompt-writing model, with an OpenAI-compatible endpoint.
+export ARTSY_PROMPT_MODEL=your-prompt-writer
+export ARTSY_PROMPT_URL=http://127.0.0.1:9000/v1
+# Set ARTSY_PROMPT_API_KEY if the endpoint requires authentication.
 
-The dry-run JSONL omits train/validation/test split labels, so it can be used
-directly by the evaluation harness without a teacher model or judge:
-
-```sh
-.venv/bin/python -m drawing.generate_dataset --dry-run --count 20 --seed 123 > evaluation/generated-20.jsonl
+.venv/bin/python -m drawing.generate_dataset --dry-run --count 20 --seed 42 > evaluation/generated-20.jsonl
 .eval-venv/bin/python -m evaluation.evaluate --dataset evaluation/generated-20.jsonl --dry-run
 ```
 
-This reuses the standard drawing templates; a different seed varies parameters
-but does not provide independent template-family holdout. Full dataset generation
-continues to assign splits internally for training and warmup datasets.
+`--dry-run` now **calls the prompt-writing LLM**, but does not run a teacher or
+renderer. Each prompt is a standalone user request; the five `caseType=repair`
+cases are complex geometry/composition challenges designed to stress the
+write → run → fix loop. They do not contain deliberately broken code. Inspect
+checks the actual trajectory and final PNG, and ignores the metadata labels.
+For a frozen comparison, keep the resulting JSONL under version control or in
+a benchmark dataset; rerunning with the same seed alone cannot reproduce
+model-authored wording exactly. Keep evaluated tasks out of SFT training.
 
-Generate programs with a stronger teacher served by a chat-completions endpoint.
-Set the model identifier and endpoint to the teacher you have available:
+**Generate training programs using a stronger teacher:**
 
 ```sh
 export ARTSY_TEACHER_MODEL=your-teacher-model
 export ARTSY_TEACHER_URL=http://127.0.0.1:9000/v1
-# Set ARTSY_TEACHER_API_KEY if that endpoint requires authentication.
-
-.venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --repairs 2 --output datasets/pilot
+# Set ARTSY_TEACHER_API_KEY if needed.
+# ARTSY_PROMPT_MODEL/URL are optional here; they default to the teacher.
+.venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --repairs 2 --output datasets/llm-pilot
 ```
 
-The endpoint must support non-streaming `POST /chat/completions`, `messages`, and
-`max_tokens`, returning a text completion containing the requested JSON object.
-The bundled Qwen server implements that protocol, but is the student baseline;
-select a stronger teacher for training data. Each candidate gets at most three
-teacher requests and three previews, with fresh final execution through
-`DrawingEnvironment`. Teacher replies are either `{"code":"complete Python"}` or
-`{"refusal":"reason"}`. Syntax errors, API errors, and prompt-level visual failures
-can trigger repairs. Generated programs use the existing local executor and its
-current permissions and resource limits.
+The output directory stores `prompt-plan.json` **before rendering**. This
+records the validated prompts, generator model/endpoint, taxonomy-slot settings,
+raw prompt-generation completions and token usage. Resuming the same command
+reuses the exact plan with no additional prompt-writing calls; changing its
+configuration requires a new output directory. Neither API keys nor credentials
+are persisted. For prompts only, `--dry-run` prints JSONL without split labels.
+For complete dataset runs, existing family-based training splits remain internal.
 
-To automatically accept examples, add an independent **vision** evaluator with
-support for PNG data URLs in chat `image_url` content:
+By default one in four tasks is repair-oriented. For a wholly challenging
+**natural repair** curriculum, use:
+
+```sh
+.venv/bin/python -m drawing.generate_dataset --curriculum repair --pool-size 32 --output datasets/llm-repair
+```
+
+This generates advanced, computationally demanding tasks with
+`repairTask.skills` metadata. The repair pipeline accepts examples only after
+a genuine execution or visual failure followed by successful correction.
+The separate `--warmup-from` command still uses its frozen legacy repair
+pool to reproduce the existing 80/20 warmup selection.
+
+Set an independent **vision** judge to automatically accept generated drawings.
+It must handle PNG `image_url` messages:
 
 ```sh
 export ARTSY_JUDGE_MODEL=your-vision-evaluator
 export ARTSY_JUDGE_URL=http://127.0.0.1:9001/v1
 # Set ARTSY_JUDGE_API_KEY if needed.
-
-.venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --output datasets/graded-pilot
+.venv/bin/python -m drawing.generate_dataset --count 20 --output datasets/llm-graded
 ```
 
-The evaluator checks every valid preview and the freshly submitted image against
-the original prompt as a whole. Acceptance requires `safe`, a correct judgment, and
-an overall match score of at least 0.85; use `--threshold` to change it. Unsafe previews
-terminate the candidate. Uncertain safety goes to review. A refusal is accepted only when the evaluator independently judges it appropriate
-for the original prompt. No expected response type is supplied to the evaluator.
-With no evaluator, executable examples and refusals go to `review.jsonl`;
-the accepted training files stay empty. Model approval is provisional: human auditing and
-judge calibration remain separate work.
+The teacher endpoint must support non-streaming OpenAI-compatible
+`POST /chat/completions`. Candidate replies are either a JSON object with
+`code` or `refusal`. The execution and evaluation loops, repair budget
+(maximum two retries), source/pixel deduplication, and checkpoint semantics
+are unchanged. Without a judge, valid programs remain in `review.jsonl`;
+`accepted.jsonl` is empty. The judge scores PNG correctness, content safety,
+and refusal appropriateness against the original request; a score of at least
+0.85 is needed for automatic acceptance, subject to separate human audit.
 
-The built-in curriculum covers 12 primitive, composition, scene, and procedural
-families. Counts up to 10,000 are supported; start with 20, then run a 1,000-prompt
-pilot in a new directory. The seed reproduces prompt specifications and render
-randomness; remote teacher replies may vary. Whole families have fixed splits
-before wording and parameters are generated. Increasing the count preserves the
-existing prompt prefix. Custom JSONL specifications can include benign and disallowed drawing requests:
+Custom prompt files still bypass the planner:
 
 ```json
-{"id":"blue-circle","family":"circles","prompt":"Draw one centered blue circle on white.","seed":42}
+{"id":"blue-circle","family":"circles","prompt":"Draw one centered blue circle on white.","seed":42,"skills":["primitives","positioning"]}
 ```
 
-Pass `--input prompts.jsonl` instead of `--count`. The generator derives the split
-from `family` and rejects conflicting splits, duplicate prompts, and unsafe IDs.
-Unknown families receive a stable hash-based 80/10/10 split; small custom inputs
-may not cover all splits. Keep related custom templates in the same family.
-The built-in curriculum contains benign drawing tasks; provide your own prompts
-where refusal might be appropriate if you need refusal data. The current SFT
-conversion still accepts only successful drawing programs, not refusal records.
+Pass `--input prompts.jsonl`. Extra fields for `requirements` and
+`expectedOutcome` are ignored by dataset validation, not sent to the judge.
+The `family` label is used for group-level splits; `skills` and `caseType`
+are optional metadata. Original fixed-template generation is retained as a
+legacy Python helper for compatibility tests, not used by the default CLI.
 
-Each output directory contains:
-
-- `manifest.json` and `prompts.jsonl`: configuration, prompt plan, model endpoints,
-  API documentation hash, runtime source/dependency hashes, and environment limits.
-- `records/*.json`: atomic candidate checkpoints with the original prompt, code
-  or refusal, completion usage/provenance, repair trace, evaluator results, seed,
-  hashes, split, and relative artifact references. Failed attempts remain available.
-- `artifacts/episode-*/`: the environment's complete operation trajectory,
-  previews, final Python source, and final PNG.
-- `accepted.jsonl`, `review.jsonl`, `rejected.jsonl`, and `candidates.jsonl`:
-  evaluated examples, pending review, rejection/infrastructure reasons, and all records.
-- `train.jsonl`, `validation.jsonl`, and `test.jsonl`: accepted records by split.
-- `summary.json`: acceptance rate, outcome counts, recorded request/token usage,
-  and the count of completions with unavailable usage. These are observed totals,
-  not a price estimate; requests interrupted before a response may still be billed.
-
-Exact normalized source and decoded pixel duplicates are excluded across candidates
-and splits. Near-duplicate image detection and human audits are not implemented.
-Credentials come only from environment variables and are excluded from the manifest.
-Outputs are ignored by Git.
-
-Repeat the same command to resume completed checkpoints without model calls.
-Use `--retry-errors` to retry infrastructure failures; previous records and their
-reported token usage are retained. Changed configuration, documentation, or runtime
-sources require a new output directory. Aggregated JSONL files are rebuilt after
-all candidates finish. Only one generator may own a directory; if a process is
-forcibly stopped, remove its `.generation.lock` only after verifying it has exited.
-Removing the expected response label changes dataset and evaluator versions: use
-a new output folder rather than resuming an old generator checkpoint in place.
-Historical pilot records remain valid warmup sources; copied records omit legacy
-rubric and expected-outcome metadata.
-Use `.venv/bin/python -m drawing.generate_dataset --help` for all options.
+Each dataset directory also includes `manifest.json`, `prompts.jsonl`,
+`records/*.json` for candidate checkpoints, `artifacts/episode-*/` for
+executed code and PNGs, `candidates.jsonl`, `accepted.jsonl`,
+`review.jsonl`, `rejected.jsonl`, `train.jsonl`, `validation.jsonl`,
+`test.jsonl`, and `summary.json`. Resume with the original command;
+`--retry-errors` retries infrastructure failures. Outputs are Git-ignored.
+Generated Python runs locally with the permissions of the drawing CLI;
+review synthetic prompts and code before using them in sensitive contexts.
 
 ### First SFT dataset: 80 one-shot drawings and 20 repairs
 
