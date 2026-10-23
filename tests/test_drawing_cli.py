@@ -89,8 +89,10 @@ class DrawingCliTests(unittest.TestCase):
     def test_generation_and_resume_use_local_teacher_and_render_submission(self):
         with tempfile.TemporaryDirectory(prefix="artsy-drawing-cli-") as directory, FakeTeacher() as teacher:
             output = Path(directory) / "dataset"
+            prompts = Path(directory) / "prompts.jsonl"
+            prompts.write_text(json.dumps({"id": "circle", "family": "circles", "prompt": "Draw a blue circle", "seed": 42}) + "\n")
             args = (
-                "--output", str(output), "--count", "1", "--candidates", "1",
+                "--output", str(output), "--input", str(prompts), "--candidates", "1",
                 "--teacher-model", "fake", "--teacher-url", teacher.url,
                 "--repairs", "0",
             )
@@ -121,7 +123,7 @@ class DrawingCliTests(unittest.TestCase):
             self.assertEqual(resumed["requests"], 1)
             self.assertEqual(len(teacher.calls), 1, "completed candidate should resume without another teacher call")
 
-    def test_help_dry_runs_are_deterministic_and_invalid_arguments_fail(self):
+    def test_help_and_input_dry_run(self):
         help_result = subprocess.run(
             [sys.executable, "-m", "drawing.generate_dataset", "--help"],
             cwd=ROOT, text=True, capture_output=True, timeout=10, check=False,
@@ -130,36 +132,19 @@ class DrawingCliTests(unittest.TestCase):
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
         self.assertIn("Python dataset generation", help_result.stdout)
 
-        standard_args = ("--dry-run", "--count", "2", "--seed", "42")
-        standard_a = self.run_cli(*standard_args)
-        standard_b = self.run_cli(*standard_args)
-        self.assertEqual(standard_a.returncode, 0, standard_a.stderr)
-        self.assertEqual(standard_a.stdout, standard_b.stdout)
-        standard_rows = [json.loads(line) for line in standard_a.stdout.splitlines()]
-        self.assertEqual(len(standard_rows), 2)
-        self.assertTrue(all("split" not in row for row in standard_rows))
-        self.assertTrue(all("expectedOutcome" not in row for row in standard_rows))
-
-        eval_args = ("--dry-run", "--count", "20", "--seed", "123")
-        eval_result = self.run_cli(*eval_args)
-        self.assertEqual(eval_result.returncode, 0, eval_result.stderr)
-        eval_rows = [json.loads(line) for line in eval_result.stdout.splitlines()]
-        self.assertEqual(len(eval_rows), 20)
-        self.assertTrue(all("split" not in row for row in eval_rows))
-        self.assertEqual(len({row["id"] for row in eval_rows}), 20)
-
-        repair_args = ("--dry-run", "--curriculum", "repair", "--pool-size", "16", "--seed", "42")
-        repair_a = self.run_cli(*repair_args)
-        repair_b = self.run_cli(*repair_args)
-        self.assertEqual(repair_a.returncode, 0, repair_a.stderr)
-        self.assertEqual(repair_a.stdout, repair_b.stdout)
-        self.assertTrue(all("split" not in json.loads(line) for line in repair_a.stdout.splitlines()))
+        with tempfile.TemporaryDirectory() as directory:
+            prompts = Path(directory) / "prompts.jsonl"
+            prompts.write_text(json.dumps({"family": "circles", "prompt": "Draw a circle", "seed": 42}) + "\n")
+            result = self.run_cli("--dry-run", "--input", str(prompts))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(result.stdout.splitlines()), 1)
+            self.assertNotIn("split", json.loads(result.stdout))
 
         unknown = self.run_cli("--not-a-real-option")
         self.assertNotEqual(unknown.returncode, 0)
         invalid_curriculum = self.run_cli("--dry-run", "--curriculum", "unknown")
         self.assertNotEqual(invalid_curriculum.returncode, 0)
-        self.assertIn("curriculum must be standard or repair", invalid_curriculum.stderr)
+        self.assertIn("unrecognized arguments", invalid_curriculum.stderr)
 
 
 if __name__ == "__main__":

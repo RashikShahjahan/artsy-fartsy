@@ -11,23 +11,18 @@ from .dataset_prompts import DIFFICULTIES, FAMILIES, SKILL_TAXONOMY, compact_jso
 GENERATOR_VERSION = "artsy-llm-prompts-v3"
 
 
-def _slots(count: int, seed: int, mode: str = "standard", difficulty: str = "mixed") -> list[dict[str, Any]]:
+def _slots(count: int, seed: int, difficulty: str = "mixed") -> list[dict[str, Any]]:
     if type(count) is not int or not 1 <= count <= 10_000:
         raise ValueError("count must be an integer from 1 to 10000")
     if type(seed) is not int or not 0 <= seed <= 9_007_199_254_740_991:
         raise ValueError("seed must be a nonnegative safe integer")
-    if mode not in ("standard", "repair"):
-        raise ValueError("mode must be standard or repair")
     if difficulty not in (*DIFFICULTIES, "mixed"):
         raise ValueError(f"difficulty must be mixed or one of {DIFFICULTIES}")
-    if mode == "repair" and difficulty != "mixed":
-        raise ValueError("The legacy repair curriculum does not accept difficulty selection")
     families = [family for family, _ in FAMILIES]
     skills = list(SKILL_TAXONOMY)
     slots = []
     for index in range(count):
-        level = ("very-hard" if mode == "repair" else
-                 DIFFICULTIES[index % len(DIFFICULTIES)] if difficulty == "mixed" else difficulty)
+        level = DIFFICULTIES[index % len(DIFFICULTIES)] if difficulty == "mixed" else difficulty
         slots.append({
             "index": index,
             "family": families[(index + seed) % len(families)],
@@ -54,8 +49,7 @@ def _too_similar(prompt: str, earlier: list[str]) -> bool:
     return False
 
 
-def _parse_batch(text: str, slots: list[dict[str, Any]], earlier: list[str], seed: int,
-                 *, mode: str) -> list[dict[str, Any]]:
+def _parse_batch(text: str, slots: list[dict[str, Any]], earlier: list[str], seed: int) -> list[dict[str, Any]]:
     reply = parse_json_reply(text)
     if not isinstance(reply, dict) or set(reply) != {"items"} or not isinstance(reply["items"], list):
         raise ValueError("Prompt generator must return JSON with an items array")
@@ -66,7 +60,7 @@ def _parse_batch(text: str, slots: list[dict[str, Any]], earlier: list[str], see
     for slot, item in zip(slots, reply["items"]):
         if not isinstance(item, dict) or type(item.get("index")) is not int or item["index"] != slot["index"]:
             raise ValueError("Prompt generator returned a missing or out-of-order slot index")
-        required = {"index", "prompt", "skills"} | ({"technicalSkills"} if mode == "repair" else set())
+        required = {"index", "prompt", "skills"}
         if set(item) != required:
             raise ValueError("Unexpected prompt generator fields")
         prompt = item["prompt"]
@@ -89,19 +83,12 @@ def _parse_batch(text: str, slots: list[dict[str, Any]], earlier: list[str], see
             "id": entropy[:24], "family": slot["family"], "prompt": prompt.strip(),
             "seed": int(entropy[24:32], 16), "skills": skills, "difficulty": slot["difficulty"],
         }
-        if mode == "repair":
-            technical = item["technicalSkills"]
-            if (not isinstance(technical, list) or not 2 <= len(technical) <= 6
-                    or any(not isinstance(x, str) or not x.strip() or len(x) > 80 for x in technical)
-                    or len(set(technical)) != len(technical)):
-                raise ValueError("Repair tasks need two to six distinct technical skills")
-            spec["repairTask"] = {"complexity": "advanced", "skills": technical}
         specs.append(spec)
     return validate_specs(specs)
 
 
 async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
-                               mode: str = "standard", difficulty: str = "mixed",
+                               difficulty: str = "mixed",
                                batch_size: int = 5,
                                max_tokens: int = 4096, retries: int = 3) -> dict[str, Any]:
     """Produce a validated prompt plan, preserving raw response provenance for auditing.
@@ -109,7 +96,7 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
     Slot labels and seeds are deterministic; model-authored wording is frozen by
     the CLI's saved plan and may not be reproducible from the same seed alone.
     """
-    slots = _slots(count, seed, mode, difficulty)
+    slots = _slots(count, seed, difficulty)
     if type(batch_size) is not int or not 1 <= batch_size <= 8:
         raise ValueError("prompt batch size must be between 1 and 8")
     if type(max_tokens) is not int or max_tokens < 1:
@@ -131,10 +118,9 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
         "geometry or precise interdependent conditions. Keep every level solvable. "
         "Difficulty describes task complexity, not a required failure or repair. "
         "Never deliberately introduce defects or instruct the agent to repair code. "
-        "For legacy mode=repair, also name 2-6 genuine computational skills as technicalSkills. "
         "Return ONLY one JSON object with an items array in slot order. Each item has "
         "index (integer), prompt (string), and skills (1-5 taxonomy labels, including "
-        "primarySkill); include technicalSkills (array of strings) ONLY in mode=repair."
+        "primarySkill)."
     )
     specs: list[dict[str, Any]] = []
     batches: list[dict[str, Any]] = []
@@ -142,7 +128,7 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
         batch_slots = slots[offset:offset + batch_size]
         recent = [s["prompt"] for s in specs[-30:]]
         request = {
-            "version": GENERATOR_VERSION, "mode": mode,
+            "version": GENERATOR_VERSION,
             "taxonomy": SKILL_TAXONOMY, "slots": batch_slots,
             "recentPromptsToAvoid": recent,
         }
@@ -156,7 +142,7 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
                 if response.get("finishReason") == "length":
                     raise ValueError("Prompt generator reply was truncated")
                 generated = _parse_batch(response["text"], batch_slots,
-                                         [s["prompt"] for s in specs], seed, mode=mode)
+                                         [s["prompt"] for s in specs], seed)
             except (ValueError, KeyError, TypeError) as error:
                 failure = str(error)
                 request["previousError"] = failure

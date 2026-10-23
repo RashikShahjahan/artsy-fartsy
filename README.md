@@ -279,8 +279,7 @@ For higher-difficulty training data, use `--difficulty hard` or
 natural write-run-fix trajectory whenever a task needs correction; successful
 initial attempts remain valuable one-shot examples. `--repairs` sets the
 per-candidate retry budget, not a quota of repair prompts. The historical
-`--curriculum repair` and `--warmup-from` commands remain available only for
-reproducing existing repair/warmup datasets; they are not needed for new data.
+`--curriculum repair` and `--warmup-from` have been removed.
 
 Set an independent **vision** judge to automatically accept generated drawings.
 It must handle PNG `image_url` messages:
@@ -322,114 +321,13 @@ executed code and PNGs, `candidates.jsonl`, `accepted.jsonl`,
 Generated Python runs locally with the permissions of the drawing CLI;
 review synthetic prompts and code before using them in sensitive contexts.
 
-### First SFT dataset: 80 one-shot drawings and 20 repairs
+### Training data
 
-Build the first 100-example selection from the existing `datasets/pilot-100`:
+Generate LLM-authored prompts with `drawing.generate_dataset` and run the teacher to collect
+successful one-shot drawings and naturally occurring repairs. A dataset is resumable
+within its output directory. Use higher `--difficulty` settings to stress repair behavior;
+there is no dedicated repair-prompt quota or warmup selection workflow.
 
-```sh
-# Inspect the retained IDs and sixteen new complex drawing specifications:
-.venv/bin/python -m drawing.generate_dataset --warmup-from datasets/pilot-100 --output datasets/sft-warmup-100 --dry-run
-
-# Retain 80 existing one-shot drawings and all 4 existing execution repairs,
-# then generate the remaining 16 repairs with the original pilot's teacher:
-.venv/bin/python -m drawing.generate_dataset --warmup-from datasets/pilot-100 --output datasets/sft-warmup-100 --timeout-ms 180000
-
-# Resume after provider/connection failures without regenerating successful work:
-.venv/bin/python -m drawing.generate_dataset --warmup-from datasets/pilot-100 --output datasets/sft-warmup-100 --timeout-ms 180000 --retry-errors
-
-# If a task exhausted its candidates, try its rejected slots again. Completed
-# repair tasks are reused and previous attempts remain recorded:
-.venv/bin/python -m drawing.generate_dataset --warmup-from datasets/pilot-100 --output datasets/sft-warmup-100 --timeout-ms 180000 --retry-errors --retry-rejected
-```
-
-Warmup generation loads `.env` when present and uses `ARTSY_TEACHER_API_KEY` or
-`TEACHER_API_KEY`. Teacher model and endpoint default to the source pilot's
-manifest; normal teacher/judge flags still override them. The original pilot is
-preserved. To use different paths, run `.venv/bin/python -m drawing.generate_dataset --warmup-from SOURCE
---output OUTPUT` with the same credentials and flags.
-
-The retained one-shot examples are selected by round-robin task family, with one
-candidate per prompt and distinct source/pixel hashes. The four natural repairs
-are retained even though three were originally rejected solely as duplicate
-renders. These explicit exceptions and the original statuses are recorded.
-
-The new repair examples are sampled from a deterministic pool of 128 challenging
-compositions (configurable with `--pool-size`, from 16 to 512). They combine
-compound paths, tangent and normal geometry, gradients, repeated object groups,
-precise counts, transformed local coordinates, and layering. These prompts contain many more constraints than the original one-shot curriculum.
-The task types now require computational geometry: Voronoi clipping, Delaunay
-triangulation, Apollonian packing, involute gears, spline offsets, marching
-squares, projected 3D meshes, Penrose subdivision, planar graph faces, hyperbolic
-geodesics, and related constructions. Repeated points, collinear sites, tangent
-geometry, and periodic seams are legitimate inputs the requested drawing must
-handle correctly.
-
-The model is always asked to produce a correct solution. Its Python code is
-executed **verbatim**. No prompt requests mistakes and no code is mutated.
-Naturally occurring execution failures and genuine prompt-level visual failures
-can both count toward the sixteen new repairs. Every valid preview is inspected
-using its actual PNG. Visual correction requests include that PNG and the
-observed mismatches against the original prompt. Only successful corrections with a
-fresh final render and passing final image review qualify. Examples that are
-correct on their first preview, malformed JSON alone, truncation alone, and
-infrastructure failures do not count. The sampler stops once it has sixteen successful natural repairs;
-any extra successes in its last worker batch remain in `generated/`.
-
-One candidate is sampled per hard prompt by default, with at most two correction
-requests. Four independent tasks run at once; use `--workers 1` for sequential
-execution. Repair generation allows 8,192 teacher tokens per request so a small
-output cap does not manufacture failures. The warmup targets **Qwen/Qwen3.5-0.8B** with text and image observations. By
-default the same teacher reviews each rendered preview and fresh final image in
-a separate vision context; this is labeled `self-review`, not independent-model
-validation. Supply a different vision reviewer with `--judge-model` for an
-independent model. A review sees the actual image and source, and the teacher
-receives the actual PNG when correcting a visual mismatch.
-
-Raw completions, `trace.executedCode`, image-bearing `trace.observation` records,
-and execution trajectories preserve the model's actual programs and observations.
-Each observation stores an artifact path and PNG hash. The SFT adapter must load
-these images through the model's multimodal processor and mask image/input tokens
-from the language-model loss. Failed actions stay in context and are loss-masked.
-
-The discarded synthetic experiment is archived under `datasets/archive/` and is
-excluded from the active selection. The earlier natural scene pilot is preserved
-at `datasets/natural-scene-pilot/`; its two genuine repairs can be reused with
-`--natural-repairs-from datasets/natural-scene-pilot/generated`. Imports must
-come from the same teacher and preserve its exact output. Their final PNGs must
-pass the current vision review before they count; their source hashes
-and IDs are frozen in the manifest. Resume discovers that source from the saved
-manifest automatically. The active generator rejects synthetic repair
-records and has no error injector. Unmodified first drafts can also be reused
-with `--drafts-from datasets/natural-algorithmic-pilot/generated`; they are
-re-rendered and inspected, and reused draft calls are excluded from new API
-usage totals. Saved draft sources are discovered automatically on resume.
-
-`datasets/sft-warmup-100/` contains:
-
-- `warmup-manifest.json`: frozen retained IDs, provenance, duplicate exceptions,
-  complex repair plan, and selection rules.
-- `retained.jsonl`: the existing 84 records with copied artifacts.
-- `imported-natural-repairs.jsonl`: any genuine repairs reused from an earlier
-  sampling run, with copied artifacts and original provenance.
-- `generated/`: resumable teacher requests, candidates, source, previews, final
-  images, execution feedback, and usage totals for the new repair curriculum.
-- `examples.jsonl`, `one-shot.jsonl`, and `repair.jsonl`: the current selection.
-- `summary.json`: actual counts, remaining repair quota, and completion status.
-- `train.jsonl`: written only when all **80 one-shot + 20 repair** examples exist.
-
-Every selected row has `warmup.split="train"`. Its original `spec.split` remains
-provenance: this first run deliberately consumes some former validation/test
-examples, so use a new held-out evaluation set. Selection does not imply visual
-or safety approval; original status and `humanReviewed` flags remain intact.
-Review the final drawings before SFT. Per-record `selectionAudit.eligible=false`
-excludes an ambiguous reviewer critique while preserving its raw evidence. Mask
-failed assistant actions from
-training loss while retaining their code/errors as repair context. A bounded run
-that cannot produce all sixteen repairs exits nonzero and withholds `train.jsonl`.
-
-For just the new complex repair curriculum, use `.venv/bin/python -m drawing.generate_dataset --curriculum
-repair --output datasets/complex-repairs` with your teacher settings. Its hard-task
-pool is also available via `--dry-run`.
 
 ## Supervised fine-tuning with TRL
 
@@ -499,7 +397,7 @@ the trained checkpoint, load `final/` in a compatible vision/tool inference serv
 and choose a sufficient generation limit in both serving and harness configuration.
 
 All commands run directly as Python modules; no Node.js or compilation step is required.
-The Makefile provides `serve`, `draw`, `render`, `dataset`, `dataset-warmup`, and
+The Makefile provides `serve`, `draw`, `render`, `dataset`, and
 `eval` shortcuts. Pass CLI arguments with `ARGS`, for example
 `make dataset ARGS="--dry-run --count 20"`.
 

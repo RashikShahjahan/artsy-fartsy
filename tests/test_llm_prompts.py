@@ -64,9 +64,6 @@ class PromptClient:
         request = json.loads(messages[1]["content"])
         self.requests.append(request)
         values = [item(slot) for slot in request["slots"]]
-        if request["mode"] == "repair":
-            for value in values:
-                value["technicalSkills"] = ["arc-length sampling", "polygon clipping"]
         return response(values)
 
 
@@ -95,12 +92,6 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all("caseType" not in x and "repairTask" not in x for x in hard["specs"]))
         self.assertEqual(validate_specs(hard["specs"]), hard["specs"])
 
-    async def test_repair_curriculum_contains_advanced_technical_metadata(self) -> None:
-        result = await generate_llm_prompts(PromptClient(), count=16, mode="repair", batch_size=8)
-        self.assertTrue(all(spec["difficulty"] == "very-hard" for spec in result["specs"]))
-        self.assertTrue(all(spec["repairTask"]["complexity"] == "advanced"
-                            and len(spec["repairTask"]["skills"]) >= 2 for spec in result["specs"]))
-
     async def test_duplicate_reply_is_retried(self) -> None:
         class DuplicateOnce(PromptClient):
             async def complete(self, messages: list[dict], max_tokens: int) -> dict:
@@ -118,7 +109,7 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["batches"][1]["attempts"], 2)
 
     def test_invalid_fields_and_labels_are_rejected(self) -> None:
-        slot = _slots(1, 42, "standard")[0]
+        slot = _slots(1, 42)[0]
         valid = item(slot)
         with self.assertRaisesRegex(ValueError, "difficulty"):
             validate_specs([{"family": "circles", "prompt": "Draw a circle", "seed": 1,
@@ -127,7 +118,7 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
                        {**valid, "skills": ["invalid_skill"]},
                        {**valid, "skills": [slot["primarySkill"], slot["primarySkill"]]}):
             with self.subTest(broken=broken), self.assertRaises(ValueError):
-                _parse_batch(json.dumps({"items": [broken]}), [slot], [], 42, mode="standard")
+                _parse_batch(json.dumps({"items": [broken]}), [slot], [], 42)
 
 
 class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):

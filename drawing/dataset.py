@@ -92,13 +92,6 @@ def _pixel_hash(png: bytes) -> str:
     return sha256(f"{image.width}x{image.height}:".encode() + image.tobytes())
 
 
-def _repaired(record: dict[str, Any], images: bool = False) -> bool:
-    gen = record.get("generation")
-    return bool(gen and (record.get("selectionAudit") or {}).get("eligible") is not False
-                and (gen.get("executionFailures") or gen.get("visualFailures"))
-                and (not images or gen.get("finalImagePassed")))
-
-
 async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, api_doc: str) -> dict[str, Any]:
     from .environment import DrawingEnvironment
     output = Path(options["output"]).resolve()
@@ -118,10 +111,9 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
     if judge:
         record["evaluator"] = {**_provenance(judge), "version": EVALUATOR_VERSION,
             "reviewMode": "self-review" if judge.model == options["teacher"].model and judge.baseUrl == options["teacher"].baseUrl else "independent-model"}
-    if options.get("mode") == "repair":
-        record["generation"] = {"mode": "repair", "initialDraft": "natural", "executionFailures": 0}
-        if options.get("imageObservations"):
-            record["generation"].update({"visualFailures": 0, "imageObservations": True, "finalImagePassed": False})
+    record["generation"] = {"initialDraft": "natural", "executionFailures": 0}
+    if options.get("imageObservations"):
+        record["generation"].update({"visualFailures": 0, "imageObservations": True, "finalImagePassed": False})
 
     messages: list[Message] = [
         {"role": "system", "content": ("Write an editable Python/ArtCanvas program for the drawing request. Return ONLY JSON with exactly one string field: "
@@ -223,7 +215,6 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                 if result["safety"] == "uncertain": record.update(status="review", reason=result["reason"]); break
                 if not (result["correct"] and result["score"] >= threshold):
                     record["reason"] = result["reason"]
-                    if options.get("mode") == "repair" and not options.get("imageObservations"): break
                     text = ("Inspect the actual rendered image attached below against the original drawing request. Visual evaluation found: "
                             f"{compact_json(result)}. Correct the visible mistakes and return a complete corrected program as JSON.")
                     if options.get("imageObservations"):
@@ -238,8 +229,6 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                     continue
                 if record.get("generation", {}).get("visualFailures") and not record["generation"].get("executionFailures") and trace.get("renderedPixelHash") in failed_visual_pixels:
                     record["reason"] = "The approved render is identical to a visually failed preview; no genuine visual repair was established"; break
-            if record.get("generation") is not None and not record["generation"].get("executionFailures") and not record["generation"].get("visualFailures"):
-                record["reason"] = "Repair curriculum requires a genuine execution or visual failure before successful correction; one-shot output excluded"; break
             feedback = await env.submit()
             if not feedback.get("ok"):
                 trace["feedback"] = feedback; record["reason"] = feedback.get("error") or feedback.get("stderr") or feedback.get("outcome")
@@ -271,16 +260,8 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     output = Path(options["output"]).resolve()
     candidates, repairs = options.get("candidates", 2), options.get("repairs", 2)
     max_tokens, threshold, workers = options.get("maxTokens", 4096), options.get("threshold", 0.85), options.get("workers", 1)
-    mode = options.get("mode")
-    if options.get("repairTarget") is not None and (mode != "repair" or type(options["repairTarget"]) is not int or options["repairTarget"] < 1):
-        raise ValueError("repairTarget requires repair mode and a positive integer")
     if type(workers) is not int or not 1 <= workers <= 8: raise ValueError("workers must be an integer from 1 to 8")
-    if workers > 1 and mode != "repair": raise ValueError("Parallel workers are supported only for independent repair tasks")
-    if mode is not None and mode not in ("standard", "repair"): raise ValueError("Unknown dataset mode")
     if options.get("imageObservations") and not options.get("judge"): raise ValueError("Image observations require a vision reviewer")
-    if options.get("retryRejected") and mode != "repair": raise ValueError("retry-rejected is supported only for the repair curriculum")
-    if mode == "repair" and (repairs < 1 or any(not s.get("repairTask") for s in specs)):
-        raise ValueError("Repair mode requires at least one repair and advanced repairTask specifications")
     if type(candidates) is not int or candidates < 1: raise ValueError("candidates must be a positive integer")
     if type(max_tokens) is not int or max_tokens < 1: raise ValueError("maxTokens must be a positive integer")
     if type(repairs) is not int or not 0 <= repairs <= 2: raise ValueError("repairs must be 0, 1, or 2 (the environment permits three previews)")
@@ -313,9 +294,6 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             manifest["promptGenerator"] = options["promptGenerator"]
         if options.get("imageObservations"): manifest["imageObservations"] = True
         if draft_sources: manifest["draftSources"] = draft_sources
-        if mode == "repair":
-            manifest.update(mode="repair", repairGenerationVersion=4, failureSource="unmodified-model-output")
-            if options.get("repairTarget"): manifest["repairTarget"] = options["repairTarget"]
         manifest_path = output / "manifest.json"
         if manifest_path.exists():
             previous = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -331,11 +309,10 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             for index in range(candidates):
                 path = records_path / f"{spec['id']}-c{index}.json"
                 saved_records.append(json.loads(path.read_text(encoding="utf-8")) if path.exists() else None)
-            has_completed_repair = mode == "repair" and any(r and r.get("status") in ("accepted", "review") and r.get("artifacts", {}).get("source") and _repaired(r, options.get("imageObservations", False)) for r in saved_records)
             out: list[dict[str, Any]] = []
             for index, saved in enumerate(saved_records):
                 filename = f"{spec['id']}-c{index}.json"
-                retry = not has_completed_repair and ((saved and saved.get("status") == "infrastructure_error" and options.get("retryErrors")) or (saved and saved.get("status") == "rejected" and options.get("retryRejected")))
+                retry = saved and saved.get("status") == "infrastructure_error" and options.get("retryErrors")
                 record = saved if saved and not retry else await _candidate({**options, "output": str(output)}, spec, index, api_doc)
                 if retry:
                     record["previousAttempts"] = [*(saved.get("previousAttempts", [])), {k: v for k, v in saved.items() if k != "previousAttempts"}]
@@ -352,11 +329,9 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
                 out.append(record)
                 callback = options.get("onRecord")
                 if callback: callback(record)
-                if mode == "repair" and record.get("status") in ("accepted", "review") and record.get("artifacts", {}).get("source") and _repaired(record, options.get("imageObservations", False)): break
             return out
 
         for offset in range(0, len(specs), workers):
-            if options.get("repairTarget") and sum(r["status"] in ("accepted", "review") and _repaired(r, options.get("imageObservations", False)) for r in records) >= options["repairTarget"]: break
             # Parallelism is bounded by independent specifications, matching TS batching.
             batch = await asyncio.gather(*(process_spec(s) for s in specs[offset:offset + workers]), return_exceptions=True)
             error = next((result for result in batch if isinstance(result, BaseException)), None)

@@ -4,7 +4,6 @@ import asyncio
 import base64
 import io
 import json
-import shutil
 import tempfile
 import unittest
 import urllib.error
@@ -19,7 +18,6 @@ from drawing.dataset_client import chat_client, parse_json_reply
 from drawing.dataset_prompts import compact_json, family_split, generate_prompts, sha256, validate_specs
 
 ROOT = Path(__file__).resolve().parents[1]
-LEGACY_FIXTURE = ROOT / "tests" / "fixtures" / "legacy-dataset"
 
 
 def completion(text: str) -> dict[str, Any]:
@@ -186,21 +184,6 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Duplicate source or rendered pixels", rejected)
         self.assertEqual((self.output / "test.jsonl").read_text(), "")
 
-    async def test_rejected_repair_can_retry_and_keeps_prior_attempt(self) -> None:
-        spec = {"id": "retry-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 30,
-                "repairTask": {"complexity": "advanced", "skills": ["color", "geometry"]}}
-        teacher = ScriptedClient(['{"code":"good"}', '{"code":"broken python"}', '{"code":"fixed"}'])
-        judge = ScriptedClient([self.rubric(), self.rubric(), self.rubric()], model="judge")
-        options = {"output": str(self.output), "specs": [spec], "mode": "repair", "candidates": 1,
-                   "teacher": teacher, "judge": judge, "renderer": self.renderer(), "config": self.config()}
-        first = await generate_dataset(options)
-        self.assertEqual(first["rejected"], 1)
-        retried = await generate_dataset({**options, "retryRejected": True})
-        self.assertEqual(retried["accepted"], 1)
-        row = json.loads((self.output / "records/retry-repair-c0.json").read_text())
-        self.assertEqual(row["previousAttempts"][0]["status"], "rejected")
-        self.assertEqual(row["generation"]["executionFailures"], 1)
-
     async def test_malformed_teacher_reply_uses_bounded_repairs_and_lock_is_enforced(self) -> None:
         one = generate_prompts(1)[0]
         options = {"output": str(self.output), "specs": [one], "teacher": ScriptedClient(["not json", '{"code":"a","refusal":"b"}']),
@@ -261,8 +244,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         import io as image_io
         from PIL import Image
 
-        spec = {"id": "visual-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 13,
-                "repairTask": {"complexity": "advanced", "skills": ["color", "geometry"]}}
+        spec = {"id": "visual-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 13}
 
         def color_png(color: tuple[int, int, int]) -> bytes:
             buff = image_io.BytesIO(); Image.new("RGB", (32, 32), color).save(buff, format="PNG"); return buff.getvalue()
@@ -287,7 +269,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
                                               "reason": "The preview is red" if score == 0 else "The preview is blue"}))
 
         teacher = ScriptedClient(['{"code":"red"}', '{"code":"blue"}'])
-        summary = await generate_dataset({"output": str(self.output), "specs": [spec], "mode": "repair", "imageObservations": True,
+        summary = await generate_dataset({"output": str(self.output), "specs": [spec], "imageObservations": True,
                                           "candidates": 1, "teacher": teacher, "judge": VisualJudge(),
                                           "renderer": ColorRenderer(), "config": self.config()})
         self.assertEqual(summary["accepted"], 1); self.assertEqual(len(seen_pngs), 3)
@@ -312,7 +294,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
 
         flip_judge = FlipJudge()
         repeated_renderer = self.renderer(red)
-        same_summary = await generate_dataset({"output": str(self.output), "specs": [spec], "mode": "repair", "imageObservations": True,
+        same_summary = await generate_dataset({"output": str(self.output), "specs": [spec], "imageObservations": True,
                                                "candidates": 1, "teacher": flip_teacher, "judge": flip_judge,
                                                "renderer": repeated_renderer, "config": self.config()})
         self.assertEqual(same_summary["rejected"], 1); self.assertEqual(flip_judge.calls, 2)
@@ -342,35 +324,15 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(row["previousAttempts"]), 1)
         self.assertEqual(row["previousAttempts"][0]["status"], "infrastructure_error")
 
-    async def test_one_shot_success_is_excluded_from_repair_curriculum(self) -> None:
-        spec = {"id": "one-shot", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 20,
-                "repairTask": {"complexity": "advanced", "skills": ["color", "geometry"]}}
-        summary = await generate_dataset({"output": str(self.output), "specs": [spec], "mode": "repair", "candidates": 1,
+    async def test_one_shot_success_is_valid_training_data(self) -> None:
+        spec = {"id": "one-shot", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 20}
+        summary = await generate_dataset({"output": str(self.output), "specs": [spec], "candidates": 1,
                                           "teacher": ScriptedClient(['{"code":"draw()"}']),
-                                          "judge": ScriptedClient([self.rubric()], model="judge"),
+                                          "judge": ScriptedClient([self.rubric(), self.rubric()], model="judge"),
                                           "renderer": self.renderer(), "config": self.config()})
-        self.assertEqual(summary["rejected"], 1)
+        self.assertEqual(summary["accepted"], 1)
         row = json.loads((self.output / "records/one-shot-c0.json").read_text())
-        self.assertIn("one-shot output excluded", row["reason"])
-        self.assertEqual(len(row["evaluations"]), 1)
-
-    async def test_legacy_checkpoint_requires_a_new_dataset_directory(self) -> None:
-        shutil.copytree(LEGACY_FIXTURE, self.output)
-        manifest = json.loads((self.output / "manifest.json").read_text())
-
-        class MustNotCall:
-            model = "golden-teacher"
-            baseUrl = "http://teacher/v1"
-            async def complete(self, *_: Any) -> dict[str, Any]:
-                raise AssertionError("A completed TypeScript checkpoint must be reused")
-
-        with self.assertRaisesRegex(ValueError, "configuration changed"):
-            await generate_dataset({"output": str(self.output), "specs": manifest["specs"], "teacher": MustNotCall(),
-                                    "candidates": manifest["candidates"], "repairs": manifest["repairs"],
-                                    "maxTokens": manifest["maxTokens"], "threshold": manifest["threshold"],
-                                    "config": manifest["config"]})
-        record = json.loads((self.output / "records" / "fe6970f11b9ac67e684d72c6-c0.json").read_text())
-        self.assertEqual(record["reason"], "Executable output; semantic and safety evaluation pending")
+        self.assertEqual(row["generation"]["executionFailures"], 0)
 
 
 if __name__ == "__main__":

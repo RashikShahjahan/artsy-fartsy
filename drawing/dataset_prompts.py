@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import re
@@ -84,18 +83,10 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
         normalized = re.sub(r"\s+", " ", row["prompt"].strip()).lower()
         if normalized in prompts:
             raise ValueError("Duplicate prompt in generation plan")
-        repair = row.get("repairTask")
-        if repair is not None and (not isinstance(repair, dict) or repair.get("complexity") != "advanced"
-                                   or not isinstance(repair.get("skills"), list) or len(repair["skills"]) < 2
-                                   or not all(isinstance(skill, str) and skill.strip() for skill in repair["skills"])
-                                   or "defects" in repair):
-            raise ValueError("Repair tasks need advanced complexity and at least two skills; defect instructions are prohibited")
         ids.add(ident)
         prompts.add(normalized)
         normalized_row = {"id": ident, "family": row["family"], "split": split, "prompt": row["prompt"],
                           "seed": row["seed"]}
-        if repair is not None:
-            normalized_row["repairTask"] = copy.deepcopy(repair)
         skills = row.get("skills")
         if skills is not None:
             if (not isinstance(skills, list) or not 1 <= len(skills) <= 5
