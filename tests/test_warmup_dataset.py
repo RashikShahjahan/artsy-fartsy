@@ -21,11 +21,12 @@ class RepairCurriculumTests(unittest.TestCase):
         self.assertEqual(specs, generate_repair_prompts())
         self.assertNotEqual(specs, generate_repair_prompts(43))
         self.assertEqual(hashlib.sha256(compact_json(specs).encode()).hexdigest(),
-                         "feb6252b710ba06f70fce461a680686002b272480f88bb8bd8b5adc3f656e74a")
+                         "ba06561bc926630bf6dd01c3309e7e35980581dd06689100a664c0076110ca10")
         self.assertEqual(len({spec["prompt"] for spec in specs}), 128)
         for spec in specs:
             self.assertEqual(spec["split"], "train")
-            self.assertGreaterEqual(len(spec["requirements"]), 13)
+            self.assertNotIn("requirements", spec)
+            self.assertGreaterEqual(len(spec["prompt"].split(". ")), 13)
             self.assertEqual(spec["repairTask"]["complexity"], "advanced")
             self.assertGreaterEqual(len(spec["repairTask"]["skills"]), 3)
             self.assertNotIn("defects", spec["repairTask"])
@@ -51,7 +52,7 @@ class WarmupSelectionTests(unittest.TestCase):
                       "feedback": {"ok": True}})
         return {"version": "artsy-dataset-v1", "id": ident, "status": "review", "reason": "Needs visual review",
                 "spec": {"id": ident, "family": "circles", "split": "train", "prompt": f"Drawing {index}",
-                         "requirements": ["A drawing"], "expectedOutcome": "drawing", "seed": index},
+                         "expectedOutcome": "drawing", "seed": index},
                 "code": code, "sourceHash": sha256(code), "imageHash": sha256(image), "pixelHash": f"pixels-{index}",
                 "artifacts": {"directory": f"artifacts/{ident}", "source": f"artifacts/{ident}/program.py",
                               "image": f"artifacts/{ident}/image.png", "trajectory": f"artifacts/{ident}/trajectory.jsonl"},
@@ -163,6 +164,7 @@ class WarmupAssemblyTests(unittest.IsolatedAsyncioTestCase):
                 all_rows = [json.loads(line) for line in (output / "train.jsonl").read_text().splitlines()]
                 self.assertEqual(sum(row["warmup"]["duplicateException"] for row in all_rows), 3)
                 self.assertTrue(all(row["warmup"]["split"] == "train" for row in all_rows))
+                self.assertTrue(all("requirements" not in row["spec"] for row in all_rows))
                 self.assertEqual(next(row for row in all_rows if row["id"] == originals[1]["id"])["warmup"]["sourceSplit"], "test")
                 self.assertEqual((source / "candidates.jsonl").read_bytes(), original_json)
                 self.assertEqual((await warmup.generate_warmup_dataset(options)), summary)
