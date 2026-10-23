@@ -212,6 +212,13 @@ Judge labels still need human calibration.
 Each run saves Inspect transcripts and model token usage in `logs/`, source and
 final image hashes plus execution/judge feedback in `artifacts/<id>-<epoch>/`,
 and aggregate scores, error counts, usage, and log locations in `summary.json`.
+Each sample's `result.json` also records observed preview attempts, source
+revisions, initial render validity, and recovery from execution failures in
+`trajectory`. These are observed behaviors, not preassigned repair labels.
+When the model doesn't preview, the initial outcome is unknown; a successful
+final render is not counted as a verified one-shot success. `summary.json`
+aggregates completion, render, visual-pass, and execution-recovery rates by
+difficulty. Visual repair of intermediate previews is not independently judged.
 Logs also record hashes of the dataset, runtime, documentation, and harness
 configuration. Open them with `.eval-venv/bin/inspect view --log-dir eval-results/base/logs`.
 Use `--dataset path/to/prompts.jsonl` for custom drawing test specs with `id`,
@@ -227,7 +234,7 @@ can have multiple `skills` labels (e.g. `symmetry`, `relative_geometry`,
 per-skill analysis; the correctness evaluator judges **only the original prompt
 and rendered output**, not a hidden `requirements` or `expectedOutcome` field.
 
-**Generate evaluation prompts with explicitly chosen counts (15 standard, 5 repair-oriented):**
+**Generate evaluation prompts balanced across difficulty levels:**
 
 ```sh
 # Choose a capable prompt-writing model, with an OpenAI-compatible endpoint.
@@ -235,15 +242,16 @@ export ARTSY_PROMPT_MODEL=your-prompt-writer
 export ARTSY_PROMPT_URL=http://127.0.0.1:9000/v1
 # Set ARTSY_PROMPT_API_KEY if the endpoint requires authentication.
 
-.venv/bin/python -m drawing.generate_dataset --dry-run --count 15 --repair-count 5 --seed 42 > evaluation/generated-20.jsonl
+.venv/bin/python -m drawing.generate_dataset --dry-run --count 20 --difficulty mixed --seed 42 > evaluation/generated-20.jsonl
 .eval-venv/bin/python -m evaluation.evaluate --dataset evaluation/generated-20.jsonl --dry-run
 ```
 
-`--dry-run` now **calls the prompt-writing LLM**, but does not run a teacher or
-renderer. Each prompt is a standalone user request; the five `caseType=repair`
-cases are complex geometry/composition challenges designed to stress the
-write → run → fix loop. They do not contain deliberately broken code. Inspect
-checks the actual trajectory and final PNG, and ignores the metadata labels.
+`--dry-run` calls the prompt-writing LLM, but does not run a teacher or
+renderer. Each prompt is a standalone user request with a saved `difficulty`
+label: `easy`, `medium`, `hard`, or `very-hard`. `mixed` cycles evenly
+through the four levels; select a single level with `--difficulty hard` (or
+another level). Difficulty describes intended task complexity, not whether a
+repair must happen. The Inspect agent may preview and fix any task.
 For a frozen comparison, keep the resulting JSONL under version control or in
 a benchmark dataset; rerunning with the same seed alone cannot reproduce
 model-authored wording exactly. Keep evaluated tasks out of SFT training.
@@ -266,20 +274,13 @@ configuration requires a new output directory. Neither API keys nor credentials
 are persisted. For prompts only, `--dry-run` prints JSONL without split labels.
 For complete dataset runs, existing family-based training splits remain internal.
 
-No fixed standard/repair proportion is imposed. `--count 20` makes only
-standard prompts; `--count 0 --repair-count 20` makes only repair-oriented
-prompts, and `--count 15 --repair-count 5` makes a specified mix. For a wholly challenging
-**natural repair** curriculum, use:
-
-```sh
-.venv/bin/python -m drawing.generate_dataset --curriculum repair --pool-size 32 --output datasets/llm-repair
-```
-
-This generates advanced, computationally demanding tasks with
-`repairTask.skills` metadata. The repair pipeline accepts examples only after
-a genuine execution or visual failure followed by successful correction.
-The separate `--warmup-from` command still uses its frozen legacy repair
-pool to reproduce the existing 80/20 warmup selection.
+For higher-difficulty training data, use `--difficulty hard` or
+`--difficulty very-hard` with a fresh output directory. Full generation saves the teacher's
+natural write-run-fix trajectory whenever a task needs correction; successful
+initial attempts remain valuable one-shot examples. `--repairs` sets the
+per-candidate retry budget, not a quota of repair prompts. The historical
+`--curriculum repair` and `--warmup-from` commands remain available only for
+reproducing existing repair/warmup datasets; they are not needed for new data.
 
 Set an independent **vision** judge to automatically accept generated drawings.
 It must handle PNG `image_url` messages:
@@ -303,12 +304,12 @@ and refusal appropriateness against the original request; a score of at least
 Custom prompt files still bypass the planner:
 
 ```json
-{"id":"blue-circle","family":"circles","prompt":"Draw one centered blue circle on white.","seed":42,"skills":["primitives","positioning"]}
+{"id":"blue-circle","family":"circles","prompt":"Draw one centered blue circle on white.","seed":42,"difficulty":"easy","skills":["primitives","positioning"]}
 ```
 
 Pass `--input prompts.jsonl`. Extra fields for `requirements` and
 `expectedOutcome` are ignored by dataset validation, not sent to the judge.
-The `family` label is used for group-level splits; `skills` and `caseType`
+The `family` label is used for group-level splits; `skills` and `difficulty`
 are optional metadata. Original fixed-template generation is retained as a
 legacy Python helper for compatibility tests, not used by the default CLI.
 

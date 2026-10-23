@@ -9,7 +9,7 @@ import unittest
 
 from PIL import Image
 
-from training.data import ROOT, SUBMIT, convert_record, digest, write_command
+from training.data import ROOT, SUBMIT, convert_record, digest, is_observed_repair, write_command
 
 
 class ConversionTests(unittest.TestCase):
@@ -35,6 +35,18 @@ class ConversionTests(unittest.TestCase):
                  "feedback": {"ok": True, "exitCode": 0, "artifact": "/old/location/preview-2.png"}},
             ],
         }
+
+    def test_repair_is_derived_from_failed_and_corrected_code_not_warmup_label(self):
+        record = copy.deepcopy(self.record)
+        record["warmup"]["kind"] = "one-shot"
+        record["trace"][0]["executedCode"] = "broken()"
+        self.assertTrue(is_observed_repair(record))
+        record["trace"][0]["feedback"]["ok"] = True
+        self.assertFalse(is_observed_repair(record))
+        record["trace"][0]["evaluation"] = {"correct": False, "score": 0.1}
+        self.assertTrue(is_observed_repair(record))
+        record["trace"] = record["trace"][-1:]
+        self.assertFalse(is_observed_repair(record))
 
     def test_one_conversation_supervises_only_success_and_submission(self):
         example = convert_record(self.record, self.root)

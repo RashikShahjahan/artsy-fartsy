@@ -10,6 +10,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from drawing.dataset_prompts import DIFFICULTIES
+
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = [{"type": "function", "function": {
     "name": "bash", "description": "Execute a bash command in the working directory.",
@@ -166,6 +168,27 @@ def convert_record(record: dict, root: Path) -> dict:
             "trainable_message_indices": trainable_message_indices, "tools": TOOLS}
 
 
+def is_observed_repair(record: dict) -> bool:
+    """A revised source recovered from a recorded execution or visual failure."""
+    trace = record.get("trace") or []
+    if len(trace) < 2 or not (trace[-1].get("feedback") or {}).get("ok"):
+        return False
+    final_source = trace[-1].get("executedCode")
+    if not final_source:
+        return False
+    for step in trace[:-1]:
+        source = step.get("executedCode")
+        if not source or source == final_source:
+            continue
+        feedback = step.get("feedback") or {}
+        evaluation = step.get("evaluation") or {}
+        if (feedback.get("ok") is False or evaluation.get("correct") is False
+                or (isinstance(evaluation.get("score"), (int, float))
+                    and evaluation["score"] < 0.85)):
+            return True
+    return False
+
+
 def load_examples(path: Path) -> tuple[list[dict], dict]:
     path = path.resolve()
     records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
@@ -175,8 +198,11 @@ def load_examples(path: Path) -> tuple[list[dict], dict]:
     return examples, {
         "dataset": str(path), "dataset_sha256": digest(path.read_bytes()),
         "records": len(records), "examples": len(examples),
-        "one_shot": sum(r.get("warmup", {}).get("kind") == "one-shot" for r in records),
-        "repairs": sum(r.get("warmup", {}).get("kind") == "repair" for r in records),
+        "one_shot": sum(len(r.get("trace", [])) == 1 and
+                        (r["trace"][0].get("feedback") or {}).get("ok") is True for r in records),
+        "repairs": sum(is_observed_repair(r) for r in records),
+        "difficulty_counts": {level: sum(r["spec"].get("difficulty") == level for r in records)
+                              for level in DIFFICULTIES},
         "unreviewed_records": sum(r.get("status") != "accepted" for r in records),
         "examples_with_images": sum(any(p["type"] == "image" for m in e["messages"] for p in m["content"]) for e in examples),
         "api_doc_sha256": digest((ROOT / "docs/artcanvas.md").read_bytes()),

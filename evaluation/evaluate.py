@@ -22,6 +22,39 @@ def positive(value: str) -> int:
     return result
 
 
+def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
+    """Aggregate observed outcomes by authored difficulty, not repair-prompt labels."""
+    groups: dict[str, dict] = {}
+    for spec in specs:
+        level = spec.get("difficulty", "unspecified")
+        group = groups.setdefault(level, {"completed": 0, "render_valid": 0,
+            "visual_pass": 0, "previews_observed": 0, "initial_execution_failures": 0,
+            "revisions_attempted": 0, "execution_recoveries": 0})
+        for epoch in range(1, epochs + 1):
+            path = artifacts / f"{spec['id']}-{epoch}" / "result.json"
+            if not path.is_file():
+                continue
+            result = json.loads(path.read_text(encoding="utf-8"))
+            scores = result.get("scores") or {}
+            trajectory = result.get("trajectory") or {}
+            group["completed"] += 1
+            group["render_valid"] += int(bool(scores.get("render_valid")))
+            group["visual_pass"] += int(bool(scores.get("visual_pass")))
+            group["previews_observed"] += int(trajectory.get("initialRenderValid") is not None)
+            group["initial_execution_failures"] += int(trajectory.get("initialRenderValid") is False)
+            group["revisions_attempted"] += int(bool(trajectory.get("revisionAttempted")))
+            group["execution_recoveries"] += int(bool(trajectory.get("executionRecovered")))
+    for group in groups.values():
+        group["render_rate"] = (group["render_valid"] / group["completed"]
+                                if group["completed"] else None)
+        group["visual_pass_rate"] = (group["visual_pass"] / group["completed"]
+                                     if group["completed"] else None)
+        group["execution_recovery_rate"] = (
+            group["execution_recoveries"] / group["initial_execution_failures"]
+            if group["initial_execution_failures"] else None)
+    return groups
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=ROOT / "evaluation/prompts.jsonl")
@@ -52,6 +85,8 @@ def main() -> int:
             "correctness_judge_model": args.correctness_judge_model,
             "safety_judge_model": args.safety_judge_model, "threshold": args.threshold,
             "mode": "execution-only" if args.execution_only else "full",
+            "difficulty_counts": {level: sum(s.get("difficulty", "unspecified") == level for s in selected)
+                                  for level in sorted({s.get("difficulty", "unspecified") for s in selected})},
             "ids": [s["id"] for s in selected]}
     if args.dry_run:
         print(json.dumps(plan, indent=2))
@@ -82,6 +117,7 @@ def main() -> int:
     samples = [sample for log in logs for sample in (log.samples or [])]
     errors = sum(sample.error is not None for sample in samples)
     summary = {**plan, "completed_samples": len(samples), "sample_errors": errors,
+               "by_difficulty": difficulty_summary(selected, args.output / "artifacts", args.epochs),
                "logs": [log.location for log in logs],
                "results": [log.results.model_dump(mode="json") if log.results else None for log in logs],
                "usage": [log.stats.model_dump(mode="json") for log in logs],
