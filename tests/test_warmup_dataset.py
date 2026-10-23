@@ -21,11 +21,12 @@ class RepairCurriculumTests(unittest.TestCase):
         self.assertEqual(specs, generate_repair_prompts())
         self.assertNotEqual(specs, generate_repair_prompts(43))
         self.assertEqual(hashlib.sha256(compact_json(specs).encode()).hexdigest(),
-                         "ba06561bc926630bf6dd01c3309e7e35980581dd06689100a664c0076110ca10")
+                         "2a63fd5d5a243708663abb8f071eda087bf21cb328f1ce2e40253768fb46cd96")
         self.assertEqual(len({spec["prompt"] for spec in specs}), 128)
         for spec in specs:
             self.assertEqual(spec["split"], "train")
             self.assertNotIn("requirements", spec)
+            self.assertNotIn("expectedOutcome", spec)
             self.assertGreaterEqual(len(spec["prompt"].split(". ")), 13)
             self.assertEqual(spec["repairTask"]["complexity"], "advanced")
             self.assertGreaterEqual(len(spec["repairTask"]["skills"]), 3)
@@ -165,6 +166,7 @@ class WarmupAssemblyTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(sum(row["warmup"]["duplicateException"] for row in all_rows), 3)
                 self.assertTrue(all(row["warmup"]["split"] == "train" for row in all_rows))
                 self.assertTrue(all("requirements" not in row["spec"] for row in all_rows))
+                self.assertTrue(all("expectedOutcome" not in row["spec"] for row in all_rows))
                 self.assertEqual(next(row for row in all_rows if row["id"] == originals[1]["id"])["warmup"]["sourceSplit"], "test")
                 self.assertEqual((source / "candidates.jsonl").read_bytes(), original_json)
                 self.assertEqual((await warmup.generate_warmup_dataset(options)), summary)
