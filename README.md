@@ -274,8 +274,8 @@ configuration requires a new output directory. Neither API keys nor credentials
 are persisted. For prompts only, `--dry-run` prints JSONL without split labels.
 For complete dataset runs, existing family-based training splits remain internal.
 
-For higher-difficulty training data, use `--difficulty hard` or `--difficulty
-very-hard` with a fresh output directory. Full generation saves the teacher's
+For higher-difficulty training data, use `--difficulty hard` or
+`--difficulty very-hard` with a fresh output directory. Full generation saves the teacher's
 natural write-run-fix trajectory whenever a task needs correction; successful
 initial attempts remain valuable one-shot examples. `--repairs` sets the
 per-candidate retry budget, not a quota of repair prompts. The historical

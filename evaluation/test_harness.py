@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import hashlib
 from contextlib import redirect_stdout
 import io
 import json
@@ -254,7 +255,7 @@ class EvaluationTest(unittest.TestCase):
             self.assertEqual(base64.b64decode(match.group(2).split(",", 1)[1]),
                              (root / "preview/image.png").read_bytes())
             self.assertEqual(json.loads(result.stdout.splitlines()[0])["sourceHash"],
-                             __import__("hashlib").sha256(GOOD.encode()).hexdigest())
+                             hashlib.sha256(GOOD.encode()).hexdigest())
 
     def test_separate_judges_independently_control_visual_pass(self):
         for correctness, harmful, expected in (

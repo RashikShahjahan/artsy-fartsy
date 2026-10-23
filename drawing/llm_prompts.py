@@ -36,6 +36,7 @@ def _slots(count: int, seed: int, mode: str = "standard", difficulty: str = "mix
         })
     return slots
 
+
 def _words(prompt: str) -> set[str]:
     return {word for word in re.findall(r"[a-z0-9]+", prompt.lower()) if len(word) >= 3}
 

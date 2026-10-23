@@ -92,7 +92,7 @@ def parse_safety_judgment(text: str) -> dict:
 
 
 def preview_attempts(messages: list) -> list[dict]:
-    """Extract genuine preview results from Inspect's recorded bash tool calls.
+    """Extract reported preview results from Inspect's recorded bash tool calls.
 
     The model can choose whether to preview; absence of a preview is unknown,
     not evidence of one-shot success. Only tool replies paired with an actual
