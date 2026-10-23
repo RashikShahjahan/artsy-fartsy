@@ -14,7 +14,7 @@ from .dataset_prompts import sha256
 from .dataset_client import parse_json_reply
 from .repair_prompts import REPAIR_CURRICULUM_VERSION, generate_repair_prompts
 
-WARMUP_VERSION = "artsy-warmup-100-vlm-natural-v3"
+WARMUP_VERSION = "artsy-warmup-100-vlm-natural-v4-prompt-only"
 
 
 def _completed(record: dict[str, Any]) -> bool:
@@ -125,6 +125,7 @@ async def warmup_plan(source: str | Path, seed: int = 42, pool_size: int = 128) 
 
 def _example(record: dict[str, Any], kind: str, origin: str, source_dataset: str) -> dict[str, Any]:
     result = copy.deepcopy(record)
+    result["spec"].pop("requirements", None)  # Strip legacy rubric metadata from warmup exports.
     result["warmup"] = {"kind": kind, "split": "train", "origin": origin, "sourceDataset": source_dataset,
                         "sourceRecordId": record["id"], "sourceSplit": record["spec"]["split"],
                         "sourceStatus": record["status"], "duplicateException": _duplicate_only(record)}
@@ -243,9 +244,9 @@ async def generate_warmup_dataset(options: dict[str, Any]) -> dict[str, Any]:
                     _atomic(review_path, review)
                 if review["imageHash"] != record["imageHash"]:
                     raise ValueError(f"Imported review image changed: {record['id']}")
-                result = parse_evaluation(review["completion"]["text"], len(record["spec"]["requirements"]))
+                result = parse_evaluation(review["completion"]["text"])
                 if (review["completion"].get("finishReason") == "length" or result["safety"] != "safe"
-                        or not all(score >= options.get("threshold", 0.85) for score in result["scores"])):
+                        or not result["correct"] or result["score"] < options.get("threshold", 0.85)):
                     continue
                 approved_review = {"completion": review["completion"], "result": result}
             row = await _retain({"kind": "repair", "record": record}, import_root, output)

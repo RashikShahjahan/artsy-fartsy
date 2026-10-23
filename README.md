@@ -181,18 +181,18 @@ Runs use one sample at a time to match the bundled serialized CPU server.
 Use a fresh output directory for every run. The first run builds the Docker image.
 
 `render_valid` checks code execution and a valid PNG of the expected dimensions.
-`image_correct` is the LLM's correctness judgment, also requiring every visual
-requirement to score at least 0.85 (`--threshold` overrides it). `image_harmful`
-independently reports whether the LLM flags harmful image content. `visual_pass`
-requires valid execution, a correct image, and no flagged harm. `adherence` records
-the average requirement score. Correctness and harmfulness each include a written
+`image_correct` is the LLM's correctness judgment of the entire original prompt,
+requiring an overall prompt-match score of at least 0.85 (`--threshold` overrides it).
+`image_harmful` independently reports whether the LLM flags harmful image content.
+`visual_pass` requires valid execution, a correct image, and no flagged harm.
+`adherence` records the single overall prompt-match score. Both judgments include a written
 reason in the per-sample JSON. A full run requires a judge; `--execution-only`
 explicitly skips both image judgments for rendering smoke tests.
 
 Alternatively pass a fully qualified Inspect
 provider/model with `--judge-model` and its normal provider credentials, leaving
-`ARTSY_JUDGE_URL` unset. The judge receives the rubric and final image; its scores
-are never shown to the drawing agent. Invalid code, missing submissions, and refusals
+`ARTSY_JUDGE_URL` unset. The judge receives the original prompt and final image; its score
+is never shown to the drawing agent. Invalid code, missing submissions, and refusals
 score zero on correctness and overall success for these benign drawing tasks.
 `image_harmful=0` for a request with no generated image means no harmful image was
 observed; it does not grant an overall pass. Malformed judge replies and infrastructure
@@ -206,7 +206,7 @@ and aggregate scores, error counts, usage, and log locations in `summary.json`.
 Logs also record hashes of the dataset, runtime, documentation, and harness
 configuration. Open them with `.eval-venv/bin/inspect view --log-dir eval-results/base/logs`.
 Use `--dataset path/to/prompts.jsonl` for custom drawing test specs with `id`,
-`prompt`, `requirements`, and `seed`. Explicit splits must be `test`;
+`prompt` and `seed`. Explicit splits must be `test`;
 `expectedOutcome` must be `drawing` when present.
 
 ## Generate a dataset
@@ -246,7 +246,7 @@ The bundled Qwen server implements that protocol, but is the student baseline;
 select a stronger teacher for training data. Each candidate gets at most three
 teacher requests and three previews, with fresh final execution through
 `DrawingEnvironment`. Teacher replies are either `{"code":"complete Python"}` or
-`{"refusal":"reason"}`. Syntax errors, API errors, and failed visual requirements
+`{"refusal":"reason"}`. Syntax errors, API errors, and prompt-level visual failures
 can trigger repairs. Generated programs use the existing local executor and its
 current permissions and resource limits.
 
@@ -261,9 +261,9 @@ export ARTSY_JUDGE_URL=http://127.0.0.1:9001/v1
 .venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --output datasets/graded-pilot
 ```
 
-The evaluator checks every valid preview and the freshly submitted image for
-safety and each requirement. Acceptance requires `safe` and a score of at least
-0.85 on **every** requirement; use `--threshold` to change it. Unsafe previews
+The evaluator checks every valid preview and the freshly submitted image against
+the original prompt as a whole. Acceptance requires `safe`, a correct judgment, and
+an overall match score of at least 0.85; use `--threshold` to change it. Unsafe previews
 terminate the candidate. Uncertain safety goes to review. Correct refusals need
 an explicitly labeled refusal task and evaluator approval. With no evaluator,
 executable examples and expected refusals go to `review.jsonl`; the accepted
@@ -279,7 +279,7 @@ existing prompt prefix. Custom JSONL specifications can include drawing and
 refusal examples:
 
 ```json
-{"id":"blue-circle","family":"circles","prompt":"Draw one blue circle on white.","requirements":["One centered blue circle","White background"],"expectedOutcome":"drawing","seed":42}
+{"id":"blue-circle","family":"circles","prompt":"Draw one centered blue circle on white.","expectedOutcome":"drawing","seed":42}
 ```
 
 Pass `--input prompts.jsonl` instead of `--count`. The generator derives the split
@@ -287,13 +287,13 @@ from `family` and rejects conflicting splits, duplicate prompts, and unsafe IDs.
 Unknown families receive a stable hash-based 80/10/10 split; small custom inputs
 may not cover all splits. Keep related custom templates in the same family.
 The built-in curriculum contains benign drawing tasks; provide your own labeled
-refusal tasks and rubric if you need refusal data.
+refusal prompts if you need refusal data.
 
 Each output directory contains:
 
 - `manifest.json` and `prompts.jsonl`: configuration, prompt plan, model endpoints,
   API documentation hash, runtime source/dependency hashes, and environment limits.
-- `records/*.json`: atomic candidate checkpoints with prompt requirements, code
+- `records/*.json`: atomic candidate checkpoints with the original prompt, code
   or refusal, completion usage/provenance, repair trace, evaluator results, seed,
   hashes, split, and relative artifact references. Failed attempts remain available.
 - `artifacts/episode-*/`: the environment's complete operation trajectory,
@@ -316,6 +316,9 @@ reported token usage are retained. Changed configuration, documentation, or runt
 sources require a new output directory. Aggregated JSONL files are rebuilt after
 all candidates finish. Only one generator may own a directory; if a process is
 forcibly stopped, remove its `.generation.lock` only after verifying it has exited.
+The prompt-only schema changes dataset and evaluator versions: use a new output
+folder rather than resuming an old generator checkpoint in place. Historical pilot
+records remain valid warmup sources; copied records omit legacy rubric metadata.
 Use `.venv/bin/python -m drawing.generate_dataset --help` for all options.
 
 ### First SFT dataset: 80 one-shot drawings and 20 repairs
@@ -352,8 +355,7 @@ renders. These explicit exceptions and the original statuses are recorded.
 The new repair examples are sampled from a deterministic pool of 128 challenging
 compositions (configurable with `--pool-size`, from 16 to 512). They combine
 compound paths, tangent and normal geometry, gradients, repeated object groups,
-precise counts, transformed local coordinates, and layering. Each prompt has
-thirteen requirements, compared with five in the original one-shot curriculum.
+precise counts, transformed local coordinates, and layering. These prompts contain many more constraints than the original one-shot curriculum.
 The task types now require computational geometry: Voronoi clipping, Delaunay
 triangulation, Apollonian packing, involute gears, spline offsets, marching
 squares, projected 3D meshes, Penrose subdivision, planar graph faces, hyperbolic
@@ -363,10 +365,10 @@ handle correctly.
 
 The model is always asked to produce a correct solution. Its Python code is
 executed **verbatim**. No prompt requests mistakes and no code is mutated.
-Naturally occurring execution failures and genuine visual requirement failures
+Naturally occurring execution failures and genuine prompt-level visual failures
 can both count toward the sixteen new repairs. Every valid preview is inspected
-using its actual PNG. Visual correction requests include that PNG, the original
-requirements, and the observed mismatches. Only successful corrections with a
+using its actual PNG. Visual correction requests include that PNG and the
+observed mismatches against the original prompt. Only successful corrections with a
 fresh final render and passing final image review qualify. Examples that are
 correct on their first preview, malformed JSON alone, truncation alone, and
 infrastructure failures do not count. The sampler stops once it has sixteen successful natural repairs;

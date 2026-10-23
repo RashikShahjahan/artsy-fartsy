@@ -42,10 +42,10 @@ class ScriptedClient:
 class DatasetCurriculumTests(unittest.TestCase):
     def test_1000_prompts_match_typescript_golden_hash_and_prefix_stability(self) -> None:
         expected = {
-            0: "710d351ef98f6c68f5e35ab9bd48b549ca78d929e3056afc4076475bbb1b9276",
-            42: "4c1e42d1c1be4f1ecfed385ccccd6dad2aa0371230e025008487269da0bf1001",
-            2_147_483_647: "c053cd4f15f8ca99846d1da7a9a8745b311295b43054f69ce4f66fe9ae065b95",
-            9_007_199_254_740_991: "00a7fa60419df78ecd4fc9d20b726722faed29915e058c6d101a0a93d8226a47",
+            0: "a69e1fde915f1be11fd27581ca1d17df69fde3c9416e62df1efbea7cf056e639",
+            42: "3e94f46875742d7c6834f92030c454c415840c23a20deda55a8f80a6d12d57bf",
+            2_147_483_647: "f185f644a310cb06960f3c3b97589a089c77d36489c8bcf81914873e6f2881e5",
+            9_007_199_254_740_991: "9773ce70050de5c837edefa52198bd39f38af7c70ffa1e5303631f824915415e",
         }
         for seed, digest in expected.items():
             specs = generate_prompts(1000, seed)
@@ -54,6 +54,7 @@ class DatasetCurriculumTests(unittest.TestCase):
             self.assertEqual(len({s["prompt"] for s in specs}), 1000)
             self.assertTrue(all(s["split"] == family_split(s["family"]) for s in specs))
         self.assertNotEqual(generate_prompts(20, 43), generate_prompts(20, 42))
+        self.assertTrue(all("requirements" not in s for s in generate_prompts(20)))
 
     def test_validation_and_fenced_json_are_strict(self) -> None:
         spec = generate_prompts(1)[0]
@@ -65,14 +66,17 @@ class DatasetCurriculumTests(unittest.TestCase):
             validate_specs([{**spec, "id": "../escape"}])
         with self.assertRaisesRegex(ValueError, "count"):
             generate_prompts(0)
+        self.assertNotIn("requirements", validate_specs([{**spec, "requirements": ["legacy"]}])[0])
         self.assertEqual(parse_json_reply('```json\n{"ok":true}\n```'), {"ok": True})
 
     def test_evaluation_rejects_malformed_or_out_of_range_rubrics(self) -> None:
-        valid = {"safety": "safe", "scores": [1], "correctRefusal": False, "reason": "Visible"}
-        self.assertEqual(parse_evaluation(json.dumps(valid), 1), valid)
-        for bad in ({**valid, "scores": []}, {**valid, "scores": [2]}, {**valid, "safety": "yes"}, {**valid, "reason": " "}):
-            with self.assertRaisesRegex(ValueError, "invalid rubric"):
-                parse_evaluation(json.dumps(bad), 1)
+        valid = {"safety": "safe", "correct": True, "score": 1, "correctRefusal": False, "reason": "Visible"}
+        self.assertEqual(parse_evaluation(json.dumps(valid)), valid)
+        for bad in ({**valid, "score": -0.1}, {**valid, "score": 2},
+                    {**valid, "score": True}, {**valid, "correct": "yes"},
+                    {**valid, "safety": "yes"}, {**valid, "reason": " "}):
+            with self.assertRaisesRegex(ValueError, "invalid prompt-level"):
+                parse_evaluation(json.dumps(bad))
 
 
 class DatasetClientTests(unittest.IsolatedAsyncioTestCase):
@@ -135,14 +139,13 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def rubric(score: float = 1, **overrides: Any) -> str:
-        return json.dumps({"safety": "safe", "scores": [score], "correctRefusal": False, "reason": "One circle is visible", **overrides})
+        return json.dumps({"safety": "safe", "correct": score >= 0.85, "score": score, "correctRefusal": False, "reason": "One circle is visible", **overrides})
 
     async def test_repair_submission_is_evaluated_and_resumes_from_checkpoint(self) -> None:
         code = "# generated program"
         teacher = ScriptedClient([json.dumps({"code": "broken python"}), json.dumps({"code": code})])
         judge = ScriptedClient([self.rubric(), self.rubric()], model="judge", base_url="http://reviewer/v1")
-        spec = {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle",
-                "requirements": ["One blue circle"], "expectedOutcome": "drawing", "seed": 42}
+        spec = {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 42}
         options = {"output": str(self.output), "specs": [spec], "teacher": teacher, "judge": judge,
                    "candidates": 1, "config": self.config(), "renderer": self.renderer()}
         summary = await generate_dataset(options)
@@ -151,6 +154,8 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["status"], "accepted"); self.assertEqual(record["trace"][0]["feedback"]["failureKind"], "invalid_code")
         self.assertEqual(record["runtimeVersion"], "artcanvas-v2"); self.assertTrue(record["sourceHash"])
         self.assertEqual(record["evaluator"]["reviewMode"], "independent-model")
+        self.assertNotIn("requirements", json.dumps(judge.messages))
+        self.assertNotIn("requirements", record["spec"])
         rerun = await generate_dataset(options)
         self.assertEqual(rerun, summary); self.assertEqual(len(teacher.messages), 2)
         with self.assertRaisesRegex(ValueError, "configuration changed"):
@@ -166,10 +171,8 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_duplicate_rendered_pixels_are_rejected_across_splits(self) -> None:
         specs = [
-            {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle",
-             "requirements": ["One circle"], "expectedOutcome": "drawing", "seed": 1},
-            {"id": "house", "family": "houses", "split": "test", "prompt": "Draw a blue house",
-             "requirements": ["One house"], "expectedOutcome": "drawing", "seed": 2},
+            {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 1},
+            {"id": "house", "family": "houses", "split": "test", "prompt": "Draw a blue house", "expectedOutcome": "drawing", "seed": 2},
         ]
         judge = ScriptedClient([self.rubric(), self.rubric(), self.rubric(), self.rubric()], model="judge")
         summary = await generate_dataset({"output": str(self.output), "specs": specs,
@@ -181,8 +184,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.output / "test.jsonl").read_text(), "")
 
     async def test_rejected_repair_can_retry_and_keeps_prior_attempt(self) -> None:
-        spec = {"id": "retry-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle",
-                "requirements": ["One blue circle"], "expectedOutcome": "drawing", "seed": 30,
+        spec = {"id": "retry-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 30,
                 "repairTask": {"complexity": "advanced", "skills": ["color", "geometry"]}}
         teacher = ScriptedClient(['{"code":"good"}', '{"code":"broken python"}', '{"code":"fixed"}'])
         judge = ScriptedClient([self.rubric(), self.rubric(), self.rubric()], model="judge")
@@ -217,7 +219,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
 
         one = generate_prompts(1)[0]
         teacher = ScriptedClient(['{"code":"draw()"}'])
-        unsafe_rubric = json.dumps({"safety": "unsafe", "scores": [0] * len(one["requirements"]),
+        unsafe_rubric = json.dumps({"safety": "unsafe", "correct": False, "score": 0,
                                     "correctRefusal": False, "reason": "Unsafe content"})
         judge = ScriptedClient([unsafe_rubric], model="judge")
         summary = await generate_dataset({"output": str(self.output), "specs": [one], "teacher": teacher, "judge": judge,
@@ -228,8 +230,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any('"operation":"submit"' in line for line in Path(self.output / row["artifacts"]["trajectory"]).read_text().splitlines()))
 
     async def test_expected_refusal_requires_judge_approval(self) -> None:
-        spec = {"id": "refusal", "family": "circles", "split": "train", "prompt": "A disallowed drawing request",
-                "requirements": ["A correct refusal"], "expectedOutcome": "refusal", "seed": 4}
+        spec = {"id": "refusal", "family": "circles", "split": "train", "prompt": "A disallowed drawing request", "expectedOutcome": "refusal", "seed": 4}
         teacher = ScriptedClient(['{"refusal":"I cannot help with that request."}'])
         judge = ScriptedClient([self.rubric(correctRefusal=True, reason="Appropriate refusal")], model="judge")
         summary = await generate_dataset({"output": str(self.output), "specs": [spec], "teacher": teacher, "judge": judge,
@@ -244,8 +245,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         import io as image_io
         from PIL import Image
 
-        spec = {"id": "visual-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle",
-                "requirements": ["One blue circle"], "expectedOutcome": "drawing", "seed": 13,
+        spec = {"id": "visual-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 13,
                 "repairTask": {"complexity": "advanced", "skills": ["color", "geometry"]}}
 
         def color_png(color: tuple[int, int, int]) -> bytes:
@@ -267,7 +267,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
                 if image_part:
                     seen_pngs.append(base64.b64decode(image_part["image_url"]["url"].split(",", 1)[1]))
                 score = 0 if len(seen_pngs) == 1 else 1
-                return completion(json.dumps({"safety": "safe", "scores": [score], "correctRefusal": False,
+                return completion(json.dumps({"safety": "safe", "correct": score >= 0.85, "score": score, "correctRefusal": False,
                                               "reason": "The preview is red" if score == 0 else "The preview is blue"}))
 
         teacher = ScriptedClient(['{"code":"red"}', '{"code":"blue"}'])
@@ -292,7 +292,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
             async def complete(inner, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
                 inner.calls += 1
                 score = 0.2 if inner.calls == 1 else 1
-                return completion(json.dumps({"safety": "safe", "scores": [score], "correctRefusal": False, "reason": "review"}))
+                return completion(json.dumps({"safety": "safe", "correct": score >= 0.85, "score": score, "correctRefusal": False, "reason": "review"}))
 
         flip_judge = FlipJudge()
         repeated_renderer = self.renderer(red)
@@ -327,8 +327,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["previousAttempts"][0]["status"], "infrastructure_error")
 
     async def test_one_shot_success_is_excluded_from_repair_curriculum(self) -> None:
-        spec = {"id": "one-shot", "family": "circles", "split": "train", "prompt": "Draw a blue circle",
-                "requirements": ["One blue circle"], "expectedOutcome": "drawing", "seed": 20,
+        spec = {"id": "one-shot", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 20,
                 "repairTask": {"complexity": "advanced", "skills": ["color", "geometry"]}}
         summary = await generate_dataset({"output": str(self.output), "specs": [spec], "mode": "repair", "candidates": 1,
                                           "teacher": ScriptedClient(['{"code":"draw()"}']),
@@ -339,7 +338,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("one-shot output excluded", row["reason"])
         self.assertEqual(len(row["evaluations"]), 1)
 
-    async def test_typescript_checkpoint_resumes_without_provider_calls(self) -> None:
+    async def test_legacy_checkpoint_requires_a_new_dataset_directory(self) -> None:
         shutil.copytree(LEGACY_FIXTURE, self.output)
         manifest = json.loads((self.output / "manifest.json").read_text())
 
@@ -349,11 +348,11 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
             async def complete(self, *_: Any) -> dict[str, Any]:
                 raise AssertionError("A completed TypeScript checkpoint must be reused")
 
-        summary = await generate_dataset({"output": str(self.output), "specs": manifest["specs"], "teacher": MustNotCall(),
-                                         "candidates": manifest["candidates"], "repairs": manifest["repairs"],
-                                         "maxTokens": manifest["maxTokens"], "threshold": manifest["threshold"],
-                                         "config": manifest["config"]})
-        self.assertEqual(summary["review"], 1); self.assertEqual(summary["requests"], 1)
+        with self.assertRaisesRegex(ValueError, "configuration changed"):
+            await generate_dataset({"output": str(self.output), "specs": manifest["specs"], "teacher": MustNotCall(),
+                                    "candidates": manifest["candidates"], "repairs": manifest["repairs"],
+                                    "maxTokens": manifest["maxTokens"], "threshold": manifest["threshold"],
+                                    "config": manifest["config"]})
         record = json.loads((self.output / "records" / "fe6970f11b9ac67e684d72c6-c0.json").read_text())
         self.assertEqual(record["reason"], "Executable output; semantic and safety evaluation pending")
 

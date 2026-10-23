@@ -10,7 +10,7 @@ REPAIR_CURRICULUM_VERSION = "artsy-algorithmic-natural-repairs-v3"
 TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
   'name': 'voronoi-mosaic',
   'skills': ['half-plane clipping', 'degenerate geometry', 'gradients'],
-  'requirements': ['Draw a stained-glass Voronoi mosaic inside the rectangle from (180,160) to (1740,980)',
+  'instructions': ['Draw a stained-glass Voronoi mosaic inside the rectangle from (180,160) to (1740,980)',
                    'Use 24 sites sampled with the supplied random seed, then replace the final two sites '
                    'with duplicates of the first two',
                    'Merge coincident sites so the final diagram has exactly 22 cells',
@@ -26,7 +26,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'triangles',
   'name': 'delaunay-network',
   'skills': ['triangulation', 'circumcircles', 'edge deduplication'],
-  'requirements': ['Draw a Delaunay triangulation of 28 sites inside a wide rectangular frame',
+  'instructions': ['Draw a Delaunay triangulation of 28 sites inside a wide rectangular frame',
                    'Include the corners of a square centered at (960,560), four sites on the horizontal line '
                    'y=560, and twenty seeded random sites',
                    'Handle the cocircular square and collinear subsets deterministically without duplicate '
@@ -43,7 +43,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'circles',
   'name': 'apollonian-packing',
   'skills': ['Descartes circles', 'complex coordinates', 'recursive deduplication'],
-  'requirements': ['Draw an Apollonian circle packing inside a large enclosing circle centered at (960,550)',
+  'instructions': ['Draw an Apollonian circle packing inside a large enclosing circle centered at (960,550)',
                    'Start from an enclosing circle of radius 430 and three mutually tangent inner circles',
                    'Compute tangent-circle centers and curvatures with the Descartes relation rather than '
                    'approximating positions by eye',
@@ -60,7 +60,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'circles',
   'name': 'involute-gears',
   'skills': ['involute curves', 'polar transforms', 'tangent layout'],
-  'requirements': ['Draw a row of three meshing involute gears with 12, 20, and 28 teeth',
+  'instructions': ['Draw a row of three meshing involute gears with 12, 20, and 28 teeth',
                    'Use module 12, a 20-degree pressure angle, and center distances determined by the sum of '
                    'pitch radii',
                    'Sample both involute flanks of each tooth and join them to root and tip arcs with closed '
@@ -78,7 +78,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'lines',
   'name': 'variable-width-ribbon',
   'skills': ['curve offsets', 'arc-length sampling', 'join geometry'],
-  'requirements': ['Draw a smooth variable-width ribbon through waypoints (220,700), (430,300), (730,700), '
+  'instructions': ['Draw a smooth variable-width ribbon through waypoints (220,700), (430,300), (730,700), '
                    '(730,700), (1110,280), (1450,760), and (1700,440)',
                    'Merge consecutive duplicate waypoints before fitting a centripetal Catmull-Rom spline',
                    'Resample the centerline by approximate arc length and vary ribbon width smoothly between '
@@ -94,7 +94,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'lines',
   'name': 'marching-squares',
   'skills': ['contour extraction', 'saddle cases', 'polyline stitching'],
-  'requirements': ['Draw a contour map of f(x,y)=sin(3*x)*cos(2*y)+0.35*sin(5*(x+y)) over a 64-by-40 '
+  'instructions': ['Draw a contour map of f(x,y)=sin(3*x)*cos(2*y)+0.35*sin(5*(x+y)) over a 64-by-40 '
                    'sampling grid',
                    'Use eight equally spaced contour levels spanning the sampled value range',
                    'Implement marching squares with interpolation along cell edges and a consistent '
@@ -110,7 +110,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'rows',
   'name': 'torus-knot-tube',
   'skills': ['3D frames', 'surface normals', 'depth sorting'],
-  'requirements': ['Draw a shaded three-dimensional tube following the closed torus-knot centerline '
+  'instructions': ['Draw a shaded three-dimensional tube following the closed torus-knot centerline '
                    '((2+cos(3*t))*cos(2*t),(2+cos(3*t))*sin(2*t),sin(3*t))',
                    'Sample 180 centerline positions and twelve vertices around each tube cross-section',
                    'Construct smoothly transported local frames so adjacent cross-sections do not flip '
@@ -126,7 +126,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'rectangles',
   'name': 'isometric-city',
   'skills': ['3D projection', 'occlusion sorting', 'polygon clipping'],
-  'requirements': ['Draw an isometric city on a four-by-four grid with sixteen buildings of seeded varying '
+  'instructions': ['Draw an isometric city on a four-by-four grid with sixteen buildings of seeded varying '
                    'heights',
                    'Project all building corners from three-dimensional coordinates using one shared '
                    'projection function',
@@ -145,7 +145,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'triangles',
   'name': 'penrose-rosette',
   'skills': ['recursive substitution', 'shared vertices', 'edge deduplication'],
-  'requirements': ['Draw a five-fold Penrose-style rosette beginning with ten triangular sectors around a '
+  'instructions': ['Draw a five-fold Penrose-style rosette beginning with ten triangular sectors around a '
                    'central point',
                    'Apply a documented golden-ratio Robinson-triangle subdivision through six levels',
                    'Track triangle type and orientation so neighboring subdivisions share exactly the same '
@@ -161,7 +161,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'flowers',
   'name': 'closed-spline-flower',
   'skills': ['centripetal splines', 'periodic boundaries', 'curvature'],
-  'requirements': ['Draw a closed asymmetric flower outline interpolating twelve alternating outer and inner '
+  'instructions': ['Draw a closed asymmetric flower outline interpolating twelve alternating outer and inner '
                    'control points around an ellipse',
                    'Include a repeated first point at the end of the control list and a consecutive repeated '
                    'point near the top',
@@ -179,7 +179,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'triangles',
   'name': 'clipped-fractal',
   'skills': ['recursive geometry', 'convex clipping', 'degenerate polygons'],
-  'requirements': ['Draw a depth-seven Sierpinski triangle pattern centered behind a regular 24-sided '
+  'instructions': ['Draw a depth-seven Sierpinski triangle pattern centered behind a regular 24-sided '
                    'circular-looking window',
                    'Compute recursive triangle vertices and retain alternating terminal triangles in teal '
                    'and gold',
@@ -195,7 +195,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'lines',
   'name': 'line-arrangement-glass',
   'skills': ['segment intersections', 'planar graph faces', 'angular sorting'],
-  'requirements': ['Draw a stained-glass panel formed by the arrangement of eighteen seeded line segments '
+  'instructions': ['Draw a stained-glass panel formed by the arrangement of eighteen seeded line segments '
                    'clipped to a rectangular frame',
                    'Include three vertical segments, three horizontal segments, two parallel diagonals, and '
                    'ten additional seeded segments',
@@ -211,7 +211,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'rows',
   'name': 'lissajous-weave',
   'skills': ['curve intersections', 'over-under ordering', 'interval clipping'],
-  'requirements': ['Draw two thick closed Lissajous ribbons, one with frequency pair (3,4) and the other '
+  'instructions': ['Draw two thick closed Lissajous ribbons, one with frequency pair (3,4) and the other '
                    'with pair (4,5)',
                    'Use different phase offsets and sample each centerline at 720 positions',
                    'Find approximate crossings between nonadjacent polyline segments and merge repeated '
@@ -227,7 +227,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'circles',
   'name': 'hyperbolic-disk',
   'skills': ['circle inversion', 'geodesic arcs', 'recursive deduplication'],
-  'requirements': ['Draw a Poincare-disk-inspired rosette from a central regular hyperbolic heptagon and '
+  'instructions': ['Draw a Poincare-disk-inspired rosette from a central regular hyperbolic heptagon and '
                    'three rings of reflected neighboring cells',
                    'Represent geodesic edges as circular arcs orthogonal to the disk boundary, with a '
                    'straight-line special case through the disk center',
@@ -244,7 +244,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'landscapes',
   'name': 'triangulated-terrain',
   'skills': ['height-field mesh', 'level-set clipping', 'perspective shading'],
-  'requirements': ['Draw a three-dimensional island terrain generated from a 40-by-30 sampled sum of three '
+  'instructions': ['Draw a three-dimensional island terrain generated from a 40-by-30 sampled sum of three '
                    'radial hills and a sinusoidal ridge',
                    'Triangulate every grid cell with alternating diagonals and project the terrain with a '
                    'perspective camera',
@@ -262,7 +262,7 @@ TASKS: list[dict[str, Any]] = [{'family': 'landscapes',
  {'family': 'columns',
   'name': 'woven-offset-maze',
   'skills': ['graph traversal', 'offset joins', 'curve stitching'],
-  'requirements': ['Draw a twelve-by-eight rectangular maze generated by a seeded depth-first spanning-tree '
+  'instructions': ['Draw a twelve-by-eight rectangular maze generated by a seeded depth-first spanning-tree '
                    'traversal',
                    'Remove shared walls consistently and leave exactly one entrance and one exit on opposite '
                    'sides',
@@ -290,7 +290,7 @@ def generate_repair_prompts(seed: int = 42, count: int = 128) -> list[dict[str, 
     for i in range(count):
         task = TASKS[i % len(TASKS)]
         variant = i // len(TASKS)
-        requirements = [*task["requirements"],
+        instructions = [*task["instructions"],
             f"Use {['teal, violet, and gold', 'navy, orange, and cream', 'emerald, magenta, and pale gold', 'blue, coral, and ivory'][variant % 4]} as the overall palette while preserving explicitly requested special colors",
             f"Add exactly {12 + variant * 4} alternating small diamonds and circles in a separate bottom legend band, without text",
             "Use a pale sky-blue background",
@@ -298,8 +298,8 @@ def generate_repair_prompts(seed: int = 42, count: int = 128) -> list[dict[str, 
             "Keep all requested components visible with no text, labels, or unrequested objects"]
         specs.append({"id": f"repair-{task['name']}-{_sha256(f'{REPAIR_CURRICULUM_VERSION}:{seed}:{i}')[:8]}",
             "family": task["family"], "split": "train",
-            "prompt": "Create this computational drawing with the documented ArtCanvas API and Python math/random only. " + ". ".join(requirements) + ".",
-            "requirements": requirements, "expectedOutcome": "drawing",
+            "prompt": "Create this computational drawing with the documented ArtCanvas API and Python math/random only. " + ". ".join(instructions) + ".",
+            "expectedOutcome": "drawing",
             "seed": int(_sha256(f"{seed}:algorithmic:{i}")[:8], 16),
             "repairTask": {"complexity": "advanced", "skills": list(task["skills"])}})
     return specs

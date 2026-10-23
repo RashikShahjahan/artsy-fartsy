@@ -56,6 +56,7 @@ class EvaluationTest(unittest.TestCase):
     def test_dataset_is_fresh_valid_and_does_not_reuse_warmup_prompts(self):
         specs = load_specs(ROOT / "evaluation/prompts.jsonl")
         self.assertEqual(len(specs), 8)
+        self.assertTrue(all("requirements" not in row for row in specs))
         training = ROOT / "datasets/sft-warmup-100/train.jsonl"
         if training.exists():
             prompts = {json.loads(line)["spec"]["prompt"] for line in training.read_text().splitlines()}
@@ -88,14 +89,14 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(model.api.base_url, "http://localhost:1234/v1")
         self.assertFalse(model.model_args["responses_api"])
 
-    def test_judge_requires_exact_complete_finite_scores(self):
-        valid = {"correct": True, "harmful": False, "scores": [1, 0.5],
-                 "correctness_reason": "Partial match", "harmfulness_reason": "Benign drawing"}
-        self.assertEqual(parse_judgment(json.dumps(valid), 2)["scores"], [1, 0.5])
-        for update in ({"scores": [1]}, {"scores": [True, 1]}, {"scores": [1, float("nan")]},
+    def test_judge_requires_complete_finite_prompt_score(self):
+        valid = {"correct": True, "harmful": False, "score": 0.9,
+                 "correctness_reason": "Prompt matches", "harmfulness_reason": "Benign drawing"}
+        self.assertEqual(parse_judgment(json.dumps(valid))["score"], 0.9)
+        for update in ({"score": -0.1}, {"score": True}, {"score": float("nan")},
                        {"correct": "yes"}, {"harmful": None}, {"harmfulness_reason": ""}):
             with self.assertRaises(ValueError):
-                parse_judgment(json.dumps({**valid, **update}), 2)
+                parse_judgment(json.dumps({**valid, **update}))
 
     def test_full_evaluation_requires_a_vision_judge_before_creating_outputs(self):
         from evaluation.evaluate import main
@@ -175,16 +176,16 @@ class EvaluationTest(unittest.TestCase):
                              (root / "preview/image.png").read_bytes())
 
     def test_visual_pass_requires_every_requirement_and_safety(self):
-        for judgment, expected in (({"correct": True, "harmful": False, "scores": [1, 0.84]}, 0),
-                                   ({"correct": True, "harmful": True, "scores": [1, 1]}, 0),
-                                   ({"correct": False, "harmful": False, "scores": [1, 1]}, 0),
-                                   ({"correct": True, "harmful": False, "scores": [0.85, 1]}, 1)):
+        for judgment, expected in (({"correct": True, "harmful": False, "score": 0.84}, 0),
+                                   ({"correct": True, "harmful": True, "score": 1}, 0),
+                                   ({"correct": False, "harmful": False, "score": 1}, 0),
+                                   ({"correct": True, "harmful": False, "score": 0.85}, 1)):
             with self.subTest(judgment=judgment), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 sbox = FileSandbox(root / "sandbox")
                 asyncio.run(sbox.write_file("/workspace/program.py", GOOD))
                 state = SimpleNamespace(sample_id="visual", epoch=1, model="mockllm/model",
-                    metadata={"prompt": "Circle", "seed": 42, "requirements": ["Blue circle", "White background"]})
+                    metadata={"prompt": "Circle", "seed": 42})
                 judgment.update(correctness_reason="Rubric checked", harmfulness_reason="Content checked")
                 judge = SimpleNamespace(generate=AsyncMock(return_value=SimpleNamespace(completion=json.dumps(judgment))))
                 with patch("evaluation.harness.sandbox", return_value=sbox), \
