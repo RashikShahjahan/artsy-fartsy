@@ -179,7 +179,10 @@ export ARTSY_SAFETY_JUDGE_URL=http://127.0.0.1:9002/v1
 ```
 
 Set `ARTSY_MODEL_URL` and optionally `ARTSY_MODEL_API_KEY` to select a different
-chat-completions endpoint. `--model` overrides the default `Qwen/Qwen3.5-0.8B`.
+chat-completions endpoint. The Inspect SWE bridge temporarily supplies this model
+key (or `local-no-auth` for the bundled server) when recreating the OpenAI-compatible
+client, then restores `OPENAI_API_KEY`. A real OpenAI key is not needed to evaluate
+local Qwen. `--model` overrides the default `Qwen/Qwen3.5-0.8B`.
 Runs use one sample at a time to match the bundled serialized CPU server.
 Use a fresh output directory for every run. The first run builds the Docker image.
 
