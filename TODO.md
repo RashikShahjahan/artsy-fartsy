@@ -40,18 +40,25 @@ available for future data/training adapters; Pi retains its own durable session 
 
 ## 3. Generate prompt–code pairs and repair trajectories
 
-- [ ] Build a prompt generator from structured specifications: objects, counts, colors, positions, spatial relationships, style, background, and explicit exclusions.
-- [ ] Create a curriculum from simple primitives to multi-object scenes and procedural art. Include varied wording and combinations, not just many paraphrases of one template.
-- [ ] Have a stronger teacher generate several candidate programs per prompt using the exact API documentation and runtime constraints.
-- [ ] Execute candidates in the sandbox; use bounded repair attempts for syntax, API, and rendering failures. Keep successful edit–run–repair trajectories for tool-use SFT.
+- [x] Build a prompt generator from structured specifications: objects, counts, colors, positions, spatial relationships, style, background, and explicit exclusions.
+- [x] Create a curriculum from simple primitives to multi-object scenes and procedural art. Include varied wording and combinations, not just many paraphrases of one template.
+- [x] Have a stronger teacher generate several candidate programs per prompt using the exact API documentation and runtime constraints.
+- [x] Execute candidates in the local environment (sandbox deferred per current scope); use bounded repair attempts for syntax, API, and rendering failures. Keep successful edit–run–repair trajectories for tool-use SFT.
 - [ ] Check the rendered image against the prompt with deterministic checks where reliable and a vision evaluator for semantic requirements. Do not accept a pair merely because its code runs.
 - [ ] Apply the content policy to prompts and every rendered candidate. Exclude harmful outputs from positive SFT targets; include correct refusal examples and benign lookalikes to reduce over-refusal.
-- [ ] Save a dataset record containing `id`, `prompt`, structured requirements, code or refusal, trajectory, artifact references, seed, API/runtime versions, teacher provenance, evaluator versions/scores, safety labels, and split.
+- [x] Save a dataset record containing `id`, `prompt`, structured requirements, code or refusal, trajectory, artifact references, seed, API/runtime versions, teacher provenance, evaluator versions/scores, safety labels, and split.
 - [ ] Deduplicate prompts, related templates, code, and near-identical renders. Split by task/template family before generation so repairs and paraphrases cannot leak into validation or test sets.
 - [ ] Audit a stratified human-reviewed sample for correctness, diversity, safety, and evaluator agreement. Version accepted data and rejection reasons.
 - [ ] Produce a pilot of roughly 1,000 accepted examples, measure acceptance rate and cost per example, then choose the scale-up target from learning curves and budget.
 
 **Done when:** a reproducible command produces a versioned, audited dataset of executable prompt–code pairs, repair trajectories, and refusal examples.
+
+**Current implementation:** `npm run dataset` generates seeded prompt plans, runs a
+configurable teacher through bounded repairs, and checkpoints candidates for resume.
+An optional independent vision evaluator gates acceptance; without it, valid renders
+remain pending review. Task families are split before generation and exact source/pixel
+duplicates are rejected. Near-duplicate detection, calibrated semantic/safety checks,
+human audits, and a live teacher pilot remain outstanding. See README for usage.
 
 ## 4. Implement and calibrate rewards
 

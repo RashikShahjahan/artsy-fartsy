@@ -73,8 +73,8 @@ Limits are in `src/config.ts`: three preview renders, sixteen model turns/tool
 calls, a five-minute episode deadline, 64 KiB source, 8 MiB PNG, and bounded logs.
 The model is text-only and receives errors/dimensions, not visual observations.
 Rendering success establishes code validity, not instruction accuracy or image
-safety. Teacher data generation, visual grading, content rewards/penalties, SFT,
-and RL are subsequent checklist items.
+safety. The dataset generator below supports teacher generation and an independent
+visual evaluator. Reward calibration, SFT, and RL are subsequent checklist items.
 
 ## Model-independent episodes
 
@@ -123,6 +123,103 @@ Seeds reproduce Python `random` and hash ordering within the same runtime.
 Python packages are pinned in `runtime/requirements.txt`; development currently
 uses Python 3.12.12. System Cairo and font versions still depend on the host, so
 cross-platform pixel identity is not guaranteed.
+
+## Generate a dataset
+
+Preview the seeded curriculum without model requests or code execution:
+
+```sh
+npm run dataset -- --dry-run --count 20 --seed 42
+```
+
+Generate programs with a stronger teacher served by a chat-completions endpoint.
+Set the model identifier and endpoint to the teacher you have available:
+
+```sh
+export ARTSY_TEACHER_MODEL=your-teacher-model
+export ARTSY_TEACHER_URL=http://127.0.0.1:9000/v1
+# Set ARTSY_TEACHER_API_KEY if that endpoint requires authentication.
+
+npm run dataset -- --count 20 --candidates 2 --repairs 2 --output datasets/pilot
+```
+
+The endpoint must support non-streaming `POST /chat/completions`, `messages`, and
+`max_tokens`, returning a text completion containing the requested JSON object.
+The bundled 230M server implements that protocol, but is the student baseline;
+select a stronger teacher for training data. Each candidate gets at most three
+teacher requests and three previews, with fresh final execution through
+`DrawingEnvironment`. Teacher replies are either `{"code":"complete Python"}` or
+`{"refusal":"reason"}`. Syntax errors, API errors, and failed visual requirements
+can trigger repairs. Generated programs use the existing local executor and its
+current permissions and resource limits.
+
+To automatically accept examples, add an independent **vision** evaluator with
+support for PNG data URLs in chat `image_url` content:
+
+```sh
+export ARTSY_JUDGE_MODEL=your-vision-evaluator
+export ARTSY_JUDGE_URL=http://127.0.0.1:9001/v1
+# Set ARTSY_JUDGE_API_KEY if needed.
+
+npm run dataset -- --count 20 --candidates 2 --output datasets/graded-pilot
+```
+
+The evaluator checks every valid preview and the freshly submitted image for
+safety and each requirement. Acceptance requires `safe` and a score of at least
+0.85 on **every** requirement; use `--threshold` to change it. Unsafe previews
+terminate the candidate. Uncertain safety goes to review. Correct refusals need
+an explicitly labeled refusal task and evaluator approval. With no evaluator,
+executable examples and expected refusals go to `review.jsonl`; the accepted
+training files stay empty. Model approval is provisional: human auditing and
+judge calibration remain separate work.
+
+The built-in curriculum covers 12 primitive, composition, scene, and procedural
+families. Counts up to 10,000 are supported; start with 20, then run a 1,000-prompt
+pilot in a new directory. The seed reproduces prompt specifications and render
+randomness; remote teacher replies may vary. Whole families have fixed splits
+before wording and parameters are generated. Increasing the count preserves the
+existing prompt prefix. Custom JSONL specifications can include drawing and
+refusal examples:
+
+```json
+{"id":"blue-circle","family":"circles","prompt":"Draw one blue circle on white.","requirements":["One centered blue circle","White background"],"expectedOutcome":"drawing","seed":42}
+```
+
+Pass `--input prompts.jsonl` instead of `--count`. The generator derives the split
+from `family` and rejects conflicting splits, duplicate prompts, and unsafe IDs.
+Unknown families receive a stable hash-based 80/10/10 split; small custom inputs
+may not cover all splits. Keep related custom templates in the same family.
+The built-in curriculum contains benign drawing tasks; provide your own labeled
+refusal tasks and rubric if you need refusal data.
+
+Each output directory contains:
+
+- `manifest.json` and `prompts.jsonl`: configuration, prompt plan, model endpoints,
+  API documentation hash, runtime source/dependency hashes, and environment limits.
+- `records/*.json`: atomic candidate checkpoints with prompt requirements, code
+  or refusal, completion usage/provenance, repair trace, evaluator results, seed,
+  hashes, split, and relative artifact references. Failed attempts remain available.
+- `artifacts/episode-*/`: the environment's complete operation trajectory,
+  previews, final Python source, and final PNG.
+- `accepted.jsonl`, `review.jsonl`, `rejected.jsonl`, and `candidates.jsonl`:
+  evaluated examples, pending review, rejection/infrastructure reasons, and all records.
+- `train.jsonl`, `validation.jsonl`, and `test.jsonl`: accepted records by split.
+- `summary.json`: acceptance rate, outcome counts, recorded request/token usage,
+  and the count of completions with unavailable usage. These are observed totals,
+  not a price estimate; requests interrupted before a response may still be billed.
+
+Exact normalized source and decoded pixel duplicates are excluded across candidates
+and splits. Near-duplicate image detection and human audits are not implemented.
+Credentials come only from environment variables and are excluded from the manifest.
+Outputs are ignored by Git.
+
+Repeat the same command to resume completed checkpoints without model calls.
+Use `--retry-errors` to retry infrastructure failures; previous records and their
+reported token usage are retained. Changed configuration, documentation, or runtime
+sources require a new output directory. Aggregated JSONL files are rebuilt after
+all candidates finish. Only one generator may own a directory; if a process is
+forcibly stopped, remove its `.generation.lock` only after verifying it has exited.
+Use `npm run dataset -- --help` for all options.
 
 ## Verification
 
