@@ -309,8 +309,8 @@ Custom prompt files still bypass the planner:
 Pass `--input prompts.jsonl`. Extra fields for `requirements` and
 `expectedOutcome` are ignored by dataset validation, not sent to the judge.
 The `family` label is used for group-level splits; `skills` and `difficulty`
-are optional metadata. Original fixed-template generation is retained as a
-legacy Python helper for compatibility tests, not used by the default CLI.
+are optional metadata. Shared schema validation and taxonomy definitions live
+in `drawing/dataset_specs.py`; the old fixed-template generator has been removed.
 
 Each dataset directory also includes `manifest.json`, `prompts.jsonl`,
 `records/*.json` for candidate checkpoints, `artifacts/episode-*/` for

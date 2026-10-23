@@ -15,9 +15,14 @@ from PIL import Image
 
 from drawing.dataset import EVALUATOR_VERSION, generate_dataset, parse_evaluation
 from drawing.dataset_client import chat_client, parse_json_reply
-from drawing.dataset_prompts import compact_json, family_split, generate_prompts, sha256, validate_specs
+from drawing.dataset_specs import compact_json, family_split, sha256, validate_specs
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def example_spec() -> dict[str, Any]:
+    """Small hand-authored spec for generation tests; no legacy templates needed."""
+    return validate_specs([{"family": "circles", "prompt": "Draw a blue circle on a plain background", "seed": 42}])[0]
 
 
 def completion(text: str) -> dict[str, Any]:
@@ -37,33 +42,24 @@ class ScriptedClient:
         return completion(self.replies.pop(0))
 
 
-class DatasetCurriculumTests(unittest.TestCase):
-    def test_1000_prompts_match_typescript_golden_hash_and_prefix_stability(self) -> None:
-        expected = {
-            0: "635e62f27108e1948f23853fbf0c07590e1a7696df7aa836637b2d9178036ac0",
-            42: "cb5175aad97d70c52614500a92977ea14db48ce36bb6fe743e1da7273d393f41",
-            2_147_483_647: "49532d9b341555468870e6c11d2c9be7aa2747d3f70f17c704ad9c56e47e938e",
-            9_007_199_254_740_991: "c543572a602812f912846387837251b6cbced383302cf57dac40271939d463c8",
-        }
-        for seed, digest in expected.items():
-            specs = generate_prompts(1000, seed)
-            self.assertEqual(sha256(compact_json(specs)), digest)
-            self.assertEqual(specs[:20], generate_prompts(20, seed))
-            self.assertEqual(len({s["prompt"] for s in specs}), 1000)
-            self.assertTrue(all(s["split"] == family_split(s["family"]) for s in specs))
-        self.assertNotEqual(generate_prompts(20, 43), generate_prompts(20, 42))
-        self.assertTrue(all("requirements" not in s and "expectedOutcome" not in s for s in generate_prompts(20)))
+class DatasetSpecTests(unittest.TestCase):
+    def test_spec_identity_and_family_split_are_stable(self) -> None:
+        spec = example_spec()
+        self.assertEqual(validate_specs([spec]), [spec])
+        self.assertEqual(spec["id"], sha256(compact_json([spec["family"], spec["prompt"], spec["seed"]]))[:24])
+        self.assertEqual(spec["split"], family_split(spec["family"]))
+        self.assertNotEqual(spec["id"], validate_specs([{**spec, "seed": 43, "id": None}])[0]["id"])
 
     def test_validation_and_fenced_json_are_strict(self) -> None:
-        spec = generate_prompts(1)[0]
+        spec = example_spec()
         with self.assertRaisesRegex(ValueError, "Split"):
             validate_specs([{**spec, "split": "test"}])
         with self.assertRaisesRegex(ValueError, "Duplicate prompt"):
             validate_specs([spec, {**spec, "id": "other"}])
         with self.assertRaisesRegex(ValueError, "safe filenames"):
             validate_specs([{**spec, "id": "../escape"}])
-        with self.assertRaisesRegex(ValueError, "count"):
-            generate_prompts(0)
+        with self.assertRaisesRegex(ValueError, "at least one"):
+            validate_specs([])
         self.assertNotIn("requirements", validate_specs([{**spec, "requirements": ["legacy"]}])[0])
         self.assertNotIn("expectedOutcome", validate_specs([{**spec, "expectedOutcome": "refusal"}])[0])
         self.assertEqual(parse_json_reply('```json\n{"ok":true}\n```'), {"ok": True})
@@ -163,7 +159,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
             await generate_dataset({**options, "threshold": 0.9})
 
     async def test_without_judge_output_is_review_only_and_duplicates_are_rejected(self) -> None:
-        one = generate_prompts(1)[0]
+        one = example_spec()
         summary = await generate_dataset({"output": str(self.output), "specs": [one], "teacher": ScriptedClient(['{"code":"draw()"}']),
                                           "candidates": 1, "renderer": self.renderer(), "config": self.config()})
         self.assertEqual(summary["review"], 1); self.assertEqual(summary["accepted"], 0)
@@ -185,7 +181,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.output / "test.jsonl").read_text(), "")
 
     async def test_malformed_teacher_reply_uses_bounded_repairs_and_lock_is_enforced(self) -> None:
-        one = generate_prompts(1)[0]
+        one = example_spec()
         options = {"output": str(self.output), "specs": [one], "teacher": ScriptedClient(["not json", '{"code":"a","refusal":"b"}']),
                    "candidates": 1, "repairs": 1, "renderer": self.renderer(), "config": self.config()}
         summary = await generate_dataset(options)
@@ -203,7 +199,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
                 calls.append(code)
                 return await base_renderer.render(code, seed)
 
-        one = generate_prompts(1)[0]
+        one = example_spec()
         teacher = ScriptedClient(['{"code":"draw()"}'])
         unsafe_rubric = json.dumps({"safety": "unsafe", "correct": False, "score": 0,
                                     "correctRefusal": False, "reason": "Unsafe content"})
@@ -302,7 +298,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("identical", same_row["reason"]); self.assertFalse(same_row["generation"]["finalImagePassed"])
 
     async def test_infrastructure_retry_retains_previous_attempt_and_usage(self) -> None:
-        spec = generate_prompts(1)[0]
+        spec = example_spec()
 
         class FlakyTeacher:
             model, baseUrl = "flaky", "http://teacher/v1"

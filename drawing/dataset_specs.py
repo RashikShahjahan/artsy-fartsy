@@ -1,4 +1,4 @@
-"""Dataset specification validation and legacy deterministic curriculum."""
+"""Shared drawing specification validation, taxonomy, and hashing."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import json
 import re
 from typing import Any
 
-PROMPT_VERSION = "artsy-curriculum-v1"
 FAMILIES = [
     ("circles", "train"), ("rectangles", "train"), ("triangles", "train"), ("lines", "train"),
     ("rows", "train"), ("columns", "train"), ("landscapes", "train"), ("flowers", "train"),
@@ -33,9 +32,6 @@ SKILL_TAXONOMY = {
     "negative_constraints": "Explicitly forbidden visual elements",
     "robustness": "Edge cases, clipping, density, and degeneracy",
 }
-
-COLORS = ["red", "blue", "green", "orange", "purple", "teal"]
-BACKGROUNDS = ["white", "light gray", "cream"]
 
 
 def compact_json(value: Any) -> str:
@@ -101,43 +97,3 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
             normalized_row["difficulty"] = difficulty
         result.append(normalized_row)
     return result
-
-
-def generate_prompts(count: int = 20, seed: int = 42) -> list[dict[str, Any]]:
-    if not _safe_int(count) or count < 1 or count > 10_000 or not _safe_int(seed) or seed < 0:
-        raise ValueError("count must be an integer from 1 to 10000 and seed a nonnegative safe integer")
-    prompts: list[dict[str, Any]] = []
-    for i in range(count):
-        family, split = FAMILIES[i % len(FAMILIES)]
-        entropy = sha256(f"{PROMPT_VERSION}:{seed}:{i}")
-
-        def sample(offset: int, size: int) -> int:
-            return int(entropy[offset:offset + 8], 16) % size
-
-        color = COLORS[sample(0, len(COLORS))]
-        accent = COLORS[(COLORS.index(color) + 1 + sample(8, 5)) % len(COLORS)]
-        n = 2 + sample(16, 5)
-        background = BACKGROUNDS[sample(24, len(BACKGROUNDS))]
-        margin = 60 + (i // len(FAMILIES)) / 10
-        tasks = {
-            "circles": [f"Draw one filled {color} circle centered on the canvas", f"The circle has a radius of {100 + sample(32, 200)} pixels"],
-            "rectangles": [f"Draw one filled {color} rectangle centered on the canvas", f"Its width is {300 + sample(32, 400)} pixels and its height is 200 pixels"],
-            "triangles": [f"Draw one filled {color} equilateral triangle centered on the canvas", "The triangle points upward and has a side length of 400 pixels"],
-            "lines": [f"Draw exactly {n} parallel {color} horizontal lines", f"Use 12-pixel-wide strokes, equal spacing, and endpoints {200 + sample(32, 200)} pixels from both sides"],
-            "rows": [f"Draw exactly {n} filled {color} circles in one centered horizontal row", "Use equal radii and spacing, with no overlaps"],
-            "columns": [f"Draw exactly {n} filled {color} squares in one centered vertical column", "Use equal sizes and spacing, with no overlaps"],
-            "landscapes": [f"Draw a flat landscape with exactly {n} {color} triangular mountains", f"Place a single {accent} sun above the mountains and a green ground strip below them"],
-            "flowers": [f"Draw one flower with exactly {n + 3} {color} petals around a {accent} circular center", "Add a green stem below the flower and exactly two green leaves"],
-            "grids": [f"Draw a grid of {n} columns and 3 rows of filled {color} squares", "Use equal square sizes and equal gaps, with the grid centered"],
-            "houses": [f"Draw one house with a {color} rectangular body and a {accent} triangular roof", f"Add exactly {n} blue windows in a row and one brown door below the windows"],
-            "rings": [f"Draw exactly {n} concentric {color} circle outlines centered on the canvas", "Use 10-pixel strokes, equal radial gaps, and no filled circles"],
-            "orbits": [f"Draw one {accent} filled circle at the center with exactly {n} small {color} filled circles around it", "Space the small circles equally around a circular orbit and draw the orbit as a thin black outline"],
-        }
-        instructions = [*tasks[family], f"Use a {background} background",
-                        f"Leave at least {margin:g} pixels clear along every canvas edge",
-                        "Do not include text, labels, borders, or extra objects"]
-        lead = ["Please create this drawing:", "Make an illustration with these requirements:", "Draw the following composition:"][sample(40, 3)]
-        prompts.append({"id": sha256(f"{PROMPT_VERSION}:{seed}:{i}")[:24], "family": family,
-                        "split": split, "prompt": f"{lead} {'. '.join(instructions)}.",
-                        "seed": int(entropy[:8], 16)})
-    return validate_specs(prompts)

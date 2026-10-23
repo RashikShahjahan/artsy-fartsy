@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from drawing.dataset_prompts import DIFFICULTIES
+from drawing.dataset_specs import DIFFICULTIES
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = [{"type": "function", "function": {

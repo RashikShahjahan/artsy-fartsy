@@ -20,7 +20,7 @@ from inspect_ai.util import sandbox
 from inspect_swe import mini_swe_agent
 from PIL import Image
 
-from drawing.dataset_prompts import DIFFICULTIES
+from drawing.dataset_specs import DIFFICULTIES
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_MODEL = "Qwen/Qwen3.5-0.8B"

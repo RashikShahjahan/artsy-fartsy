@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from drawing.dataset_prompts import SKILL_TAXONOMY, family_split, validate_specs
+from drawing.dataset_specs import SKILL_TAXONOMY, family_split, validate_specs
 from drawing.generate_dataset import main
 from drawing.llm_prompts import _parse_batch, _slots, generate_llm_prompts
 
@@ -91,6 +91,12 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(x["difficulty"] == "hard" for x in hard["specs"]))
         self.assertTrue(all("caseType" not in x and "repairTask" not in x for x in hard["specs"]))
         self.assertEqual(validate_specs(hard["specs"]), hard["specs"])
+
+    async def test_invalid_prompt_count_is_rejected_before_model_call(self) -> None:
+        client = PromptClient()
+        with self.assertRaisesRegex(ValueError, "count"):
+            await generate_llm_prompts(client, count=0)
+        self.assertEqual(client.calls, 0)
 
     async def test_duplicate_reply_is_retried(self) -> None:
         class DuplicateOnce(PromptClient):

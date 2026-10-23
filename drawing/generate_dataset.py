@@ -114,7 +114,7 @@ async def main(argv: list[str] | None = None) -> int:
         print(HELP)
         return 0
     _load_env_file()
-    from .dataset_prompts import compact_json, sha256, validate_specs
+    from .dataset_specs import compact_json, sha256, validate_specs
     from .llm_prompts import GENERATOR_VERSION, generate_llm_prompts
     from .dataset_client import chat_client
     if args.difficulty not in ("mixed", "easy", "medium", "hard", "very-hard"):

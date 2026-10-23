@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .dataset_client import Completion, Message, parse_json_reply
-from .dataset_prompts import PROMPT_VERSION, compact_json, sha256, validate_specs
+from .dataset_specs import compact_json, sha256, validate_specs
 
 DATASET_VERSION = "artsy-dataset-v3"
 EVALUATOR_VERSION = "artsy-rubric-v4-outcome-blind"
@@ -285,7 +285,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         config = options.get("config") or _default_config()
         teacher = _provenance(options["teacher"])
         judge = options.get("judge")
-        manifest: dict[str, Any] = {"version": DATASET_VERSION, "promptVersion": PROMPT_VERSION, "specs": specs,
+        manifest: dict[str, Any] = {"version": DATASET_VERSION, "promptVersion": "artsy-specs-v1", "specs": specs,
             "candidates": candidates, "repairs": repairs, "maxTokens": max_tokens, "threshold": threshold,
             "teacher": teacher, "evaluator": {**_provenance(judge), "version": EVALUATOR_VERSION} if judge else None,
             "config": config, "apiDocHash": sha256(api_doc), "runtimeHashes": runtime_hashes}

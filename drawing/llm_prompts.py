@@ -6,7 +6,7 @@ import re
 from typing import Any
 
 from .dataset_client import parse_json_reply
-from .dataset_prompts import DIFFICULTIES, FAMILIES, SKILL_TAXONOMY, compact_json, sha256, validate_specs
+from .dataset_specs import DIFFICULTIES, FAMILIES, SKILL_TAXONOMY, compact_json, sha256, validate_specs
 
 GENERATOR_VERSION = "artsy-llm-prompts-v3"
 
