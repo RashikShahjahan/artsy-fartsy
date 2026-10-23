@@ -50,9 +50,8 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
     for row in value:
         if (not isinstance(row, dict) or not isinstance(row.get("family"), str) or not row["family"].strip()
                 or not isinstance(row.get("prompt"), str) or not row["prompt"].strip()
-                or row.get("expectedOutcome") not in ("drawing", "refusal")
                 or not _safe_int(row.get("seed")) or row["seed"] < 0):
-            raise ValueError("Each prompt needs family, prompt, expectedOutcome (drawing/refusal), and a nonnegative integer seed")
+            raise ValueError("Each prompt needs family, prompt, and a nonnegative integer seed")
         split = family_split(row["family"])
         if "split" in row and row["split"] != split:
             raise ValueError(f"Split for family {row['family']} must be {split}")
@@ -73,7 +72,6 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
         ids.add(ident)
         prompts.add(normalized)
         normalized_row = {"id": ident, "family": row["family"], "split": split, "prompt": row["prompt"],
-                          "expectedOutcome": row["expectedOutcome"],
                           "seed": row["seed"]}
         if repair is not None:
             normalized_row["repairTask"] = copy.deepcopy(repair)
@@ -117,6 +115,5 @@ def generate_prompts(count: int = 20, seed: int = 42) -> list[dict[str, Any]]:
         lead = ["Please create this drawing:", "Make an illustration with these requirements:", "Draw the following composition:"][sample(40, 3)]
         prompts.append({"id": sha256(f"{PROMPT_VERSION}:{seed}:{i}")[:24], "family": family,
                         "split": split, "prompt": f"{lead} {'. '.join(instructions)}.",
-                        "expectedOutcome": "drawing",
                         "seed": int(entropy[:8], 16)})
     return validate_specs(prompts)
