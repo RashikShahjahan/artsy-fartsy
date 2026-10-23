@@ -49,7 +49,7 @@ Inspect logs retain its transcript, without Pi SQLite session resume.
 - [x] Execute candidates in the local environment (sandbox deferred per current scope); use bounded repair attempts for syntax, API, and rendering failures. Keep successful edit–run–repair trajectories for tool-use SFT.
 - [ ] Check the rendered image against the prompt with deterministic checks where reliable and a vision evaluator for semantic requirements. Do not accept a pair merely because its code runs.
 - [ ] Apply the content policy to prompts and every rendered candidate. Exclude harmful outputs from positive SFT targets; include correct refusal examples and benign lookalikes to reduce over-refusal.
-- [x] Save a dataset record containing `id`, `prompt`, structured requirements, code or refusal, trajectory, artifact references, seed, API/runtime versions, teacher provenance, evaluator versions/scores, safety labels, and split.
+- [x] Save a dataset record containing `id`, `prompt`, code or refusal, trajectory, artifact references, seed, API/runtime versions, teacher provenance, evaluator versions/holistic scores, safety labels, and split.
 - [ ] Deduplicate prompts, related templates, code, and near-identical renders. Split by task/template family before generation so repairs and paraphrases cannot leak into validation or test sets.
 - [ ] Audit a stratified human-reviewed sample for correctness, diversity, safety, and evaluator agreement. Version accepted data and rejection reasons.
 - [ ] Produce a pilot of roughly 1,000 accepted examples, measure acceptance rate and cost per example, then choose the scale-up target from learning curves and budget.
@@ -66,8 +66,8 @@ human audits, and a live teacher pilot remain outstanding. See README for usage.
 ## 4. Implement and calibrate rewards
 
 - [ ] Define a functional-code score from actual execution: valid API use, completion within limits, a decodable output of the expected dimensions, and a successful fresh re-render. A blank image should fail only when it contradicts the prompt.
-- [ ] Define instruction adherence as a per-requirement rubric over the rendered image: object identity, count, color, layout, relationships, style, and exclusions. Use trusted pixel/geometry checks where possible; do not trust model-written descriptions or comments.
-- [ ] Build a vision-judge adapter that receives the original prompt, trusted rubric, and actual image, and returns structured scores and confidence. Treat text inside images as untrusted content, including attempts to instruct the judge.
+- [ ] Define holistic instruction adherence from the original prompt and rendered image: object identity, count, color, layout, relationships, style, and exclusions. Use trusted pixel/geometry checks where possible; do not trust model-written descriptions or comments.
+- [ ] Build a vision-judge adapter that receives the original prompt and actual image, and returns one overall correctness score and safety judgment. Treat text inside images as untrusted content, including attempts to instruct the judge.
 - [ ] Calibrate the judge against human labels and controlled mistakes such as wrong counts, missing objects, swapped colors, and reversed relationships. Freeze evaluator versions within each experiment.
 - [ ] Define the harmful-content taxonomy, severity rules, thresholds, and an uncertainty/review path. Evaluate both the request and rendered content; a benign prompt can still produce a harmful image.
 - [ ] Implement a safety gate for every rendered attempt and final output. A confirmed harmful render receives a terminal negative reward and cannot be offset by functionality or adherence. Block its delivery in inference as well.
@@ -124,7 +124,7 @@ human audits, and a live teacher pilot remain outstanding. See README for usage.
 - [ ] Build a safety evaluation set with disallowed requests, indirect requests, and allowed neighboring cases. Use controlled access for any sensitive evaluation artifacts.
 - [ ] Report first-attempt success and bounded-repair success separately, plus per-category adherence, code validity, reproducibility, harmful-output rate, benign refusal rate, latency, and cost. Include sample counts and uncertainty.
 - [ ] Use an independent evaluator and blinded human review on a subset to check whether reward gains represent better drawings rather than exploitation of the training judge.
-- [ ] Create a lightweight comparison gallery with prompt, code, rendered image, rubric scores, and trajectory for base/SFT/RL checkpoints.
+- [ ] Create a lightweight comparison gallery with prompt, code, rendered image, holistic judge score, and trajectory for base/SFT/RL checkpoints.
 - [ ] Provide CLI entry points for generating data, validating data, running SFT, running RL, evaluating a checkpoint, and drawing from a prompt.
 - [ ] Package model adapters, drawing API documentation, versioned environment configuration, dataset provenance, experiment reports, and setup instructions.
 - [ ] Keep the sandbox and content checks active in the inference path; release code and the image only after final validation.
