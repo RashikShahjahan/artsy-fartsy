@@ -67,12 +67,12 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(task.token_limit, 32768)
         self.assertEqual(task.config.max_tokens, 2048)
 
-    def test_dataset_rejects_training_rows_duplicate_prompts_and_refusal_tasks(self):
+    def test_dataset_rejects_training_rows_duplicate_prompts_and_invalid_inputs(self):
         original = load_specs(ROOT / "evaluation/prompts.jsonl")[0]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "data.jsonl"
             for rows in ([{**original, "split": "train"}], [{**original, "seed": True}],
-                         [{**original, "expectedOutcome": "refusal"}],
+                         [{**original, "prompt": ""}],
                          [original, {**original, "id": "different"}]):
                 path.write_text("\n".join(json.dumps(r) for r in rows))
                 with self.assertRaises(ValueError):
