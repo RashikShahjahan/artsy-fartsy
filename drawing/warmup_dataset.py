@@ -125,7 +125,9 @@ async def warmup_plan(source: str | Path, seed: int = 42, pool_size: int = 128) 
 
 def _example(record: dict[str, Any], kind: str, origin: str, source_dataset: str) -> dict[str, Any]:
     result = copy.deepcopy(record)
-    result["spec"].pop("requirements", None)  # Strip legacy rubric metadata from warmup exports.
+    # Strip old dataset labels and rubric metadata from warmup exports.
+    result["spec"].pop("requirements", None)
+    result["spec"].pop("expectedOutcome", None)
     result["warmup"] = {"kind": kind, "split": "train", "origin": origin, "sourceDataset": source_dataset,
                         "sourceRecordId": record["id"], "sourceSplit": record["spec"]["split"],
                         "sourceStatus": record["status"], "duplicateException": _duplicate_only(record)}

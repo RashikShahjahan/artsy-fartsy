@@ -47,8 +47,7 @@ def load_specs(path: Path) -> list[dict]:
             or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", row["id"])
             or not isinstance(row.get("prompt"), str) or not row["prompt"].strip()
             or type(row.get("seed")) is not int or not 0 <= row["seed"] <= 2**53 - 1
-            or row.get("split", "test") != "test"
-            or row.get("expectedOutcome", "drawing") != "drawing"):
+            or row.get("split", "test") != "test"):
             raise ValueError(f"{path}:{line_number}: expected a test drawing spec with id, prompt, and seed")
         normalized = " ".join(row["prompt"].lower().split())
         if row["id"] in ids or normalized in prompts:

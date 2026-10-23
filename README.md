@@ -215,8 +215,7 @@ and aggregate scores, error counts, usage, and log locations in `summary.json`.
 Logs also record hashes of the dataset, runtime, documentation, and harness
 configuration. Open them with `.eval-venv/bin/inspect view --log-dir eval-results/base/logs`.
 Use `--dataset path/to/prompts.jsonl` for custom drawing test specs with `id`,
-`prompt` and `seed`. Explicit splits must be `test`;
-`expectedOutcome` must be `drawing` when present.
+`prompt` and `seed`. Explicit splits must be `test`.
 
 ## Generate a dataset
 
@@ -273,10 +272,10 @@ export ARTSY_JUDGE_URL=http://127.0.0.1:9001/v1
 The evaluator checks every valid preview and the freshly submitted image against
 the original prompt as a whole. Acceptance requires `safe`, a correct judgment, and
 an overall match score of at least 0.85; use `--threshold` to change it. Unsafe previews
-terminate the candidate. Uncertain safety goes to review. Correct refusals need
-an explicitly labeled refusal task and evaluator approval. With no evaluator,
-executable examples and expected refusals go to `review.jsonl`; the accepted
-training files stay empty. Model approval is provisional: human auditing and
+terminate the candidate. Uncertain safety goes to review. A refusal is accepted only when the evaluator independently judges it appropriate
+for the original prompt. No expected response type is supplied to the evaluator.
+With no evaluator, executable examples and refusals go to `review.jsonl`;
+the accepted training files stay empty. Model approval is provisional: human auditing and
 judge calibration remain separate work.
 
 The built-in curriculum covers 12 primitive, composition, scene, and procedural
@@ -284,19 +283,19 @@ families. Counts up to 10,000 are supported; start with 20, then run a 1,000-pro
 pilot in a new directory. The seed reproduces prompt specifications and render
 randomness; remote teacher replies may vary. Whole families have fixed splits
 before wording and parameters are generated. Increasing the count preserves the
-existing prompt prefix. Custom JSONL specifications can include drawing and
-refusal examples:
+existing prompt prefix. Custom JSONL specifications can include benign and disallowed drawing requests:
 
 ```json
-{"id":"blue-circle","family":"circles","prompt":"Draw one centered blue circle on white.","expectedOutcome":"drawing","seed":42}
+{"id":"blue-circle","family":"circles","prompt":"Draw one centered blue circle on white.","seed":42}
 ```
 
 Pass `--input prompts.jsonl` instead of `--count`. The generator derives the split
 from `family` and rejects conflicting splits, duplicate prompts, and unsafe IDs.
 Unknown families receive a stable hash-based 80/10/10 split; small custom inputs
 may not cover all splits. Keep related custom templates in the same family.
-The built-in curriculum contains benign drawing tasks; provide your own labeled
-refusal prompts if you need refusal data.
+The built-in curriculum contains benign drawing tasks; provide your own prompts
+where refusal might be appropriate if you need refusal data. The current SFT
+conversion still accepts only successful drawing programs, not refusal records.
 
 Each output directory contains:
 
@@ -325,9 +324,10 @@ reported token usage are retained. Changed configuration, documentation, or runt
 sources require a new output directory. Aggregated JSONL files are rebuilt after
 all candidates finish. Only one generator may own a directory; if a process is
 forcibly stopped, remove its `.generation.lock` only after verifying it has exited.
-The prompt-only schema changes dataset and evaluator versions: use a new output
-folder rather than resuming an old generator checkpoint in place. Historical pilot
-records remain valid warmup sources; copied records omit legacy rubric metadata.
+Removing the expected response label changes dataset and evaluator versions: use
+a new output folder rather than resuming an old generator checkpoint in place.
+Historical pilot records remain valid warmup sources; copied records omit legacy
+rubric and expected-outcome metadata.
 Use `.venv/bin/python -m drawing.generate_dataset --help` for all options.
 
 ### First SFT dataset: 80 one-shot drawings and 20 repairs

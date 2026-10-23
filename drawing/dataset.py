@@ -14,8 +14,8 @@ from typing import Any
 from .dataset_client import Completion, Message, parse_json_reply
 from .dataset_prompts import PROMPT_VERSION, compact_json, sha256, validate_specs
 
-DATASET_VERSION = "artsy-dataset-v2"
-EVALUATOR_VERSION = "artsy-rubric-v3-prompt-only"
+DATASET_VERSION = "artsy-dataset-v3"
+EVALUATOR_VERSION = "artsy-rubric-v4-outcome-blind"
 
 
 def _default_config() -> dict[str, Any]:
@@ -63,7 +63,7 @@ def parse_evaluation(text: str) -> dict[str, Any]:
 
 async def evaluate(judge: Any, spec: dict[str, Any], refusal: str | None = None,
                    image: bytes | None = None, source: str | None = None) -> Completion:
-    request: dict[str, Any] = {"prompt": spec["prompt"], "expectedOutcome": spec["expectedOutcome"]}
+    request: dict[str, Any] = {"prompt": spec["prompt"]}
     if refusal is not None:
         request["refusal"] = refusal
     if source is not None:
@@ -143,7 +143,7 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
             saved = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             continue
-        saved_spec = {k: v for k, v in (saved.get("spec") or {}).items() if k != "requirements"}
+        saved_spec = {k: v for k, v in (saved.get("spec") or {}).items() if k not in ("requirements", "expectedOutcome")}
         if (saved.get("generation", {}).get("initialDraft") != "natural" or saved_spec != spec
                 or saved.get("teacher") != _provenance(options["teacher"])):
             raise ValueError("Draft source is not a matching natural teacher trajectory")
@@ -194,16 +194,12 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                 feedback = await env.refuse(target["refusal"]); trace["feedback"] = feedback
                 if not feedback.get("ok"):
                     record["reason"] = feedback.get("error") or feedback.get("outcome"); break
-                if spec["expectedOutcome"] != "refusal":
-                    record["reason"] = "Unexpected refusal of a drawing request"; break
                 if not judge:
                     record.update(status="review", reason="Refusal requires independent evaluation"); break
                 evaluation = await grade(target["refusal"]); trace["evaluation"] = evaluation["result"]
                 result = evaluation["result"]
                 record["status"] = ("review" if result["safety"] == "uncertain" else "accepted" if result["safety"] == "safe" and result["correctRefusal"] and result["score"] >= threshold else "rejected")
                 record["reason"] = result["reason"]; break
-            if spec["expectedOutcome"] == "refusal":
-                record["reason"] = "Teacher did not provide the expected refusal"; break
             trace["executedCode"] = target["code"]; record["code"] = target["code"]
             feedback = await env.write_code(target["code"])
             if feedback.get("ok"): feedback = await env.run_code()
@@ -283,7 +279,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     if mode is not None and mode not in ("standard", "repair"): raise ValueError("Unknown dataset mode")
     if options.get("imageObservations") and not options.get("judge"): raise ValueError("Image observations require a vision reviewer")
     if options.get("retryRejected") and mode != "repair": raise ValueError("retry-rejected is supported only for the repair curriculum")
-    if mode == "repair" and (repairs < 1 or any(not s.get("repairTask") or s["expectedOutcome"] != "drawing" for s in specs)):
+    if mode == "repair" and (repairs < 1 or any(not s.get("repairTask") for s in specs)):
         raise ValueError("Repair mode requires at least one repair and advanced repairTask specifications")
     if type(candidates) is not int or candidates < 1: raise ValueError("candidates must be a positive integer")
     if type(max_tokens) is not int or max_tokens < 1: raise ValueError("maxTokens must be a positive integer")

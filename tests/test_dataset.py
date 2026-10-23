@@ -42,10 +42,10 @@ class ScriptedClient:
 class DatasetCurriculumTests(unittest.TestCase):
     def test_1000_prompts_match_typescript_golden_hash_and_prefix_stability(self) -> None:
         expected = {
-            0: "a69e1fde915f1be11fd27581ca1d17df69fde3c9416e62df1efbea7cf056e639",
-            42: "3e94f46875742d7c6834f92030c454c415840c23a20deda55a8f80a6d12d57bf",
-            2_147_483_647: "f185f644a310cb06960f3c3b97589a089c77d36489c8bcf81914873e6f2881e5",
-            9_007_199_254_740_991: "9773ce70050de5c837edefa52198bd39f38af7c70ffa1e5303631f824915415e",
+            0: "635e62f27108e1948f23853fbf0c07590e1a7696df7aa836637b2d9178036ac0",
+            42: "cb5175aad97d70c52614500a92977ea14db48ce36bb6fe743e1da7273d393f41",
+            2_147_483_647: "49532d9b341555468870e6c11d2c9be7aa2747d3f70f17c704ad9c56e47e938e",
+            9_007_199_254_740_991: "c543572a602812f912846387837251b6cbced383302cf57dac40271939d463c8",
         }
         for seed, digest in expected.items():
             specs = generate_prompts(1000, seed)
@@ -54,7 +54,7 @@ class DatasetCurriculumTests(unittest.TestCase):
             self.assertEqual(len({s["prompt"] for s in specs}), 1000)
             self.assertTrue(all(s["split"] == family_split(s["family"]) for s in specs))
         self.assertNotEqual(generate_prompts(20, 43), generate_prompts(20, 42))
-        self.assertTrue(all("requirements" not in s for s in generate_prompts(20)))
+        self.assertTrue(all("requirements" not in s and "expectedOutcome" not in s for s in generate_prompts(20)))
 
     def test_validation_and_fenced_json_are_strict(self) -> None:
         spec = generate_prompts(1)[0]
@@ -67,6 +67,7 @@ class DatasetCurriculumTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "count"):
             generate_prompts(0)
         self.assertNotIn("requirements", validate_specs([{**spec, "requirements": ["legacy"]}])[0])
+        self.assertNotIn("expectedOutcome", validate_specs([{**spec, "expectedOutcome": "refusal"}])[0])
         self.assertEqual(parse_json_reply('```json\n{"ok":true}\n```'), {"ok": True})
 
     def test_evaluation_rejects_malformed_or_out_of_range_rubrics(self) -> None:
@@ -145,7 +146,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         code = "# generated program"
         teacher = ScriptedClient([json.dumps({"code": "broken python"}), json.dumps({"code": code})])
         judge = ScriptedClient([self.rubric(), self.rubric()], model="judge", base_url="http://reviewer/v1")
-        spec = {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 42}
+        spec = {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 42}
         options = {"output": str(self.output), "specs": [spec], "teacher": teacher, "judge": judge,
                    "candidates": 1, "config": self.config(), "renderer": self.renderer()}
         summary = await generate_dataset(options)
@@ -155,7 +156,9 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["runtimeVersion"], "artcanvas-v2"); self.assertTrue(record["sourceHash"])
         self.assertEqual(record["evaluator"]["reviewMode"], "independent-model")
         self.assertNotIn("requirements", json.dumps(judge.messages))
+        self.assertNotIn("expectedOutcome", json.dumps(judge.messages))
         self.assertNotIn("requirements", record["spec"])
+        self.assertNotIn("expectedOutcome", record["spec"])
         rerun = await generate_dataset(options)
         self.assertEqual(rerun, summary); self.assertEqual(len(teacher.messages), 2)
         with self.assertRaisesRegex(ValueError, "configuration changed"):
@@ -171,8 +174,8 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_duplicate_rendered_pixels_are_rejected_across_splits(self) -> None:
         specs = [
-            {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 1},
-            {"id": "house", "family": "houses", "split": "test", "prompt": "Draw a blue house", "expectedOutcome": "drawing", "seed": 2},
+            {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 1},
+            {"id": "house", "family": "houses", "split": "test", "prompt": "Draw a blue house", "seed": 2},
         ]
         judge = ScriptedClient([self.rubric(), self.rubric(), self.rubric(), self.rubric()], model="judge")
         summary = await generate_dataset({"output": str(self.output), "specs": specs,
@@ -184,7 +187,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.output / "test.jsonl").read_text(), "")
 
     async def test_rejected_repair_can_retry_and_keeps_prior_attempt(self) -> None:
-        spec = {"id": "retry-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 30,
+        spec = {"id": "retry-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 30,
                 "repairTask": {"complexity": "advanced", "skills": ["color", "geometry"]}}
         teacher = ScriptedClient(['{"code":"good"}', '{"code":"broken python"}', '{"code":"fixed"}'])
         judge = ScriptedClient([self.rubric(), self.rubric(), self.rubric()], model="judge")
@@ -229,8 +232,8 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["evaluations"] and row["status"], "rejected")
         self.assertFalse(any('"operation":"submit"' in line for line in Path(self.output / row["artifacts"]["trajectory"]).read_text().splitlines()))
 
-    async def test_expected_refusal_requires_judge_approval(self) -> None:
-        spec = {"id": "refusal", "family": "circles", "split": "train", "prompt": "A disallowed drawing request", "expectedOutcome": "refusal", "seed": 4}
+    async def test_refusal_requires_judge_approval_without_a_preassigned_label(self) -> None:
+        spec = {"id": "refusal", "family": "circles", "split": "train", "prompt": "A disallowed drawing request", "seed": 4}
         teacher = ScriptedClient(['{"refusal":"I cannot help with that request."}'])
         judge = ScriptedClient([self.rubric(correctRefusal=True, reason="Appropriate refusal")], model="judge")
         summary = await generate_dataset({"output": str(self.output), "specs": [spec], "teacher": teacher, "judge": judge,
@@ -240,12 +243,25 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["refusal"], "I cannot help with that request.")
         self.assertNotIn("code", row)
         self.assertIn('"operation":"refuse"', Path(self.output / row["artifacts"]["trajectory"]).read_text())
+        self.assertNotIn("expectedOutcome", json.dumps(judge.messages))
+        self.assertEqual(json.loads(judge.messages[0][1]["content"][0]["text"])["prompt"], spec["prompt"])
+
+    async def test_inappropriate_refusal_is_rejected_by_judge(self) -> None:
+        spec = {"id": "benign-refusal", "family": "circles", "split": "train",
+                "prompt": "Draw a blue circle", "seed": 5}
+        teacher = ScriptedClient(['{"refusal":"I cannot draw circles."}'])
+        judge = ScriptedClient([self.rubric(correctRefusal=False, reason="Benign request")], model="judge")
+        summary = await generate_dataset({"output": str(self.output), "specs": [spec], "teacher": teacher,
+                                          "judge": judge, "candidates": 1, "renderer": self.renderer(),
+                                          "config": self.config()})
+        self.assertEqual(summary["rejected"], 1)
+        self.assertEqual(json.loads((self.output / "records/benign-refusal-c0.json").read_text())["status"], "rejected")
 
     async def test_visual_repair_sends_exact_preview_and_reviewer_flip_cannot_fake_repair(self) -> None:
         import io as image_io
         from PIL import Image
 
-        spec = {"id": "visual-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 13,
+        spec = {"id": "visual-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 13,
                 "repairTask": {"complexity": "advanced", "skills": ["color", "geometry"]}}
 
         def color_png(color: tuple[int, int, int]) -> bytes:
@@ -327,7 +343,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["previousAttempts"][0]["status"], "infrastructure_error")
 
     async def test_one_shot_success_is_excluded_from_repair_curriculum(self) -> None:
-        spec = {"id": "one-shot", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "expectedOutcome": "drawing", "seed": 20,
+        spec = {"id": "one-shot", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 20,
                 "repairTask": {"complexity": "advanced", "skills": ["color", "geometry"]}}
         summary = await generate_dataset({"output": str(self.output), "specs": [spec], "mode": "repair", "candidates": 1,
                                           "teacher": ScriptedClient(['{"code":"draw()"}']),

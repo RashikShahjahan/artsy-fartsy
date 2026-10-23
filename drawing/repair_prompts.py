@@ -299,7 +299,6 @@ def generate_repair_prompts(seed: int = 42, count: int = 128) -> list[dict[str, 
         specs.append({"id": f"repair-{task['name']}-{_sha256(f'{REPAIR_CURRICULUM_VERSION}:{seed}:{i}')[:8]}",
             "family": task["family"], "split": "train",
             "prompt": "Create this computational drawing with the documented ArtCanvas API and Python math/random only. " + ". ".join(instructions) + ".",
-            "expectedOutcome": "drawing",
             "seed": int(_sha256(f"{seed}:algorithmic:{i}")[:8], 16),
             "repairTask": {"complexity": "advanced", "skills": list(task["skills"])}})
     return specs
