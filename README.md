@@ -217,6 +217,18 @@ Preview the seeded curriculum without model requests or code execution:
 .venv/bin/python -m drawing.generate_dataset --dry-run --count 20 --seed 42
 ```
 
+The dry-run JSONL omits train/validation/test split labels, so it can be used
+directly by the evaluation harness without a teacher model or judge:
+
+```sh
+.venv/bin/python -m drawing.generate_dataset --dry-run --count 20 --seed 123 > evaluation/generated-20.jsonl
+.eval-venv/bin/python -m evaluation.evaluate --dataset evaluation/generated-20.jsonl --dry-run
+```
+
+This reuses the standard drawing templates; a different seed varies parameters
+but does not provide independent template-family holdout. Full dataset generation
+continues to assign splits internally for training and warmup datasets.
+
 Generate programs with a stronger teacher served by a chat-completions endpoint.
 Set the model identifier and endpoint to the teacher you have available:
 
