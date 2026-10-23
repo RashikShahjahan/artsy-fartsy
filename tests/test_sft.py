@@ -54,7 +54,7 @@ class ConversionTests(unittest.TestCase):
             "image": "preview-1.png", "imageHash": digest((self.root / "preview-1.png").read_bytes()),
             "text": "privileged judge scores and answer",
         }
-        self.record["trace"][0]["evaluation"] = {"reason": "secret answer", "scores": [0.2]}
+        self.record["trace"][0]["evaluation"] = {"reason": "secret answer", "score": 0.2}
         example = convert_record(self.record, self.root)
         serialized = json.dumps(example["messages"])
         self.assertIn("preview-1.png", serialized)
