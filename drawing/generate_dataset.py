@@ -11,10 +11,11 @@ from typing import Any
 
 HELP = """Python dataset generation
   --output DIR          Dataset directory (default: datasets/pilot)
-  --count N             Structured prompts to generate (default: 20)
+  --count N             Ordinary prompts (default: 20, or 0 with --repair-count)
+  --repair-count N      Additional repair-oriented prompts (default: 0)
   --seed N              Taxonomy/slot seed (default: 42; prompt text is model-generated)
   --input FILE          Custom JSONL specs instead of the built-in curriculum
-  --curriculum MODE     standard (default, 25% repair-oriented) or repair (all challenging)
+  --curriculum MODE     standard (default) or repair (all challenging)
   --pool-size N         Hard-task pool for repair/warmup, 16–512 (default: 128)
   --natural-repairs-from DIR  Reuse verified natural repairs from a previous run
   --drafts-from DIR     Reuse unmodified model drafts (repeatable)
@@ -76,6 +77,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False, usage=HELP.splitlines()[0])
     parser.add_argument("--output")
     parser.add_argument("--count")
+    parser.add_argument("--repair-count", default="0")
     parser.add_argument("--seed", default="42")
     parser.add_argument("--input")
     parser.add_argument("--curriculum", default="standard")
@@ -134,12 +136,19 @@ async def main(argv: list[str] | None = None) -> int:
         raise ValueError("curriculum must be standard or repair")
     if args.input and repair_mode:
         raise ValueError("--input cannot be combined with the built-in repair/warmup curriculum")
-    if repair_mode and args.count:
-        raise ValueError("Use --pool-size for the repair prompt pool; the warmup selects 16 repairs")
+    if repair_mode and (args.count is not None or int(args.repair_count)):
+        raise ValueError("Use --pool-size for the repair/warmup prompt pool; do not set --count or --repair-count")
     seed, pool_size = int(args.seed), int(args.pool_size)
     if repair_mode and not 16 <= pool_size <= 512:
         raise ValueError("pool-size must be between 16 and 512")
-    count = pool_size if repair_mode else int(args.count or 20)
+    requested_repairs = int(args.repair_count)
+    if requested_repairs < 0:
+        raise ValueError("repair-count must be nonnegative")
+    standard_count = (0 if repair_mode else int(args.count) if args.count is not None
+                      else 0 if requested_repairs else 20)
+    count = pool_size if repair_mode else standard_count + requested_repairs
+    if not repair_mode and standard_count < 0:
+        raise ValueError("count must be nonnegative")
     output = args.output or ("datasets/sft-warmup-100" if warmup_source else "datasets/pilot")
     plan = await warmup_plan(warmup_source, seed, pool_size) if warmup_source else None
 
@@ -150,7 +159,9 @@ async def main(argv: list[str] | None = None) -> int:
     prompt_url = args.prompt_url or os.getenv("ARTSY_PROMPT_URL") or base_url
     prompt_config = {
         "version": GENERATOR_VERSION, "mode": "repair" if repair_mode else "standard",
-        "count": count, "seed": seed, "model": prompt_model, "baseUrl": prompt_url,
+        "count": count, "standardCount": standard_count,
+        "repairCount": count if repair_mode else requested_repairs,
+        "seed": seed, "model": prompt_model, "baseUrl": prompt_url,
         "batchSize": int(args.prompt_batch_size), "maxTokens": int(args.prompt_max_tokens),
         "retries": int(args.prompt_retries),
     }
@@ -179,7 +190,8 @@ async def main(argv: list[str] | None = None) -> int:
             prompt_client = chat_client({"model": prompt_model, "baseUrl": prompt_url,
                 "apiKey": prompt_key, "timeoutMs": int(args.timeout_ms)})
             generated = await generate_llm_prompts(prompt_client, count, seed,
-                mode=prompt_config["mode"], batch_size=prompt_config["batchSize"],
+                mode=prompt_config["mode"], repair_count=requested_repairs,
+                batch_size=prompt_config["batchSize"],
                 max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"])
             specs = generated["specs"]
             if not args.dry_run:

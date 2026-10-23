@@ -227,7 +227,7 @@ can have multiple `skills` labels (e.g. `symmetry`, `relative_geometry`,
 per-skill analysis; the correctness evaluator judges **only the original prompt
 and rendered output**, not a hidden `requirements` or `expectedOutcome` field.
 
-**Generate 20 evaluation prompts (15 standard, 5 repair-oriented):**
+**Generate evaluation prompts with explicitly chosen counts (15 standard, 5 repair-oriented):**
 
 ```sh
 # Choose a capable prompt-writing model, with an OpenAI-compatible endpoint.
@@ -235,7 +235,7 @@ export ARTSY_PROMPT_MODEL=your-prompt-writer
 export ARTSY_PROMPT_URL=http://127.0.0.1:9000/v1
 # Set ARTSY_PROMPT_API_KEY if the endpoint requires authentication.
 
-.venv/bin/python -m drawing.generate_dataset --dry-run --count 20 --seed 42 > evaluation/generated-20.jsonl
+.venv/bin/python -m drawing.generate_dataset --dry-run --count 15 --repair-count 5 --seed 42 > evaluation/generated-20.jsonl
 .eval-venv/bin/python -m evaluation.evaluate --dataset evaluation/generated-20.jsonl --dry-run
 ```
 
@@ -266,7 +266,9 @@ configuration requires a new output directory. Neither API keys nor credentials
 are persisted. For prompts only, `--dry-run` prints JSONL without split labels.
 For complete dataset runs, existing family-based training splits remain internal.
 
-By default one in four tasks is repair-oriented. For a wholly challenging
+No fixed standard/repair proportion is imposed. `--count 20` makes only
+standard prompts; `--count 0 --repair-count 20` makes only repair-oriented
+prompts, and `--count 15 --repair-count 5` makes a specified mix. For a wholly challenging
 **natural repair** curriculum, use:
 
 ```sh

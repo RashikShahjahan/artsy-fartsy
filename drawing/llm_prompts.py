@@ -8,22 +8,26 @@ from typing import Any
 from .dataset_client import parse_json_reply
 from .dataset_prompts import FAMILIES, SKILL_TAXONOMY, compact_json, sha256, validate_specs
 
-GENERATOR_VERSION = "artsy-llm-prompts-v1"
+GENERATOR_VERSION = "artsy-llm-prompts-v2"
 DIFFICULTIES = ("basic", "intermediate", "advanced")
 
 
-def _slots(count: int, seed: int, mode: str) -> list[dict[str, Any]]:
+def _slots(count: int, seed: int, mode: str, repair_count: int = 0) -> list[dict[str, Any]]:
     if type(count) is not int or not 1 <= count <= 10_000:
         raise ValueError("count must be an integer from 1 to 10000")
     if type(seed) is not int or not 0 <= seed <= 9_007_199_254_740_991:
         raise ValueError("seed must be a nonnegative safe integer")
     if mode not in ("standard", "repair"):
         raise ValueError("mode must be standard or repair")
+    if type(repair_count) is not int or not 0 <= repair_count <= count:
+        raise ValueError("repair_count must be between 0 and count")
+    if mode == "repair" and repair_count:
+        raise ValueError("repair_count is only for standard/mixed prompt generation")
     families = [family for family, _ in FAMILIES]
     skills = list(SKILL_TAXONOMY)
     slots = []
     for index in range(count):
-        repair = mode == "repair" or index % 4 == 3 or (count < 4 and index == count - 1)
+        repair = mode == "repair" or index >= count - repair_count
         slots.append({
             "index": index,
             "family": families[(index + seed) % len(families)],
@@ -98,14 +102,15 @@ def _parse_batch(text: str, slots: list[dict[str, Any]], earlier: list[str], see
 
 
 async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
-                               mode: str = "standard", batch_size: int = 5,
+                               mode: str = "standard", repair_count: int = 0,
+                               batch_size: int = 5,
                                max_tokens: int = 4096, retries: int = 3) -> dict[str, Any]:
     """Produce a validated prompt plan, preserving raw response provenance for auditing.
 
     Slot labels and seeds are deterministic; model-authored wording is frozen by
     the CLI's saved plan and may not be reproducible from the same seed alone.
     """
-    slots = _slots(count, seed, mode)
+    slots = _slots(count, seed, mode, repair_count)
     if type(batch_size) is not int or not 1 <= batch_size <= 8:
         raise ValueError("prompt batch size must be between 1 and 8")
     if type(max_tokens) is not int or max_tokens < 1:

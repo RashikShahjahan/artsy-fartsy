@@ -73,7 +73,7 @@ class PromptClient:
 class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
     async def test_taxonomy_balanced_eval_mix_and_no_judge_rubrics(self) -> None:
         client = PromptClient()
-        result = await generate_llm_prompts(client, count=20, seed=42, batch_size=5)
+        result = await generate_llm_prompts(client, count=20, seed=42, repair_count=5, batch_size=5)
         specs = result["specs"]
         self.assertEqual(len(specs), 20)
         self.assertEqual(sum(spec["caseType"] == "repair" for spec in specs), 5)
@@ -86,6 +86,12 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls, 4)
         self.assertEqual(len(result["batches"]), 4)
         self.assertEqual(validate_specs(specs), specs)
+
+    async def test_default_has_no_repairs_and_repair_only_can_be_requested(self) -> None:
+        default = await generate_llm_prompts(PromptClient(), count=8)
+        only_repairs = await generate_llm_prompts(PromptClient(), count=3, repair_count=3)
+        self.assertTrue(all(x["caseType"] == "standard" for x in default["specs"]))
+        self.assertTrue(all(x["caseType"] == "repair" for x in only_repairs["specs"]))
 
     async def test_repair_curriculum_contains_advanced_technical_metadata(self) -> None:
         result = await generate_llm_prompts(PromptClient(), count=16, mode="repair", batch_size=8)
@@ -123,7 +129,7 @@ class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
     async def test_dry_run_generates_eval_prompts_without_split_or_rendering(self) -> None:
         client = PromptClient()
         with patch("drawing.dataset_client.chat_client", return_value=client), contextlib.redirect_stdout(io.StringIO()) as output:
-            code = await main(["--dry-run", "--count", "4", "--prompt-model", "prompt-writer"])
+            code = await main(["--dry-run", "--count", "3", "--repair-count", "1", "--prompt-model", "prompt-writer"])
         self.assertEqual(code, 0)
         specs = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual(len(specs), 4)
