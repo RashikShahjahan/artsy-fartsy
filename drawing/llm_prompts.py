@@ -6,37 +6,35 @@ import re
 from typing import Any
 
 from .dataset_client import parse_json_reply
-from .dataset_prompts import FAMILIES, SKILL_TAXONOMY, compact_json, sha256, validate_specs
+from .dataset_prompts import DIFFICULTIES, FAMILIES, SKILL_TAXONOMY, compact_json, sha256, validate_specs
 
-GENERATOR_VERSION = "artsy-llm-prompts-v2"
-DIFFICULTIES = ("basic", "intermediate", "advanced")
+GENERATOR_VERSION = "artsy-llm-prompts-v3"
 
 
-def _slots(count: int, seed: int, mode: str, repair_count: int = 0) -> list[dict[str, Any]]:
+def _slots(count: int, seed: int, mode: str = "standard", difficulty: str = "mixed") -> list[dict[str, Any]]:
     if type(count) is not int or not 1 <= count <= 10_000:
         raise ValueError("count must be an integer from 1 to 10000")
     if type(seed) is not int or not 0 <= seed <= 9_007_199_254_740_991:
         raise ValueError("seed must be a nonnegative safe integer")
     if mode not in ("standard", "repair"):
         raise ValueError("mode must be standard or repair")
-    if type(repair_count) is not int or not 0 <= repair_count <= count:
-        raise ValueError("repair_count must be between 0 and count")
-    if mode == "repair" and repair_count:
-        raise ValueError("repair_count is only for standard/mixed prompt generation")
+    if difficulty not in (*DIFFICULTIES, "mixed"):
+        raise ValueError(f"difficulty must be mixed or one of {DIFFICULTIES}")
+    if mode == "repair" and difficulty != "mixed":
+        raise ValueError("The legacy repair curriculum does not accept difficulty selection")
     families = [family for family, _ in FAMILIES]
     skills = list(SKILL_TAXONOMY)
     slots = []
     for index in range(count):
-        repair = mode == "repair" or index >= count - repair_count
+        level = ("very-hard" if mode == "repair" else
+                 DIFFICULTIES[index % len(DIFFICULTIES)] if difficulty == "mixed" else difficulty)
         slots.append({
             "index": index,
             "family": families[(index + seed) % len(families)],
             "primarySkill": skills[(index + seed) % len(skills)],
-            "difficulty": "advanced" if repair else DIFFICULTIES[(index // len(skills)) % len(DIFFICULTIES)],
-            "caseType": "repair" if repair else "standard",
+            "difficulty": level,
         })
     return slots
-
 
 def _words(prompt: str) -> set[str]:
     return {word for word in re.findall(r"[a-z0-9]+", prompt.lower()) if len(word) >= 3}
@@ -88,7 +86,7 @@ def _parse_batch(text: str, slots: list[dict[str, Any]], earlier: list[str], see
         entropy = sha256(f"{GENERATOR_VERSION}:{seed}:{index}")
         spec: dict[str, Any] = {
             "id": entropy[:24], "family": slot["family"], "prompt": prompt.strip(),
-            "seed": int(entropy[24:32], 16), "skills": skills, "caseType": slot["caseType"],
+            "seed": int(entropy[24:32], 16), "skills": skills, "difficulty": slot["difficulty"],
         }
         if mode == "repair":
             technical = item["technicalSkills"]
@@ -102,7 +100,7 @@ def _parse_batch(text: str, slots: list[dict[str, Any]], earlier: list[str], see
 
 
 async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
-                               mode: str = "standard", repair_count: int = 0,
+                               mode: str = "standard", difficulty: str = "mixed",
                                batch_size: int = 5,
                                max_tokens: int = 4096, retries: int = 3) -> dict[str, Any]:
     """Produce a validated prompt plan, preserving raw response provenance for auditing.
@@ -110,7 +108,7 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
     Slot labels and seeds are deterministic; model-authored wording is frozen by
     the CLI's saved plan and may not be reproducible from the same seed alone.
     """
-    slots = _slots(count, seed, mode, repair_count)
+    slots = _slots(count, seed, mode, difficulty)
     if type(batch_size) is not int or not 1 <= batch_size <= 8:
         raise ValueError("prompt batch size must be between 1 and 8")
     if type(max_tokens) is not int or max_tokens < 1:
@@ -119,18 +117,20 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
         raise ValueError("prompt retries must be between 1 and 5")
     system = (
         "You create diverse, self-contained drawing requests for evaluating and training a "
-        "Python/ArtCanvas image-drawing agent on a 1920x1080 canvas. Write ORIGINAL prompts, "
+        "Python/ArtCanvas image-drawing agent on a 1920x1200 canvas. Write ORIGINAL prompts, "
         "not permutations of stock templates. Make all tasks benign and feasible with basic "
         "geometry, math, random, shapes, fills, paths, and gradients; no external images, "
         "files, fonts, network access, installed packages, or user-provided code. "
         "Each prompt is 1-5 natural sentences with concrete visual success criteria, "
         "but never include a hidden answer, a scoring rubric, source code, or instructions "
         "to the evaluator. Balance creative scenes with measurable geometry and constraints. "
-        "A caseType=repair slot is a difficult multi-step drawing challenge likely to exercise "
-        "the agent's write-run-fix loop; do NOT invent a broken program or instruct the "
-        "evaluator to repair code. Use multiple independent constraints and computations. "
-        "For mode=repair, also name 2-6 genuine computational skills as technicalSkills, "
-        "but do not plant errors or specify defects. "
+        "Follow each slot's difficulty: easy means one or two shapes and few constraints; "
+        "medium means several objects with layout or layering; hard means complex geometry "
+        "and multiple interacting constraints; very-hard means challenging procedural "
+        "geometry or precise interdependent conditions. Keep every level solvable. "
+        "Difficulty describes task complexity, not a required failure or repair. "
+        "Never deliberately introduce defects or instruct the agent to repair code. "
+        "For legacy mode=repair, also name 2-6 genuine computational skills as technicalSkills. "
         "Return ONLY one JSON object with an items array in slot order. Each item has "
         "index (integer), prompt (string), and skills (1-5 taxonomy labels, including "
         "primarySkill); include technicalSkills (array of strings) ONLY in mode=repair."

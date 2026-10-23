@@ -16,6 +16,8 @@ FAMILIES = [
 ]
 # Orthogonal to the scene family: a prompt can exercise several skills.
 # Used to plan/stratify datasets, never as requirements sent to an evaluator.
+DIFFICULTIES = ("easy", "medium", "hard", "very-hard")
+
 SKILL_TAXONOMY = {
     "primitives": "Basic shapes, paths, fills, and strokes",
     "counting": "Exact quantities, repetition, and grouping",
@@ -101,11 +103,11 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
                     or len(set(skills)) != len(skills)):
                 raise ValueError("Skills must be 1-5 unique taxonomy labels")
             normalized_row["skills"] = list(skills)
-        case_type = row.get("caseType")
-        if case_type is not None:
-            if case_type not in ("standard", "repair"):
-                raise ValueError("caseType must be standard or repair")
-            normalized_row["caseType"] = case_type
+        difficulty = row.get("difficulty")
+        if difficulty is not None:
+            if difficulty not in DIFFICULTIES:
+                raise ValueError(f"difficulty must be one of {DIFFICULTIES}")
+            normalized_row["difficulty"] = difficulty
         result.append(normalized_row)
     return result
 

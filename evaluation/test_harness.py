@@ -22,7 +22,8 @@ from PIL import Image
 import yaml
 
 from evaluation.harness import (ROOT, drawing_score, drawing_task, load_specs, model_from_env,
-                                parse_correctness_judgment, parse_safety_judgment)
+                                parse_correctness_judgment, parse_safety_judgment,
+                                preview_attempts, trajectory_metrics)
 from evaluation.render import render
 
 GOOD = ('from artcanvas import ArtCanvas\n'
@@ -73,6 +74,7 @@ class EvaluationTest(unittest.TestCase):
             path = Path(directory) / "data.jsonl"
             for rows in ([{**original, "split": "train"}], [{**original, "seed": True}],
                          [{**original, "prompt": ""}],
+                         [{**original, "difficulty": "impossible"}],
                          [original, {**original, "id": "different"}]):
                 path.write_text("\n".join(json.dumps(r) for r in rows))
                 with self.assertRaises(ValueError):
@@ -143,6 +145,50 @@ class EvaluationTest(unittest.TestCase):
             self.assertEqual(summary["correctness_judge_model"], "mockllm/correct")
             self.assertEqual(summary["safety_judge_model"], "mockllm/safe")
 
+    def test_preview_trajectory_measures_observed_revisions_and_execution_recovery(self):
+        def call(id, command):
+            return SimpleNamespace(tool_calls=[
+                SimpleNamespace(id=id, arguments={"command": command})])
+        def reply(id, ok, source_hash):
+            return SimpleNamespace(tool_call_id=id, content=(
+                f'Return code: 0\n{{"ok": {str(ok).lower()}, '
+                f'"sourceHash": "{source_hash}"}}'))
+        messages = [
+            call("first", "python /opt/artsy/render.py --preview < /workspace/program.py"),
+            reply("first", False, "a" * 64),
+            call("second", "python /opt/artsy/render.py --preview < /workspace/program.py"),
+            reply("second", True, "b" * 64),
+        ]
+        self.assertEqual(preview_attempts(messages),
+                         [{"ok": False, "sourceHash": "a" * 64},
+                          {"ok": True, "sourceHash": "b" * 64}])
+        outcome = trajectory_metrics(messages, final_render_valid=True, final_visual_pass=True)
+        self.assertEqual(outcome["previewAttempts"], 2)
+        self.assertFalse(outcome["initialRenderValid"])
+        self.assertTrue(outcome["revisionAttempted"])
+        self.assertTrue(outcome["executionRecovered"])
+        self.assertIsNone(trajectory_metrics([], True)["initialRenderValid"])
+        self.assertFalse(trajectory_metrics([], True)["executionRecovered"])
+        unchanged = [messages[0], messages[1], messages[2],
+                     reply("second", True, "a" * 64)]
+        self.assertFalse(trajectory_metrics(unchanged, True)["executionRecovered"])
+
+    def test_difficulty_summary_uses_observed_records(self):
+        from evaluation.evaluate import difficulty_summary
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            file = root / "x-1/result.json"
+            file.parent.mkdir(parents=True)
+            file.write_text(json.dumps({
+                "scores": {"render_valid": 1, "visual_pass": 1},
+                "trajectory": {"initialRenderValid": False,
+                               "revisionAttempted": True, "executionRecovered": True},
+            }))
+            summary = difficulty_summary([{"id": "x", "difficulty": "hard"}], root, 1)
+            self.assertEqual(summary["hard"]["completed"], 1)
+            self.assertEqual(summary["hard"]["execution_recovery_rate"], 1.0)
+            self.assertEqual(summary["hard"]["visual_pass_rate"], 1.0)
+
     def test_fresh_render_code_errors_dimensions_symlinks_and_timeouts(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
@@ -207,6 +253,8 @@ class EvaluationTest(unittest.TestCase):
             self.assertEqual(match.group(1), "image_url")
             self.assertEqual(base64.b64decode(match.group(2).split(",", 1)[1]),
                              (root / "preview/image.png").read_bytes())
+            self.assertEqual(json.loads(result.stdout.splitlines()[0])["sourceHash"],
+                             __import__("hashlib").sha256(GOOD.encode()).hexdigest())
 
     def test_separate_judges_independently_control_visual_pass(self):
         for correctness, harmful, expected in (

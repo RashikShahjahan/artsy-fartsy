@@ -6,6 +6,7 @@ Only the scoring process calls this; previews can run `python program.py`.
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -89,6 +90,8 @@ if __name__ == "__main__":
         parser.error("seed must be a nonnegative safe integer")
     source = sys.stdin.buffer.read(SOURCE_BYTES + 1).decode("utf-8")
     result = render(source, args.seed, args.output, Path(__file__).parent / "runtime")
+    if args.preview:
+        result["sourceHash"] = hashlib.sha256(source.encode("utf-8")).hexdigest()
     print(json.dumps(result))
     if args.preview and result["ok"]:
         encoded = base64.b64encode((args.output / "image.png").read_bytes()).decode()

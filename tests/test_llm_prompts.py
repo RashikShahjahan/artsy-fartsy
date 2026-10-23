@@ -73,29 +73,31 @@ class PromptClient:
 class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
     async def test_taxonomy_balanced_eval_mix_and_no_judge_rubrics(self) -> None:
         client = PromptClient()
-        result = await generate_llm_prompts(client, count=20, seed=42, repair_count=5, batch_size=5)
+        result = await generate_llm_prompts(client, count=20, seed=42, batch_size=5)
         specs = result["specs"]
         self.assertEqual(len(specs), 20)
-        self.assertEqual(sum(spec["caseType"] == "repair" for spec in specs), 5)
+        self.assertEqual({level: sum(spec["difficulty"] == level for spec in specs)
+                          for level in ("easy", "medium", "hard", "very-hard")},
+                         {"easy": 5, "medium": 5, "hard": 5, "very-hard": 5})
         self.assertEqual(len({spec["prompt"] for spec in specs}), 20)
         self.assertEqual(set(SKILL_TAXONOMY),
                          {skill for spec in specs for skill in spec["skills"]})
         self.assertTrue(all(spec["split"] == family_split(spec["family"]) for spec in specs))
         self.assertTrue(all("requirements" not in spec and "expectedOutcome" not in spec
-                            and "repairTask" not in spec for spec in specs))
+                            and "repairTask" not in spec and "caseType" not in spec for spec in specs))
         self.assertEqual(client.calls, 4)
         self.assertEqual(len(result["batches"]), 4)
         self.assertEqual(validate_specs(specs), specs)
 
-    async def test_default_has_no_repairs_and_repair_only_can_be_requested(self) -> None:
-        default = await generate_llm_prompts(PromptClient(), count=8)
-        only_repairs = await generate_llm_prompts(PromptClient(), count=3, repair_count=3)
-        self.assertTrue(all(x["caseType"] == "standard" for x in default["specs"]))
-        self.assertTrue(all(x["caseType"] == "repair" for x in only_repairs["specs"]))
+    async def test_difficulty_can_be_selected_without_repair_labels(self) -> None:
+        hard = await generate_llm_prompts(PromptClient(), count=8, difficulty="hard")
+        self.assertTrue(all(x["difficulty"] == "hard" for x in hard["specs"]))
+        self.assertTrue(all("caseType" not in x and "repairTask" not in x for x in hard["specs"]))
+        self.assertEqual(validate_specs(hard["specs"]), hard["specs"])
 
     async def test_repair_curriculum_contains_advanced_technical_metadata(self) -> None:
         result = await generate_llm_prompts(PromptClient(), count=16, mode="repair", batch_size=8)
-        self.assertTrue(all(spec["caseType"] == "repair" for spec in result["specs"]))
+        self.assertTrue(all(spec["difficulty"] == "very-hard" for spec in result["specs"]))
         self.assertTrue(all(spec["repairTask"]["complexity"] == "advanced"
                             and len(spec["repairTask"]["skills"]) >= 2 for spec in result["specs"]))
 
@@ -118,6 +120,9 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
     def test_invalid_fields_and_labels_are_rejected(self) -> None:
         slot = _slots(1, 42, "standard")[0]
         valid = item(slot)
+        with self.assertRaisesRegex(ValueError, "difficulty"):
+            validate_specs([{"family": "circles", "prompt": "Draw a circle", "seed": 1,
+                             "difficulty": "impossible"}])
         for broken in ({**valid, "requirements": ["secret rubric"]},
                        {**valid, "skills": ["invalid_skill"]},
                        {**valid, "skills": [slot["primarySkill"], slot["primarySkill"]]}):
@@ -129,11 +134,12 @@ class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
     async def test_dry_run_generates_eval_prompts_without_split_or_rendering(self) -> None:
         client = PromptClient()
         with patch("drawing.dataset_client.chat_client", return_value=client), contextlib.redirect_stdout(io.StringIO()) as output:
-            code = await main(["--dry-run", "--count", "3", "--repair-count", "1", "--prompt-model", "prompt-writer"])
+            code = await main(["--dry-run", "--count", "4", "--difficulty", "hard", "--prompt-model", "prompt-writer"])
         self.assertEqual(code, 0)
         specs = [json.loads(line) for line in output.getvalue().splitlines()]
         self.assertEqual(len(specs), 4)
-        self.assertEqual(sum(row["caseType"] == "repair" for row in specs), 1)
+        self.assertTrue(all(row["difficulty"] == "hard" for row in specs))
+        self.assertTrue(all("caseType" not in row for row in specs))
         self.assertTrue(all("split" not in row for row in specs))
         self.assertEqual(client.calls, 1)
 

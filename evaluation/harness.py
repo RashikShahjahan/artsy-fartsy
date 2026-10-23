@@ -20,6 +20,8 @@ from inspect_ai.util import sandbox
 from inspect_swe import mini_swe_agent
 from PIL import Image
 
+from drawing.dataset_prompts import DIFFICULTIES
+
 ROOT = Path(__file__).resolve().parents[1]
 BASE_MODEL = "Qwen/Qwen3.5-0.8B"
 AGENT_VERSION = "2.2.3"
@@ -47,7 +49,8 @@ def load_specs(path: Path) -> list[dict]:
             or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", row["id"])
             or not isinstance(row.get("prompt"), str) or not row["prompt"].strip()
             or type(row.get("seed")) is not int or not 0 <= row["seed"] <= 2**53 - 1
-            or row.get("split", "test") != "test"):
+            or row.get("split", "test") != "test"
+            or ("difficulty" in row and row["difficulty"] not in DIFFICULTIES)):
             raise ValueError(f"{path}:{line_number}: expected a test drawing spec with id, prompt, and seed")
         normalized = " ".join(row["prompt"].lower().split())
         if row["id"] in ids or normalized in prompts:
@@ -86,6 +89,60 @@ def parse_safety_judgment(text: str) -> dict:
         or not isinstance(result.get("reason"), str) or not result["reason"].strip()):
         raise ValueError("Safety judge must return a harmful boolean and reason")
     return {"harmful": result["harmful"], "reason": result["reason"]}
+
+
+def preview_attempts(messages: list) -> list[dict]:
+    """Extract genuine preview results from Inspect's recorded bash tool calls.
+
+    The model can choose whether to preview; absence of a preview is unknown,
+    not evidence of one-shot success. Only tool replies paired with an actual
+    preview command and the renderer's source hash are considered.
+    """
+    pending: set[str] = set()
+    attempts: list[dict] = []
+    for message in messages:
+        for call in getattr(message, "tool_calls", None) or []:
+            arguments = getattr(call, "arguments", None) or {}
+            command = arguments.get("command", "") if isinstance(arguments, dict) else ""
+            if ("render.py" in command and "--preview" in command
+                    and getattr(call, "id", None)):
+                pending.add(call.id)
+        call_id = getattr(message, "tool_call_id", None)
+        if call_id not in pending:
+            continue
+        pending.discard(call_id)
+        content = getattr(message, "content", "")
+        if isinstance(content, list):
+            content = "\n".join(part.text for part in content
+                                if isinstance(getattr(part, "text", None), str))
+        if not isinstance(content, str):
+            continue
+        for line in content.splitlines():
+            try:
+                feedback = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            if (isinstance(feedback, dict) and type(feedback.get("ok")) is bool
+                    and re.fullmatch(r"[0-9a-f]{64}", str(feedback.get("sourceHash", "")))):
+                attempts.append({"ok": feedback["ok"], "sourceHash": feedback["sourceHash"]})
+                break
+    return attempts
+
+
+def trajectory_metrics(messages: list, final_render_valid: bool,
+                       final_visual_pass: bool | None = None) -> dict:
+    attempts = preview_attempts(messages)
+    initial = attempts[0] if attempts else None
+    changed = bool(initial and any(a["sourceHash"] != initial["sourceHash"]
+                                   for a in attempts[1:]))
+    recovered = bool(initial and not initial["ok"] and changed and final_render_valid
+                     and any(a["ok"] and a["sourceHash"] != initial["sourceHash"]
+                             for a in attempts[1:]))
+    return {"previewAttempts": len(attempts),
+            "initialRenderValid": initial["ok"] if initial else None,
+            "revisionAttempted": changed,
+            "executionRecovered": recovered,
+            "finalVisualPass": final_visual_pass}
 
 
 @scorer(metrics={"*": [mean(), stderr()]})
@@ -182,6 +239,9 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
                     values["image_correct"] = float(correctness["correct"] and correctness["score"] >= threshold)
                     values["image_harmful"] = float(safety["harmful"])
                     values["visual_pass"] = values["image_correct"] * (1 - values["image_harmful"])
+        result["trajectory"] = trajectory_metrics(getattr(state, "messages", []) or [],
+            bool(values["render_valid"]), bool(values["visual_pass"]) if "visual_pass" in values else None)
+        result["difficulty"] = state.metadata.get("difficulty")
         result["scores"] = values
         (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
         return Score(value=values, explanation=result.get("error", json.dumps(result.get("feedback", {}))),
