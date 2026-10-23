@@ -80,3 +80,17 @@ test("VM runner: complete repair episode through the real Pi harness", async () 
   try { assert.equal((await draw("blue circle", directory, { models, model })).submitted, true); }
   finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test("structured refusal terminates and reopens without executing drawing code", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "artsy-refusal-"));
+  const faux = fauxProvider(); const models = createModels(); models.setProvider(faux.provider);
+  faux.setResponses([call("refuse", { reason: "Cannot fulfill this request" })]);
+  const renderer: Renderer = { render: async () => { throw new Error("must not execute"); } };
+  try {
+    const state = await draw("unsupported request", directory, { models, model, renderer });
+    assert.equal(state.refusal, "Cannot fulfill this request"); assert.equal(state.submitted, false);
+    assert.equal(JSON.parse(await readFile(join(directory, "result.json"), "utf8")).outcome, "refused");
+    assert.equal((await draw("unsupported request", directory, { models, model, renderer })).refusal, state.refusal);
+    assert.equal(faux.state.callCount, 1);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

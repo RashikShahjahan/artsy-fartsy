@@ -7,7 +7,8 @@
     "build": "rm -rf dist && tsc && mkdir -p dist/docs dist/runtime && cp docs/*.md dist/docs/ && cp runtime/*.py dist/runtime/",
     "draw": "node --import tsx src/cli.ts",
     "test": "node --import tsx --test tests/*.test.ts",
-    "serve": ".venv/bin/python -m uvicorn inference.server:app --host 127.0.0.1 --port 8080"
+    "serve": ".venv/bin/python -m uvicorn inference.server:app --host 127.0.0.1 --port 8080",
+    "render": "node --import tsx src/run.ts"
   },
   "repository": {
     "type": "git",

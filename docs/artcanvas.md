@@ -1,7 +1,9 @@
-# ArtCanvas API
-The original default canvas is 1920×1200, white background, black brush.
+# ArtCanvas API v2
+The default canvas is 1920×1200, white background, black brush.
 Colors are floats from 0 to 1; coordinates are pixels; angles are radians.
 The runtime supplies Cairo-compatible CFFI bindings for its `import cairo`.
+Dimensions must be integers from 1 to 4096. Episode environments require their
+configured dimensions (1920×1200 by default). Use `math` and seeded `random` as needed.
 
 ```python
 from artcanvas import ArtCanvas
@@ -29,9 +31,25 @@ set_gradient(x1, y1, x2, y2, stops)
 set_radial_gradient(cx1, cy1, radius1, cx2, cy2, radius2, stops)
 set_dash_pattern(dashes, offset=0)
 draw_rounded_rectangle(x, y, width, height, radius, fill=False)
+# Composable paths (segments are drawn only by stroke/fill):
+new_path()
+move_to(x, y)
+line_to(x, y)
+curve_to(cx1, cy1, cx2, cy2, x, y)
+close_path()
+stroke()
+fill()
+# Transforms and brush state:
+save_state()
+restore_state()
+translate(x, y)
+rotate(radians)
+scale(x, y)
 save()
 ```
 
 Gradient stops are `(offset, r, g, b, a)` tuples. `save()` finishes the surface;
-use it once at the end OR use a context manager that saves on exit.
+repeated saves are harmless. A context manager saves only on successful exit.
+`save_state()`/`restore_state()` push/pop Cairo brush settings and transforms;
+these do not write a file. Keep state pushes and pops balanced.
 Save as `output.png` in the current directory.

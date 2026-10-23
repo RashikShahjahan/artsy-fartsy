@@ -7,11 +7,11 @@ import { createRegistry, defineDoc, defineExtension, defineTool, GenerationTask,
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { LIMITS, MODEL_ID, PROVIDER } from "./config.js";
 import { liquidModels } from "./model.js";
-import { LocalRenderer, type Renderer } from "./renderer.js";
+import { LocalRenderer, RUNTIME_VERSION, type Renderer } from "./renderer.js";
 
 export const context = BACKGROUND_CONTEXT;
 export const hash = (value: string | Buffer) => createHash("sha256").update(value).digest("hex");
-type EpisodeState = { chargedTasks: string[]; requestHash: string; source: string; seed: number; attempts: number; calls: number; submitted: boolean; artifact: string; sourceHash: string; imageHash: string };
+type EpisodeState = { chargedTasks: string[]; requestHash: string; source: string; seed: number; attempts: number; calls: number; submitted: boolean; refusal?: string; artifact: string; sourceHash: string; imageHash: string };
 export const Episode = defineDoc<EpisodeState>({
   kind: "artsy.episode", version: 1, scope: "conversation", history: "latest", fork: "initial",
   initial: () => ({ chargedTasks: [], requestHash: "", source: "", seed: 0, attempts: 0, calls: 0, submitted: false, artifact: "", sourceHash: "", imageHash: "" }),
@@ -24,13 +24,14 @@ async function atomicFile(path: string, data: string | Buffer) {
 }
 
 export async function openDrawing(options: { directory: string; renderer?: Renderer; models?: Models; model?: {provider: string; modelId: string}; seed?: number }) {
+  if (options.seed !== undefined && (!Number.isSafeInteger(options.seed) || options.seed < 0)) throw new Error("seed must be a nonnegative integer");
   const directory = resolve(options.directory);
   await mkdir(directory, { recursive: true });
   const renderer = options.renderer ?? new LocalRenderer();
   const apiDoc = await readFile(new URL("../docs/artcanvas.md", import.meta.url), "utf8");
   const drawing = defineExtension({
     name: "artsy.drawing",
-    wraps: ["write_code", "read_code", "run_code", "submit"].map(name => ({ tool: name, wrap: (tool: ToolRegistration) => ({
+    wraps: ["write_code", "read_code", "run_code", "submit", "refuse"].map(name => ({ tool: name, wrap: (tool: ToolRegistration) => ({
       ...tool,
       execute: async (...[args, api, ctx]: Parameters<ToolRegistration["execute"]>) => {
         await api.commit(async tx => {
@@ -45,7 +46,7 @@ export async function openDrawing(options: { directory: string; renderer?: Rende
         return tool.execute(args, api, ctx);
       },
     }) })),
-    sections: [section("drawing", () => `Draw the user's request by writing a Python program. Use write_code, run_code, fix errors with write_code, then submit. A text answer alone is not a submission. You have ${LIMITS.maxAttempts} preview attempts. submit always executes the latest source again in a fresh working directory. The policy is text-only: inspect execution errors, not images. Use math/random as needed.\n${apiDoc}`)],
+    sections: [section("drawing", () => `Draw the user's request by writing a Python program. Use write_code, run_code, fix errors with write_code, then submit. A text answer alone is not a submission. Call refuse(reason) to finish a request you cannot fulfill. You have ${LIMITS.maxAttempts} preview attempts. submit always executes the latest source again in a fresh working directory. The policy is text-only: inspect execution errors, not images. Use math/random as needed.\n${apiDoc}`)],
     tools: [
       defineTool({
         name: "write_code", description: "Replace program.py with complete Python source. Fix code by calling this again.",
@@ -53,7 +54,7 @@ export async function openDrawing(options: { directory: string; renderer?: Rende
         replay: "safe", executionMode: "sequential",
         execute: async ({ source }, api, ctx) => {
           if (Buffer.byteLength(source) > LIMITS.sourceBytes) throw new Error("Source exceeds 64 KiB");
-          await api.commit(async tx => { const doc = await tx.doc(Episode, api.conversationId); if (doc.submitted) throw new Error("Episode already submitted"); doc.source = source; }, ctx);
+          await api.commit(async tx => { const doc = await tx.doc(Episode, api.conversationId); if (doc.submitted || doc.refusal) throw new Error("Episode already finished"); doc.source = source; }, ctx);
           return reply({ written: true, bytes: Buffer.byteLength(source) });
         },
       }),
@@ -68,7 +69,7 @@ export async function openDrawing(options: { directory: string; renderer?: Rende
         execute: async (_, api, ctx) => {
           const state = await api.commit(async tx => {
             const doc = await tx.doc(Episode, api.conversationId);
-            if (doc.submitted || !doc.source) throw new Error("Write code before running");
+            if (doc.submitted || doc.refusal || !doc.source) throw new Error("Write code before running");
             if (doc.attempts >= LIMITS.maxAttempts) throw new Error("Preview attempt budget exhausted; fix and submit the final code");
             doc.attempts += 1; return { source: doc.source, seed: doc.seed, attempt: doc.attempts };
           }, ctx);
@@ -83,6 +84,7 @@ export async function openDrawing(options: { directory: string; renderer?: Rende
         replay: "unsafe", executionMode: "sequential",
         execute: async (_, api, ctx) => {
           const state = await api.snapshot(Episode, api.conversationId, ctx);
+          if (state?.refusal) throw new Error("Episode already refused");
           if (!state?.source) throw new Error("Write code first");
           if (state.submitted) return { ...reply({ submitted: true, artifact: state.artifact }), control: { terminate: true } };
           const result = await renderer.render(state.source, state.seed);
@@ -94,11 +96,25 @@ export async function openDrawing(options: { directory: string; renderer?: Rende
           return { ...reply({ submitted: true, width: result.width, height: result.height, sourceHash, imageHash }), control: { terminate: true } };
         },
       }),
+      defineTool({
+        name: "refuse", description: "Finish with a structured refusal and a concise reason.",
+        parameters: Type.Object({ reason: Type.String({ minLength: 1, maxLength: 2048 }) }),
+        replay: "safe", executionMode: "sequential",
+        execute: async ({ reason }, api, ctx) => {
+          if (!reason.trim() || Buffer.byteLength(reason) > 2048) throw new Error("Expected a reason of 1–2048 bytes");
+          await api.commit(async tx => {
+            const doc = await tx.doc(Episode, api.conversationId);
+            if (doc.submitted) throw new Error("Episode already submitted");
+            doc.refusal = reason;
+          }, ctx);
+          return { ...reply({ refused: true, reason }), control: { terminate: true } };
+        },
+      }),
     ],
     hooks: [hook(GenerationTask, {
       onYield: async (_, api, ctx) => {
         const state = await api.snapshot(Episode, api.conversationId, ctx);
-        if (!state?.submitted) return { continue: "Use the drawing tools. Write code, run it, fix errors, and call submit to finish." };
+        if (!state?.submitted && !state?.refusal) return { continue: "Use the drawing tools. Write code, run it, fix errors, and call submit to finish." };
       },
     })],
   });
@@ -139,8 +155,8 @@ export async function draw(prompt: string, directory: string, options: Omit<Para
     const request = await session.root.submit({ type: "input", content: prompt, requestId: hash(prompt) }, context);
     await request.wait(context);
     const state = await session.state();
-    await atomicFile(join(directory, "result.json"), JSON.stringify({ model: options.model ?? { provider: PROVIDER, modelId: MODEL_ID }, prompt, ...state }, null, 2));
-    if (!state?.submitted) throw new Error(`No valid submission; inspect ${directory}/session.sqlite`);
+    await atomicFile(join(directory, "result.json"), JSON.stringify({ runtimeVersion: RUNTIME_VERSION, outcome: state?.submitted ? "submitted" : state?.refusal ? "refused" : "incomplete", model: options.model ?? { provider: PROVIDER, modelId: MODEL_ID }, prompt, ...state }, null, 2));
+    if (!state?.submitted && !state?.refusal) throw new Error(`No valid submission; inspect ${directory}/session.sqlite`);
     return state;
   } finally { clearTimeout(timer); await session.close(); }
 }

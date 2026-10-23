@@ -1,8 +1,14 @@
 import math
 import cairo
 
+__version__ = "2.0.0"
+
+
 class ArtCanvas:
     def __init__(self, width=1920, height=1200, filename="output.png"):
+        if not all(isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= 4096 for n in (width, height)):
+            raise ValueError("Canvas dimensions must be integers between 1 and 4096")
+        self._finished = False
         # Initialize canvas
         self.width = width
         self.height = height
@@ -22,10 +28,11 @@ class ArtCanvas:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        # Save the image before cleanup
-        if self.surface:
-            self.surface.write_to_png(self.filename)
+        if exc_type is None:
+            self.save()
+        elif not self._finished:
             self.surface.finish()
+            self._finished = True
 
     def move_brush_to(self, x, y):
         self.ctx.move_to(x, y)
@@ -130,6 +137,45 @@ class ArtCanvas:
 
     def save(self):
         """Save the image to file and cleanup"""
-        if self.surface:
+        if not self._finished:
             self.surface.write_to_png(self.filename)
             self.surface.finish()
+            self._finished = True
+
+    def new_path(self):
+        self.ctx.new_path()
+
+    def move_to(self, x, y):
+        self.ctx.move_to(x, y)
+
+    def line_to(self, x, y):
+        """Append a segment without immediately stroking it."""
+        self.ctx.line_to(x, y)
+
+    def curve_to(self, cx1, cy1, cx2, cy2, x, y):
+        self.ctx.curve_to(cx1, cy1, cx2, cy2, x, y)
+
+    def close_path(self):
+        self.ctx.close_path()
+
+    def stroke(self):
+        self.ctx.stroke()
+
+    def fill(self):
+        self.ctx.fill()
+
+    def save_state(self):
+        """Push brush settings and the current transform (does not save a file)."""
+        self.ctx.save()
+
+    def restore_state(self):
+        self.ctx.restore()
+
+    def translate(self, x, y):
+        self.ctx.translate(x, y)
+
+    def rotate(self, radians):
+        self.ctx.rotate(radians)
+
+    def scale(self, x, y):
+        self.ctx.scale(x, y)
