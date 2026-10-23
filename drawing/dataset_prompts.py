@@ -50,11 +50,9 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
     for row in value:
         if (not isinstance(row, dict) or not isinstance(row.get("family"), str) or not row["family"].strip()
                 or not isinstance(row.get("prompt"), str) or not row["prompt"].strip()
-                or not isinstance(row.get("requirements"), list) or not row["requirements"]
-                or not all(isinstance(req, str) and req.strip() for req in row["requirements"])
                 or row.get("expectedOutcome") not in ("drawing", "refusal")
                 or not _safe_int(row.get("seed")) or row["seed"] < 0):
-            raise ValueError("Each prompt needs family, prompt, nonempty requirements, expectedOutcome (drawing/refusal), and a nonnegative integer seed")
+            raise ValueError("Each prompt needs family, prompt, expectedOutcome (drawing/refusal), and a nonnegative integer seed")
         split = family_split(row["family"])
         if "split" in row and row["split"] != split:
             raise ValueError(f"Split for family {row['family']} must be {split}")
@@ -75,7 +73,7 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
         ids.add(ident)
         prompts.add(normalized)
         normalized_row = {"id": ident, "family": row["family"], "split": split, "prompt": row["prompt"],
-                          "requirements": list(row["requirements"]), "expectedOutcome": row["expectedOutcome"],
+                          "expectedOutcome": row["expectedOutcome"],
                           "seed": row["seed"]}
         if repair is not None:
             normalized_row["repairTask"] = copy.deepcopy(repair)
@@ -113,12 +111,12 @@ def generate_prompts(count: int = 20, seed: int = 42) -> list[dict[str, Any]]:
             "rings": [f"Draw exactly {n} concentric {color} circle outlines centered on the canvas", "Use 10-pixel strokes, equal radial gaps, and no filled circles"],
             "orbits": [f"Draw one {accent} filled circle at the center with exactly {n} small {color} filled circles around it", "Space the small circles equally around a circular orbit and draw the orbit as a thin black outline"],
         }
-        requirements = [*tasks[family], f"Use a {background} background",
+        instructions = [*tasks[family], f"Use a {background} background",
                         f"Leave at least {margin:g} pixels clear along every canvas edge",
                         "Do not include text, labels, borders, or extra objects"]
         lead = ["Please create this drawing:", "Make an illustration with these requirements:", "Draw the following composition:"][sample(40, 3)]
         prompts.append({"id": sha256(f"{PROMPT_VERSION}:{seed}:{i}")[:24], "family": family,
-                        "split": split, "prompt": f"{lead} {'. '.join(requirements)}.",
-                        "requirements": requirements, "expectedOutcome": "drawing",
+                        "split": split, "prompt": f"{lead} {'. '.join(instructions)}.",
+                        "expectedOutcome": "drawing",
                         "seed": int(entropy[:8], 16)})
     return validate_specs(prompts)
