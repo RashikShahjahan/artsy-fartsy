@@ -1,0 +1,64 @@
+{
+  "version": "artsy-dataset-v1",
+  "id": "fe6970f11b9ac67e684d72c6-c0",
+  "spec": {
+    "id": "fe6970f11b9ac67e684d72c6",
+    "family": "circles",
+    "split": "train",
+    "prompt": "Make an illustration with these requirements: Draw one filled blue circle centered on the canvas. The circle has a radius of 151 pixels. Use a white background. Leave at least 60 pixels clear along every canvas edge. Do not include text, labels, borders, or extra objects.",
+    "requirements": [
+      "Draw one filled blue circle centered on the canvas",
+      "The circle has a radius of 151 pixels",
+      "Use a white background",
+      "Leave at least 60 pixels clear along every canvas edge",
+      "Do not include text, labels, borders, or extra objects"
+    ],
+    "expectedOutcome": "drawing",
+    "seed": 4268323057
+  },
+  "candidate": 0,
+  "status": "review",
+  "reason": "Executable output; semantic and safety evaluation pending",
+  "artifacts": {
+    "directory": "artifacts/episode-MQ7N6O",
+    "trajectory": "artifacts/episode-MQ7N6O/trajectory.jsonl",
+    "image": "artifacts/episode-MQ7N6O/image.png",
+    "source": "artifacts/episode-MQ7N6O/program.py"
+  },
+  "trace": [
+    {
+      "attempt": 0,
+      "completion": {
+        "text": "{\"code\":\"draw()\"}",
+        "model": "golden-teacher",
+        "usage": {
+          "prompt_tokens": 5,
+          "completion_tokens": 10
+        },
+        "finishReason": "stop"
+      },
+      "executedCode": "draw()",
+      "feedback": {
+        "ok": true,
+        "outcome": "active",
+        "stdout": "",
+        "stderr": "",
+        "width": 2,
+        "height": 2,
+        "artifact": "/tmp/artsy-ts-resume-Q8midt/artifacts/episode-MQ7N6O/preview-1.png"
+      }
+    }
+  ],
+  "evaluations": [],
+  "teacher": {
+    "model": "golden-teacher",
+    "baseUrl": "http://teacher/v1"
+  },
+  "runtimeVersion": "artcanvas-v2",
+  "apiDocHash": "68c6487953bff85d766dec00bab936577a70d009aa02f9ce0810c123bea531ea",
+  "humanReviewed": false,
+  "code": "draw()",
+  "sourceHash": "8e6dc5915e2d34874152bf23455565e67f4f522c656b14d60f4a5da458921f90",
+  "imageHash": "0abc0b2e70b436996e19700644aa232ce745575c8b44402141b6118f9f33c9f6",
+  "pixelHash": "7108de4db23d6d919ecfc1b97e7f3183dd2be76180ff3ce6320f9c97ab99f271"
+}

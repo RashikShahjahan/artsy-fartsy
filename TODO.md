@@ -8,9 +8,9 @@ The choices and numerical targets below are proposed starting points to validate
 
 ## 1. Define the first experiment
 
-- [ ] Choose a small, code-capable base model, initially in the 1–3B parameter range; check its license, context length, Python performance, and tool-call format.
+- [x] Select Qwen/Qwen3.5-0.8B (Apache 2.0) with its vision encoder and native tool-call format. Serve a bounded 32,768-token context; benchmark Python performance on held-out drawing tasks before training.
 - [ ] Record available GPU memory, training budget, and teacher/judge API budget. Benchmark a small batch before choosing dataset size or training duration.
-- [ ] Start with a text-only policy model. It receives API documentation, the user prompt, its code, and execution feedback; a separate vision evaluator sees the rendered image. Image observations for the policy are a later experiment.
+- [x] Use Qwen/Qwen3.5-0.8B as a vision-language policy. It receives API documentation, the user prompt, its code, execution feedback, and rendered preview images. Keep independent evaluator scores outside policy observations.
 - [ ] Fix the initial scope: static 2D drawings, one Python file, a versioned `ArtCanvas` API, a fixed canvas size, and PNG output. Include shapes, diagrams, scenes, and procedural patterns.
 - [ ] Define what counts as a successful response: submitted code reproduces a safe image that satisfies the user's visible requirements. Define a structured refusal response for disallowed requests.
 - [ ] Create versioned configuration for the model, API, renderer, sandbox, data generation, SFT, RL, reward rules, and evaluation.
@@ -30,28 +30,38 @@ The choices and numerical targets below are proposed starting points to validate
 - [x] Store the full observable trajectory, source, images, errors, seed, and runtime version. Ensure reset removes all state between episodes.
 - [ ] Verify isolation, cleanup, deterministic examples, infinite-loop termination, oversized output handling, and recovery from worker crashes.
 
-**Current scope:** local execution, per user direction; sandboxing and API/file-access
-restrictions are deferred. Python packages are pinned; host Cairo/fonts remain
+**Current scope:** Mini SWE drawing/evaluation runs in per-sample Docker containers
+with no outbound network or host mounts. Dataset generation and the standalone
+renderer continue to execute locally; API/file-access restrictions remain deferred.
+Python packages are pinned; host Cairo/fonts remain
 unpinned. Local tests cover cleanup, reproducibility, timeouts, oversized PNGs,
 and recovery after execution/startup failures. The independent episode core is
-available for future data/training adapters; Pi retains its own durable session state.
+available for future data/training adapters. Mini SWE replaces Pi's model loop;
+Inspect logs retain its transcript, without Pi SQLite session resume.
 
 **Done when:** the same episode runner supports teacher data generation, model rollouts, and evaluation, and reliably contains failing programs.
 
 ## 3. Generate prompt–code pairs and repair trajectories
 
-- [ ] Build a prompt generator from structured specifications: objects, counts, colors, positions, spatial relationships, style, background, and explicit exclusions.
-- [ ] Create a curriculum from simple primitives to multi-object scenes and procedural art. Include varied wording and combinations, not just many paraphrases of one template.
-- [ ] Have a stronger teacher generate several candidate programs per prompt using the exact API documentation and runtime constraints.
-- [ ] Execute candidates in the sandbox; use bounded repair attempts for syntax, API, and rendering failures. Keep successful edit–run–repair trajectories for tool-use SFT.
+- [x] Build a prompt generator from structured specifications: objects, counts, colors, positions, spatial relationships, style, background, and explicit exclusions.
+- [x] Create a curriculum from simple primitives to multi-object scenes and procedural art. Include varied wording and combinations, not just many paraphrases of one template.
+- [x] Have a stronger teacher generate several candidate programs per prompt using the exact API documentation and runtime constraints.
+- [x] Execute candidates in the local environment (sandbox deferred per current scope); use bounded repair attempts for syntax, API, and rendering failures. Keep successful edit–run–repair trajectories for tool-use SFT.
 - [ ] Check the rendered image against the prompt with deterministic checks where reliable and a vision evaluator for semantic requirements. Do not accept a pair merely because its code runs.
 - [ ] Apply the content policy to prompts and every rendered candidate. Exclude harmful outputs from positive SFT targets; include correct refusal examples and benign lookalikes to reduce over-refusal.
-- [ ] Save a dataset record containing `id`, `prompt`, structured requirements, code or refusal, trajectory, artifact references, seed, API/runtime versions, teacher provenance, evaluator versions/scores, safety labels, and split.
+- [x] Save a dataset record containing `id`, `prompt`, structured requirements, code or refusal, trajectory, artifact references, seed, API/runtime versions, teacher provenance, evaluator versions/scores, safety labels, and split.
 - [ ] Deduplicate prompts, related templates, code, and near-identical renders. Split by task/template family before generation so repairs and paraphrases cannot leak into validation or test sets.
 - [ ] Audit a stratified human-reviewed sample for correctness, diversity, safety, and evaluator agreement. Version accepted data and rejection reasons.
 - [ ] Produce a pilot of roughly 1,000 accepted examples, measure acceptance rate and cost per example, then choose the scale-up target from learning curves and budget.
 
 **Done when:** a reproducible command produces a versioned, audited dataset of executable prompt–code pairs, repair trajectories, and refusal examples.
+
+**Current implementation:** `.venv/bin/python -m drawing.generate_dataset` generates seeded prompt plans, runs a
+configurable teacher through bounded repairs, and checkpoints candidates for resume.
+An optional independent vision evaluator gates acceptance; without it, valid renders
+remain pending review. Task families are split before generation and exact source/pixel
+duplicates are rejected. Near-duplicate detection, calibrated semantic/safety checks,
+human audits, and a live teacher pilot remain outstanding. See README for usage.
 
 ## 4. Implement and calibrate rewards
 
@@ -80,11 +90,13 @@ available for future data/training adapters; Pi retains its own durable session 
 
 ## 5. Run the SFT warm-up
 
+- [x] Implement the first-run dataset recipe: retain 80 pilot one-shot drawings and all four natural execution repairs, then generate sixteen harder natural execution/visual repair trajectories sampled from a bounded pool, with actual PNG observations with recorded errors and successful fresh submissions. Preserve original review/split provenance and the three explicit duplicate exceptions; export the 100-row selection only when the 80/20 target is complete. See `make dataset-warmup`.
+- [ ] Review the 100 selected final images and freeze this first SFT dataset revision. Use Qwen/Qwen3.5-0.8B multimodal observations. New repairs must arise naturally from harder tasks; execute model code verbatim, inspect the actual PNG during generation, and exclude the archived synthetic experiment; failed assistant actions are context-only loss-masked prefixes. Create a new held-out evaluation set because this selection consumes former pilot validation/test examples.
 - [ ] Evaluate the untouched base model on a frozen development benchmark before training.
-- [ ] Build an SFT data adapter with the exact production API prompt, chat template, tool schemas, code submissions, and refusal format.
+- [ ] Build a Qwen3.5-0.8B SFT data adapter using its multimodal processor, exact production API prompt/chat template/tool schemas, actual preview PNG observations, code submissions, and refusal format.
 - [ ] Train on both direct prompt–code examples and successful repair trajectories so the model learns how to operate the environment before RL.
-- [ ] Mask user prompts and tool outputs from the loss; train on assistant responses and tool calls. Verify that packing and truncation preserve complete examples and tool-call boundaries.
-- [ ] Start with a LoRA fine-tune; consider quantization only after verifying hardware and trainer compatibility. Save adapters, tokenizer, configuration, dataset revision, and reproducible checkpoints.
+- [ ] Mask user prompts, image/input tokens, tool outputs, and failed assistant actions from the loss; train on successful assistant responses and tool calls. Verify that packing and truncation preserve complete examples and tool-call boundaries.
+- [ ] Start with a short, conservative full-parameter SFT pilot on Qwen/Qwen3.5-0.8B. Measure peak training memory on a representative batch before the run; use LoRA as a fallback if full training exceeds available memory. Save full model weights, tokenizer, configuration, dataset revision, and reproducible checkpoints.
 - [ ] Compare checkpoints by render success, adherence, repair success, harmful-output rate, and benign refusal rate. Select on development results rather than training loss alone.
 - [ ] Require a useful execution baseline before RL; a provisional gate is at least 90% valid renders on simple held-out development tasks, with separately specified adherence and safety criteria.
 

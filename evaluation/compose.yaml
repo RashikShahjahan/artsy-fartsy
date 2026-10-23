@@ -1,0 +1,10 @@
+services:
+  default:
+    build:
+      context: ..
+      dockerfile: evaluation/Dockerfile
+    init: true
+    command: tail -f /dev/null
+    network_mode: none
+    mem_limit: 2g
+    cpus: 2

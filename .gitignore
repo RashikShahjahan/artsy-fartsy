@@ -1,9 +1,12 @@
-node_modules/
-dist/
 .venv/
+.eval-venv/
+.sft-venv/
+checkpoints/
 __pycache__/
 *.pyc
 .cache/
 episodes/
+datasets/
+eval-results/
 .env
 .DS_Store

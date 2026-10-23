@@ -1,7 +1,10 @@
-"""Local OpenAI-compatible bridge for Liquid's native Python-style tool calls."""
-import ast
+"""OpenAI-compatible vision and tool-call bridge for Qwen3.5."""
+import base64
+import binascii
+import io
 import json
 import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -10,62 +13,116 @@ from threading import Lock
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 
-MODEL_ID = "LiquidAI/LFM2.5-230M"
-MODEL_REVISION = "40cb2ad3b3044d5a41eee083a6103c8b523afa45"
+MODEL_ID = "Qwen/Qwen3.5-0.8B"
+MODEL_REVISION = "2fc06364715b967f1860aea9cf38778875588b17"
+CONTEXT_WINDOW = 32768
 MAX_TOKENS = 2048
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+IMAGE_SIZE = {"shortest_edge": 256 * 256, "longest_edge": 1024 * 1024}
 lock = Lock()
 
 
-def parse_tools(text):
-    """Decode literal call arguments, never execute model-generated Python."""
-    if "<|tool_call_start|>" not in text:
-        return text.replace("<|im_end|>", "").replace("<|endoftext|>", ""), []
-    before, rest = text.split("<|tool_call_start|>", 1)
-    calls_text, separator, after = rest.partition("<|tool_call_end|>")
-    if not separator:
-        raise ValueError("Incomplete tool call")
-    tree = ast.parse(calls_text.strip(), mode="eval").body
-    if not isinstance(tree, ast.List):
-        raise ValueError("Expected a list of tool calls")
-    calls = []
-    for item in tree.elts:
-        if not isinstance(item, ast.Call) or not isinstance(item.func, ast.Name) or item.args:
-            raise ValueError("Expected named tool with keyword arguments")
+def parse_tools(text, tools=None):
+    """Decode Qwen's function/parameter tags without evaluating generated code."""
+    text = text.replace("<|im_end|>", "").replace("<|endoftext|>", "")
+    # Thinking is disabled in the prompt, but never execute calls inside reasoning.
+    if text.lstrip().startswith("<think>"):
+        _, end, answer = text.partition("</think>")
+        if not end:
+            return text, []
+        text = answer.lstrip("\n")
+    schemas = {tool["function"]["name"]: tool["function"].get("parameters", {}).get("properties", {})
+               for tool in tools or []}
+    calls, prose = [], []
+    while "<tool_call>" in text:
+        before, rest = text.split("<tool_call>", 1)
+        call_text, end, text = rest.partition("</tool_call>")
+        if not end:
+            raise ValueError("Incomplete tool call")
+        function = re.fullmatch(r"\s*<function=([A-Za-z_]\w*)>(.*?)</function>\s*", call_text, re.DOTALL)
+        if not function:
+            raise ValueError("Expected a named function")
+        name, parameters = function.groups()
         args = {}
-        for keyword in item.keywords:
-            if keyword.arg is None or keyword.arg in args:
-                raise ValueError("Invalid tool keyword")
-            args[keyword.arg] = ast.literal_eval(keyword.value)
+        while parameters.strip():
+            parameter = re.match(r"\s*<parameter=([A-Za-z_]\w*)>(.*?)</parameter>", parameters, re.DOTALL)
+            if not parameter:
+                raise ValueError("Invalid or incomplete parameter")
+            key, value = parameter.groups()
+            if key in args:
+                raise ValueError("Duplicate parameter")
+            # Remove only the protocol's framing newlines; preserve Python indentation.
+            value = value.removeprefix("\n").removesuffix("\n")
+            kind = schemas.get(name, {}).get(key, {}).get("type", "string")
+            args[key] = value if kind == "string" else json.loads(value)
+            parameters = parameters[parameter.end():]
         calls.append({"id": "call_" + uuid.uuid4().hex, "type": "function",
-                      "function": {"name": item.func.id, "arguments": json.dumps(args)}})
-    return (before + after).replace("<|im_end|>", "").strip(), calls
+                      "function": {"name": name, "arguments": json.dumps(args)}})
+        prose.append(before)
+    prose.append(text)
+    return "".join(prose).strip(), calls
+
+
+def image_content(part):
+    """Decode an inline image locally before passing it to the processor."""
+    from PIL import Image, UnidentifiedImageError
+    source = part.get("image_url", {})
+    url = source.get("url", "") if isinstance(source, dict) else source
+    if not isinstance(url, str) or not re.match(r"^data:image/[\w.+-]+;base64,", url):
+        raise ValueError("Images must use inline base64 image data URLs")
+    encoded = url.split(",", 1)[1]
+    if len(encoded) > 4 * ((MAX_IMAGE_BYTES + 2) // 3):
+        raise ValueError("Image exceeds 8 MiB")
+    try:
+        data = base64.b64decode(encoded, validate=True)
+        if len(data) > MAX_IMAGE_BYTES:
+            raise ValueError("Image exceeds 8 MiB")
+        with Image.open(io.BytesIO(data)) as image:
+            if not (1 <= image.width <= 4096 and 1 <= image.height <= 4096):
+                raise ValueError("Image dimensions exceed 4096×4096")
+            return {"type": "image", "image": image.convert("RGB")}
+    except (binascii.Error, UnidentifiedImageError, OSError) as error:
+        raise ValueError("Invalid inline image") from error
 
 
 def template_messages(messages):
-    """Convert the OpenAI wire transcript back to Liquid's native tool format."""
+    """Qwen's template expects tool argument objects, not OpenAI JSON strings."""
     result = []
     for original in messages:
         message = dict(original)
         content = message.get("content") or ""
         if isinstance(content, list):
-            content = "\n".join(part.get("text", "") for part in content)
-        if message.get("tool_calls"):
             parts = []
+            for part in content:
+                if part.get("type") == "image_url":
+                    parts.append(image_content(part))
+                elif part.get("type") == "text":
+                    parts.append({"type": "text", "text": part["text"]})
+                else:
+                    raise ValueError("Unsupported content type")
+            content = parts
+        if message.get("tool_calls"):
+            calls = []
             for call in message["tool_calls"]:
-                args = json.loads(call["function"]["arguments"])
-                parts.append(call["function"]["name"] + "(" + ", ".join(f"{key}={value!r}" for key, value in args.items()) + ")")
-            content += "<|tool_call_start|>[" + ", ".join(parts) + "]<|tool_call_end|>"
-        result.append({"role": message["role"], "content": content})
+                function = dict(call["function"])
+                args = function.get("arguments", {})
+                function["arguments"] = json.loads(args) if isinstance(args, str) else args
+                calls.append({**call, "function": function})
+            message["tool_calls"] = calls
+        message["content"] = content
+        result.append(message)
     return result
 
 
 @asynccontextmanager
 async def lifespan(app):
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
     torch.set_num_threads(min(8, os.cpu_count() or 1))
-    app.state.tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, revision=MODEL_REVISION)
-    app.state.model = AutoModelForCausalLM.from_pretrained(MODEL_ID, revision=MODEL_REVISION, dtype=torch.float32).eval()
+    app.state.processor = AutoProcessor.from_pretrained(MODEL_ID, revision=MODEL_REVISION, size=IMAGE_SIZE)
+    app.state.tokenizer = app.state.processor.tokenizer
+    app.state.model = Qwen3_5ForConditionalGeneration.from_pretrained(
+        MODEL_ID, revision=MODEL_REVISION, dtype=torch.float32).eval()
     yield
 
 
@@ -74,12 +131,12 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    return {"model": MODEL_ID, "revision": MODEL_REVISION, "ready": True}
+    return {"model": MODEL_ID, "revision": MODEL_REVISION, "ready": True, "input": ["text", "image"]}
 
 
 @app.get("/v1/models")
 def models():
-    return {"object": "list", "data": [{"id": MODEL_ID, "object": "model", "owned_by": "LiquidAI"}]}
+    return {"object": "list", "data": [{"id": MODEL_ID, "object": "model", "owned_by": "Qwen"}]}
 
 
 @app.post("/v1/chat/completions")
@@ -88,18 +145,22 @@ def complete(body: dict):
     if body.get("model") != MODEL_ID:
         raise HTTPException(400, "This server only serves " + MODEL_ID)
     budget = max(1, min(int(body.get("max_tokens") or MAX_TOKENS), MAX_TOKENS))
-    tokenizer, model = app.state.tokenizer, app.state.model
+    tokenizer, processor, model = app.state.tokenizer, app.state.processor, app.state.model
     with lock, torch.inference_mode():
-        inputs = tokenizer.apply_chat_template(template_messages(body["messages"]), tools=body.get("tools") or None,
-                                               tokenize=True, add_generation_prompt=True, return_tensors="pt", return_dict=True)
+        try:
+            inputs = processor.apply_chat_template(template_messages(body["messages"]), tools=body.get("tools") or None,
+                                                   tokenize=True, add_generation_prompt=True, enable_thinking=False,
+                                                   return_tensors="pt", return_dict=True)
+        except ValueError as error:
+            raise HTTPException(400, str(error)) from error
         count = inputs["input_ids"].shape[-1]
-        if count + budget > 32768:
+        if count + budget > CONTEXT_WINDOW:
             raise HTTPException(400, "Context exceeds model capacity")
         output = model.generate(**inputs, max_new_tokens=budget, do_sample=False,
                                 pad_token_id=tokenizer.eos_token_id)
         raw = tokenizer.decode(output[0, count:], skip_special_tokens=False)
     try:
-        text, calls = parse_tools(raw)
+        text, calls = parse_tools(raw, body.get("tools"))
     except (ValueError, SyntaxError):
         # Preserve malformed output for the harness to ask the model to correct.
         text, calls = raw, []

@@ -1,0 +1,25 @@
+agent:
+  system_template: |
+    You are a drawing agent. Use the bash tool to write and test a Python program.
+    Every response must contain at least one bash tool call with {"command":"..."}.
+    Shell state does not persist between commands; files do persist.
+    Finish by calling bash with exactly: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
+  instance_template: "{{task}}"
+  step_limit: 16
+  cost_limit: 0
+  mode: yolo
+environment:
+  timeout: 10
+model:
+  cost_tracking: ignore_errors
+  multimodal_regex: '(?s)<MSWEA_MULTIMODAL_CONTENT><CONTENT_TYPE>(.+?)</CONTENT_TYPE>(.+?)</MSWEA_MULTIMODAL_CONTENT>'
+  observation_template: |
+    Return code: {{output.returncode}}
+    {{output.output}}
+    {% if output.exception_info %}{{output.exception_info}}{% endif %}
+  model_kwargs:
+    drop_params: true
+    max_tokens: 2048
+    temperature: 0
+    timeout: 120
+    num_retries: 0

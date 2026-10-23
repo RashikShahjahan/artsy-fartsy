@@ -1,0 +1,2 @@
+-r ../runtime/requirements.txt
+Pillow==12.0.0

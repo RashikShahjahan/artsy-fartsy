@@ -1,0 +1,50 @@
+{
+  "version": "artsy-dataset-v1",
+  "promptVersion": "artsy-curriculum-v1",
+  "specs": [
+    {
+      "id": "fe6970f11b9ac67e684d72c6",
+      "family": "circles",
+      "split": "train",
+      "prompt": "Make an illustration with these requirements: Draw one filled blue circle centered on the canvas. The circle has a radius of 151 pixels. Use a white background. Leave at least 60 pixels clear along every canvas edge. Do not include text, labels, borders, or extra objects.",
+      "requirements": [
+        "Draw one filled blue circle centered on the canvas",
+        "The circle has a radius of 151 pixels",
+        "Use a white background",
+        "Leave at least 60 pixels clear along every canvas edge",
+        "Do not include text, labels, borders, or extra objects"
+      ],
+      "expectedOutcome": "drawing",
+      "seed": 4268323057
+    }
+  ],
+  "candidates": 1,
+  "repairs": 2,
+  "maxTokens": 4096,
+  "threshold": 0.85,
+  "teacher": {
+    "model": "golden-teacher",
+    "baseUrl": "http://teacher/v1"
+  },
+  "evaluator": null,
+  "config": {
+    "version": 1,
+    "runtimeVersion": "artcanvas-v2",
+    "width": 2,
+    "height": 2,
+    "maxCalls": 16,
+    "maxAttempts": 3,
+    "renderSeconds": 10,
+    "episodeMs": 300000,
+    "sourceBytes": 65536,
+    "maxPolicyTokens": 32768,
+    "pngBytes": 8388608,
+    "feedbackBytes": 8192
+  },
+  "apiDocHash": "68c6487953bff85d766dec00bab936577a70d009aa02f9ce0810c123bea531ea",
+  "runtimeHashes": {
+    "artcanvas.py": "ce75fcc9306d53c0169432fd641132c73259b763a5840e760e217c5bfc4a071e",
+    "cairo.py": "940f3463650a9aa82fda9e70a9eb95e7b648f488b7a823f2582746f0a2da7471",
+    "requirements.txt": "0ed65c175b34e0d7370f21765e1a6a82ee88ebd2846cd1cb753384122935ea18"
+  }
+}
