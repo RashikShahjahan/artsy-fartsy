@@ -46,7 +46,7 @@ def main() -> int:
         parser.error("Episode is incomplete or its artifacts changed; choose a new --episode directory")
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "episode.json").write_text(json.dumps(request, indent=2) + "\n")
-    spec = {"id": "drawing", "prompt": prompt, "requirements": [prompt], "seed": args.seed}
+    spec = {"id": "drawing", "prompt": prompt, "seed": args.seed}
     logs = eval(drawing_task([spec], str(directory / "artifacts")),
                 model=model_from_env(args.model), log_dir=str(directory / "logs"), max_samples=1)
     artifact = directory / "artifacts/drawing-1"
