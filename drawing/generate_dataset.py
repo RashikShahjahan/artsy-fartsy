@@ -30,7 +30,7 @@ HELP = """Python dataset generation
   --judge-model ID      Optional vision evaluator, or ARTSY_JUDGE_MODEL
   --judge-url URL       Evaluator base URL (defaults to teacher URL)
   --timeout-ms N        Per-request deadline (default: 60000)
-  --dry-run             Print prompt JSONL without network calls or rendering
+  --dry-run             Print prompt JSONL without split labels or model calls/rendering
   --retry-errors        Retry checkpointed infrastructure failures on resume
   --retry-rejected      Retry rejected repair candidates for still-missing tasks
   --help, -h            Show this help
@@ -141,7 +141,8 @@ async def main(argv: list[str] | None = None) -> int:
                 "newRepairPrompts": specs, "target": {"oneShot": 80, "repairs": 20, "total": 100}}, indent=2))
         else:
             for spec in specs:
-                print(json.dumps(spec, ensure_ascii=False, separators=(",", ":")))
+                row = {key: value for key, value in spec.items() if key != "split"}
+                print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
         return 0
 
     output = args.output or ("datasets/sft-warmup-100" if warmup_source else "datasets/pilot")
