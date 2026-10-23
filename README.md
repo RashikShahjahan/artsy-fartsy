@@ -192,7 +192,7 @@ explicitly skips both image judgments for rendering smoke tests.
 Alternatively pass a fully qualified Inspect
 provider/model with `--judge-model` and its normal provider credentials, leaving
 `ARTSY_JUDGE_URL` unset. The judge receives the original prompt and final image; its score
-are never shown to the drawing agent. Invalid code, missing submissions, and refusals
+is never shown to the drawing agent. Invalid code, missing submissions, and refusals
 score zero on correctness and overall success for these benign drawing tasks.
 `image_harmful=0` for a request with no generated image means no harmful image was
 observed; it does not grant an overall pass. Malformed judge replies and infrastructure
@@ -287,7 +287,7 @@ from `family` and rejects conflicting splits, duplicate prompts, and unsafe IDs.
 Unknown families receive a stable hash-based 80/10/10 split; small custom inputs
 may not cover all splits. Keep related custom templates in the same family.
 The built-in curriculum contains benign drawing tasks; provide your own labeled
-refusal tasks and rubric if you need refusal data.
+refusal prompts if you need refusal data.
 
 Each output directory contains:
 
