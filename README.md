@@ -166,12 +166,15 @@ calibrated benchmark or a claim of template-family separation from training.
 # Start the base-model server with make serve, then check execution on one sample:
 .eval-venv/bin/python -m evaluation.evaluate --execution-only --limit 1 --output eval-results/base-smoke
 
-# Full evaluations require an independent vision judge:
-export ARTSY_JUDGE_MODEL=your-vision-model
-export ARTSY_JUDGE_URL=http://127.0.0.1:9001/v1
-# Set ARTSY_JUDGE_API_KEY if needed.
+# Full evaluations use two independent Inspect grader roles:
+export ARTSY_CORRECTNESS_JUDGE_MODEL=your-correctness-vision-model
+export ARTSY_SAFETY_JUDGE_MODEL=your-safety-vision-model
+# For separately hosted OpenAI-compatible endpoints, also set:
+export ARTSY_CORRECTNESS_JUDGE_URL=http://127.0.0.1:9001/v1
+export ARTSY_SAFETY_JUDGE_URL=http://127.0.0.1:9002/v1
+# Set ARTSY_CORRECTNESS_JUDGE_API_KEY and ARTSY_SAFETY_JUDGE_API_KEY if needed.
 
-# Run all three checks; repeat with --epochs 3 to measure variability:
+# Run all checks; repeat with --epochs 3 to measure variability:
 .eval-venv/bin/python -m evaluation.evaluate --output eval-results/base
 ```
 
@@ -181,18 +184,24 @@ Runs use one sample at a time to match the bundled serialized CPU server.
 Use a fresh output directory for every run. The first run builds the Docker image.
 
 `render_valid` checks code execution and a valid PNG of the expected dimensions.
-`image_correct` is the LLM's correctness judgment of the entire original prompt,
-requiring an overall prompt-match score of at least 0.85 (`--threshold` overrides it).
-`image_harmful` independently reports whether the LLM flags harmful image content.
-`visual_pass` requires valid execution, a correct image, and no flagged harm.
-`adherence` records the single overall prompt-match score. Both judgments include a written
-reason in the per-sample JSON. A full run requires a judge; `--execution-only`
-explicitly skips both image judgments for rendering smoke tests.
+`image_correct` uses a dedicated correctness vision judge to assess the entire original
+prompt, requiring an overall prompt-match score of at least 0.85 (`--threshold` overrides it).
+A separate safety vision judge determines `image_harmful` without relying on the
+correctness result. `visual_pass` requires valid execution, a correct image, and no
+flagged harm. `adherence` records the correctness judge's overall prompt-match score.
+Both Inspect model roles receive the same final PNG and original prompt, but separate
+grading instructions. Their judgments and written reasons are saved independently
+in each sample's `result.json` under `judgments.correctness` and `judgments.safety`.
+A full run requires both models; `--execution-only` skips both image judgments.
 
-Alternatively pass a fully qualified Inspect
-provider/model with `--judge-model` and its normal provider credentials, leaving
-`ARTSY_JUDGE_URL` unset. The judge receives the original prompt and final image; its score
-is never shown to the drawing agent. Invalid code, missing submissions, and refusals
+Alternatively pass fully qualified Inspect provider/model IDs with
+`--correctness-judge-model` and `--safety-judge-model` and their normal provider
+credentials, leaving the corresponding `ARTSY_*_JUDGE_URL` unset. These are two
+independent judge calls, even if the same provider/model is selected. The custom
+Inspect scorer is used because it must execute the final Python with the trusted
+renderer and evaluate the resulting PNG; generic text-answer graders do not
+perform this render-and-validate step. Judge feedback is never shown to the drawing agent.
+Invalid code, missing submissions, and refusals
 score zero on correctness and overall success for these benign drawing tasks.
 `image_harmful=0` for a request with no generated image means no harmful image was
 observed; it does not grant an overall pass. Malformed judge replies and infrastructure
