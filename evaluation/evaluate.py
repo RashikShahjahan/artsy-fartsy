@@ -29,40 +29,53 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path("eval-results") / datetime.now(timezone.utc).strftime("base-%Y%m%dT%H%M%S%fZ"))
     parser.add_argument("--limit", type=positive)
     parser.add_argument("--epochs", type=positive, default=1)
-    parser.add_argument("--judge-model", default=os.getenv("ARTSY_JUDGE_MODEL"), help="Independent vision judge; optionally set ARTSY_JUDGE_URL/API_KEY")
+    parser.add_argument("--correctness-judge-model", default=os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL"),
+                        help="Vision model for prompt correctness; optionally set ARTSY_CORRECTNESS_JUDGE_URL/API_KEY")
+    parser.add_argument("--safety-judge-model", default=os.getenv("ARTSY_SAFETY_JUDGE_MODEL"),
+                        help="Vision model for harmful content; optionally set ARTSY_SAFETY_JUDGE_URL/API_KEY")
     parser.add_argument("--threshold", type=float, default=0.85)
-    parser.add_argument("--execution-only", action="store_true", help="Smoke test rendering without the correctness and harm judge")
+    parser.add_argument("--execution-only", action="store_true", help="Smoke test rendering without either vision judge")
     parser.add_argument("--dry-run", action="store_true", help="Validate specs and show the plan without Docker or model requests")
     args = parser.parse_args()
     if args.execution_only:
-        args.judge_model = None
+        args.correctness_judge_model = None
+        args.safety_judge_model = None
     if not 0 <= args.threshold <= 1:
         parser.error("threshold must be between 0 and 1")
-    if args.judge_model and args.judge_model.removeprefix("openai/") == args.model:
-        parser.error("select an independent judge rather than the model under evaluation")
+    for role, model in (("correctness", args.correctness_judge_model), ("safety", args.safety_judge_model)):
+        if model and model.removeprefix("openai/") == args.model:
+            parser.error(f"select an independent {role} judge rather than the model under evaluation")
     specs = load_specs(args.dataset)
     selected = specs[:args.limit] if args.limit else specs
     plan = {"model": args.model, "base_url": os.getenv("ARTSY_MODEL_URL", "http://127.0.0.1:8080/v1"),
             "dataset": str(args.dataset.resolve()), "samples": len(selected), "epochs": args.epochs,
-            "judge_model": args.judge_model, "threshold": args.threshold,
+            "correctness_judge_model": args.correctness_judge_model,
+            "safety_judge_model": args.safety_judge_model, "threshold": args.threshold,
             "mode": "execution-only" if args.execution_only else "full",
             "ids": [s["id"] for s in selected]}
     if args.dry_run:
         print(json.dumps(plan, indent=2))
         return 0
-    if not args.execution_only and not args.judge_model:
-        parser.error("Full evaluation requires --judge-model or ARTSY_JUDGE_MODEL for image correctness and harmfulness; use --execution-only for a rendering smoke test")
+    if not args.execution_only and not (args.correctness_judge_model and args.safety_judge_model):
+        parser.error("Full evaluation requires both --correctness-judge-model and --safety-judge-model "
+                     "(or the corresponding ARTSY_*_JUDGE_MODEL variables); use --execution-only for render tests")
     args.output.mkdir(parents=True, exist_ok=False)
+
+    # Inspect records each role and its model calls in the evaluation log.
     roles = {}
-    if args.judge_model:
-        if url := os.getenv("ARTSY_JUDGE_URL"):
-            roles["grader"] = get_model("openai/" + args.judge_model.removeprefix("openai/"),
-                base_url=url, api_key=os.getenv("ARTSY_JUDGE_API_KEY", "local-no-auth"),
+    for role, model in (("correctness", args.correctness_judge_model), ("safety", args.safety_judge_model)):
+        if not model:
+            continue
+        prefix = f"ARTSY_{role.upper()}_JUDGE"
+        if url := os.getenv(f"{prefix}_URL"):
+            roles[f"{role}_grader"] = get_model("openai/" + model.removeprefix("openai/"),
+                base_url=url, api_key=os.getenv(f"{prefix}_API_KEY", "local-no-auth"),
                 responses_api=False)
         else:
-            roles["grader"] = get_model(args.judge_model)
+            roles[f"{role}_grader"] = get_model(model)
     logs = eval(
-        drawing_task(selected, str(args.output / "artifacts"), args.judge_model, args.threshold),
+        drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
+                     args.safety_judge_model, args.threshold),
         model=model_from_env(args.model), model_roles=roles,
         log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=1,
     )
