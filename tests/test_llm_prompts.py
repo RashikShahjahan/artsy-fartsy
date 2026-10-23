@@ -1,0 +1,155 @@
+"""Tests for LLM-authored prompt planning and evaluation mixes."""
+from __future__ import annotations
+
+import contextlib
+import io
+import json
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from drawing.dataset_prompts import SKILL_TAXONOMY, family_split, validate_specs
+from drawing.generate_dataset import main
+from drawing.llm_prompts import _parse_batch, _slots, generate_llm_prompts
+
+
+def response(items: list[dict]) -> dict:
+    return {"text": json.dumps({"items": items}), "model": "prompt-writer",
+            "finishReason": "stop", "usage": {"prompt_tokens": 30, "completion_tokens": 100}}
+
+
+def item(slot: dict, *, suffix: str = "") -> dict:
+    index = slot["index"]
+    motifs = [
+        "a moonlit harbor with floating paper lanterns and anchored sailboats",
+        "a desert caravan passing sandstone dunes beneath a copper eclipse",
+        "a winter greenhouse filled with crystal ferns and frost-covered glass",
+        "a carnival maze of striped tents, flags, gears and spinning wheels",
+        "an underwater reef with branching anemones and glowing striped fish",
+        "a mountainside observatory with brass telescopes and meteor trails",
+        "an orchard of twisting apple trees and patterned woven baskets",
+        "a clockwork aviary where mechanical birds perch on bronze branches",
+        "a coral palace with arched balconies and pearl staircases",
+        "a seaside lighthouse surrounded by rugged cliffs and foamy waves",
+        "a Japanese garden with stepping stones, koi and mossy bridges",
+        "a volcanic cavern with glowing mineral columns and smoke spirals",
+        "a futuristic train depot with cantilever roofs and glass tunnels",
+        "a star chart with constellations, gold astrolabes and orbit paths",
+        "a botanical specimen tray with seeds, petals and vein networks",
+        "a hot-air balloon festival over checkerboard farmland at sunset",
+        "a geometric quilt of woven diamonds and staggered zigzag borders",
+        "a riverside mill with wooden waterwheels and terraced flower beds",
+        "an ice sculpture park with translucent towers and drifting snow",
+        "an astronomical clock with nested dials and ornate hands",
+    ]
+    return {"index": index, "skills": [slot["primarySkill"], "composition"]
+            if slot["primarySkill"] != "composition" else ["composition"],
+            "prompt": (f"Draw {motifs[index % len(motifs)]}. Add a coherent foreground, "
+                       f"an atmospheric background and clear {slot['family']} motifs. "
+                       f"Use a deliberate visual hierarchy, exact spacing and a "
+                       f"harmonious contrasting palette. {suffix}")}
+
+
+class PromptClient:
+    model = "prompt-writer"
+    baseUrl = "http://writer/v1"
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.requests = []
+
+    async def complete(self, messages: list[dict], max_tokens: int) -> dict:
+        self.calls += 1
+        request = json.loads(messages[1]["content"])
+        self.requests.append(request)
+        values = [item(slot) for slot in request["slots"]]
+        if request["mode"] == "repair":
+            for value in values:
+                value["technicalSkills"] = ["arc-length sampling", "polygon clipping"]
+        return response(values)
+
+
+class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
+    async def test_taxonomy_balanced_eval_mix_and_no_judge_rubrics(self) -> None:
+        client = PromptClient()
+        result = await generate_llm_prompts(client, count=20, seed=42, repair_count=5, batch_size=5)
+        specs = result["specs"]
+        self.assertEqual(len(specs), 20)
+        self.assertEqual(sum(spec["caseType"] == "repair" for spec in specs), 5)
+        self.assertEqual(len({spec["prompt"] for spec in specs}), 20)
+        self.assertEqual(set(SKILL_TAXONOMY),
+                         {skill for spec in specs for skill in spec["skills"]})
+        self.assertTrue(all(spec["split"] == family_split(spec["family"]) for spec in specs))
+        self.assertTrue(all("requirements" not in spec and "expectedOutcome" not in spec
+                            and "repairTask" not in spec for spec in specs))
+        self.assertEqual(client.calls, 4)
+        self.assertEqual(len(result["batches"]), 4)
+        self.assertEqual(validate_specs(specs), specs)
+
+    async def test_default_has_no_repairs_and_repair_only_can_be_requested(self) -> None:
+        default = await generate_llm_prompts(PromptClient(), count=8)
+        only_repairs = await generate_llm_prompts(PromptClient(), count=3, repair_count=3)
+        self.assertTrue(all(x["caseType"] == "standard" for x in default["specs"]))
+        self.assertTrue(all(x["caseType"] == "repair" for x in only_repairs["specs"]))
+
+    async def test_repair_curriculum_contains_advanced_technical_metadata(self) -> None:
+        result = await generate_llm_prompts(PromptClient(), count=16, mode="repair", batch_size=8)
+        self.assertTrue(all(spec["caseType"] == "repair" for spec in result["specs"]))
+        self.assertTrue(all(spec["repairTask"]["complexity"] == "advanced"
+                            and len(spec["repairTask"]["skills"]) >= 2 for spec in result["specs"]))
+
+    async def test_duplicate_reply_is_retried(self) -> None:
+        class DuplicateOnce(PromptClient):
+            async def complete(self, messages: list[dict], max_tokens: int) -> dict:
+                result = await super().complete(messages, max_tokens)
+                if self.calls == 2:
+                    items = json.loads(result["text"])["items"]
+                    items[0]["prompt"] = self.first_prompt
+                    return response(items)
+                if self.calls == 1:
+                    self.first_prompt = json.loads(result["text"])["items"][0]["prompt"]
+                return result
+        client = DuplicateOnce()
+        result = await generate_llm_prompts(client, count=4, batch_size=2)
+        self.assertEqual(client.calls, 3)
+        self.assertEqual(result["batches"][1]["attempts"], 2)
+
+    def test_invalid_fields_and_labels_are_rejected(self) -> None:
+        slot = _slots(1, 42, "standard")[0]
+        valid = item(slot)
+        for broken in ({**valid, "requirements": ["secret rubric"]},
+                       {**valid, "skills": ["invalid_skill"]},
+                       {**valid, "skills": [slot["primarySkill"], slot["primarySkill"]]}):
+            with self.subTest(broken=broken), self.assertRaises(ValueError):
+                _parse_batch(json.dumps({"items": [broken]}), [slot], [], 42, mode="standard")
+
+
+class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dry_run_generates_eval_prompts_without_split_or_rendering(self) -> None:
+        client = PromptClient()
+        with patch("drawing.dataset_client.chat_client", return_value=client), contextlib.redirect_stdout(io.StringIO()) as output:
+            code = await main(["--dry-run", "--count", "3", "--repair-count", "1", "--prompt-model", "prompt-writer"])
+        self.assertEqual(code, 0)
+        specs = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(len(specs), 4)
+        self.assertEqual(sum(row["caseType"] == "repair" for row in specs), 1)
+        self.assertTrue(all("split" not in row for row in specs))
+        self.assertEqual(client.calls, 1)
+
+    async def test_saved_prompt_plan_is_reused_without_new_model_calls(self) -> None:
+        client = PromptClient()
+
+        async def no_render(_options: dict) -> dict:
+            return {"complete": True, "accepted": 0}
+
+        with tempfile.TemporaryDirectory() as folder:
+            args = ["--output", str(Path(folder) / "new-dataset"), "--count", "4",
+                    "--prompt-model", "prompt-writer", "--teacher-model", "teacher"]
+            with patch("drawing.dataset_client.chat_client", return_value=client), \
+                 patch("drawing.dataset.generate_dataset", side_effect=no_render), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(await main(args), 0)
+                self.assertEqual(await main(args), 0)
+            self.assertEqual(client.calls, 1)
+            self.assertTrue((Path(folder) / "new-dataset" / "prompt-plan.json").is_file())

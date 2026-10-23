@@ -308,6 +308,9 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             "candidates": candidates, "repairs": repairs, "maxTokens": max_tokens, "threshold": threshold,
             "teacher": teacher, "evaluator": {**_provenance(judge), "version": EVALUATOR_VERSION} if judge else None,
             "config": config, "apiDocHash": sha256(api_doc), "runtimeHashes": runtime_hashes}
+        if options.get("promptGenerator"):
+            manifest["promptVersion"] = options["promptGenerator"]["version"]
+            manifest["promptGenerator"] = options["promptGenerator"]
         if options.get("imageObservations"): manifest["imageObservations"] = True
         if draft_sources: manifest["draftSources"] = draft_sources
         if mode == "repair":
