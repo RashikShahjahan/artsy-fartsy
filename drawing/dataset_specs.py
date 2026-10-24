@@ -55,6 +55,45 @@ def family_split(family: str) -> str:
     return "train" if bucket < 8 else "validation" if bucket == 8 else "test"
 
 
+def assign_holdout(specs: list[dict[str, Any]], eval_count: int, seed: int) -> list[dict[str, Any]]:
+    """Allocate an exact, stable held-out test set within task strata.
+
+    The whole prompt plan is validated before splitting, so near-duplicates
+    rejected by the prompt writer cannot leak across train/test.
+    """
+    specs = validate_specs(specs)
+    if type(eval_count) is not int or not 0 <= eval_count < len(specs):
+        raise ValueError("eval-count must be between zero and count - 1")
+    if type(seed) is not int or seed < 0:
+        raise ValueError("Holdout seed must be a nonnegative integer")
+    if eval_count == 0:
+        return specs
+
+    groups: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for spec in specs:
+        key = (spec.get("difficulty", "unspecified"),
+               spec.get("kind", "drawing"), spec["family"])
+        groups.setdefault(key, []).append(spec)
+
+    quotas: dict[tuple[str, str, str], int] = {}
+    remainders: list[tuple[int, str, tuple[str, str, str]]] = []
+    for key, rows in groups.items():
+        whole, remainder = divmod(len(rows) * eval_count, len(specs))
+        quotas[key] = whole
+        remainders.append((remainder, sha256(f"{seed}:{compact_json(key)}"), key))
+    remaining = eval_count - sum(quotas.values())
+    for _, _, key in sorted(remainders, key=lambda item: (-item[0], item[1]))[:remaining]:
+        quotas[key] += 1
+
+    heldout: set[str] = set()
+    for key, rows in groups.items():
+        ranked = sorted(rows, key=lambda spec: sha256(f"{seed}:{spec['id']}"))
+        heldout.update(spec["id"] for spec in ranked[:quotas[key]])
+    assert len(heldout) == eval_count
+    return validate_specs([{**spec, "split": "test" if spec["id"] in heldout else "train"}
+                           for spec in specs])
+
+
 def _safe_int(value: Any) -> bool:
     return type(value) is int and -9_007_199_254_740_991 <= value <= 9_007_199_254_740_991
 
@@ -70,9 +109,9 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
                 or not isinstance(row.get("prompt"), str) or not row["prompt"].strip()
                 or not _safe_int(row.get("seed")) or row["seed"] < 0):
             raise ValueError("Each prompt needs family, prompt, and a nonnegative integer seed")
-        split = family_split(row["family"])
-        if "split" in row and row["split"] != split:
-            raise ValueError(f"Split for family {row['family']} must be {split}")
+        split = row.get("split", family_split(row["family"]))
+        if split not in ("train", "validation", "test"):
+            raise ValueError("Split must be train, validation, or test")
         ident = row.get("id")
         if ident is None:
             ident = sha256(compact_json([row["family"], row["prompt"], row["seed"]]))[:24]
