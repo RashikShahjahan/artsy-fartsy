@@ -19,6 +19,9 @@ uv pip install --python .venv/bin/python -r inference/requirements-tinker.txt -r
 # Authenticate once, or set TINKER_API_KEY in .env:
 .venv/bin/tinker auth login
 
+# On Apple Silicon, also install the MLX backend (the default on macOS):
+uv pip install --python .venv/bin/python -r inference/requirements-mlx.txt
+
 # Inspect has separate dependency constraints from the inference server.
 uv venv --python 3.12 .eval-venv
 uv pip install --python .eval-venv/bin/python -r evaluation/requirements.txt -r runtime/requirements.txt
@@ -44,6 +47,19 @@ requests require a new episode directory. There is no Pi SQLite session or autom
 interrupted-session resume. Only one process should own an episode directory.
 
 `ARTSY_MODEL_URL` can point to another OpenAI-compatible serving endpoint, using
+<<<<<<< HEAD
+the same model identifier and tool-call support. The bundled server uses MLX on
+Apple Silicon Macs and PyTorch elsewhere, and translates
+Qwen's function/parameter tool-call tags into the OpenAI tool protocol. Tool
+arguments are decoded as data; the bridge never evaluates generated expressions.
+It loads the full vision-language model at a pinned revision, with thinking
+disabled. Image inputs use OpenAI `image_url` blocks containing inline base64
+image data URLs. Images are decoded with Pillow and resized to at most 1,024
+visual tokens (about one megapixel); original preview files retain their resolution.
+Requests are serialized and capped at 2,048 generated tokens and a
+32,768-token context to bound inference, below Qwen's native context capacity.
+Set `ARTSY_BACKEND=torch` to select the CPU backend explicitly.
+=======
 the same model identifier and tool-call support. The bundled server uses Tinker
 for hosted inference and translates Qwen's function/parameter tool-call tags into
 the OpenAI tool protocol. Tool arguments are decoded as data; the bridge never
@@ -59,6 +75,7 @@ The bridge accepts concurrent Tinker requests. Set `ARTSY_TINKER_MODEL_PATH` to 
 The bridge loads `.env` automatically and also supports credentials saved by
 `tinker auth login`. For local CPU inference, install `inference/requirements.lock`
 and set `ARTSY_BACKEND=torch`.
+>>>>>>> main
 This is a small development server, not a public API service.
 
 ## Drawing API

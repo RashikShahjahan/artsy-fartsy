@@ -4,6 +4,7 @@ import binascii
 import io
 import json
 import os
+import platform
 import re
 import time
 import uuid
