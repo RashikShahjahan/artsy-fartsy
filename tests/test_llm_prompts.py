@@ -7,6 +7,7 @@ import io
 import json
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -125,7 +126,7 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
                 slot = json.loads(messages[1]["content"])["slots"][0]
                 if slot["index"] == 1 and not self.failed_once:
                     self.failed_once = True
-                    raise ConnectionError("Temporary provider failure")
+                    raise urllib.error.URLError("Temporary provider failure")
                 return await super().complete(messages, max_tokens)
 
         client = TransientFailure()
