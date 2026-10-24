@@ -387,7 +387,8 @@ records the validated prompts, generator model/endpoint, taxonomy-slot settings,
 raw prompt-generation completions and token usage. Resuming the same command
 reuses the exact plan with no additional prompt-writing calls; changing its
 configuration requires a new output directory. Neither API keys nor credentials
-are persisted. For prompts only, `--dry-run` prints JSONL without split labels.
+are persisted. For prompts only, `--dry-run` prints JSONL without split labels by default;
+with `--eval-count`, it includes the assigned train/test split.
 For complete dataset runs without `--eval-count`, existing family-based
 training splits remain the default. An explicit train/test split in a custom
 input spec is now respected.
