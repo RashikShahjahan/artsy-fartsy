@@ -16,7 +16,7 @@ from PIL import Image
 from drawing.dataset import generate_dataset
 from drawing.judges import parse_correctness_judgment, parse_safety_judgment, correctness_judge_prompt, safety_judge_prompt
 from drawing.dataset_client import chat_client, parse_json_reply
-from drawing.dataset_specs import compact_json, family_split, sha256, validate_specs
+from drawing.dataset_specs import assign_holdout, compact_json, family_split, sha256, validate_specs
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -55,8 +55,9 @@ class DatasetSpecTests(unittest.TestCase):
 
     def test_validation_and_fenced_json_are_strict(self) -> None:
         spec = example_spec()
+        self.assertEqual(validate_specs([{**spec, "split": "test"}])[0]["split"], "test")
         with self.assertRaisesRegex(ValueError, "Split"):
-            validate_specs([{**spec, "split": "test"}])
+            validate_specs([{**spec, "split": "invalid"}])
         with self.assertRaisesRegex(ValueError, "Duplicate prompt"):
             validate_specs([spec, {**spec, "id": "other"}])
         with self.assertRaisesRegex(ValueError, "safe filenames"):
@@ -66,6 +67,25 @@ class DatasetSpecTests(unittest.TestCase):
         self.assertNotIn("requirements", validate_specs([{**spec, "requirements": ["legacy"]}])[0])
         self.assertNotIn("expectedOutcome", validate_specs([{**spec, "expectedOutcome": "refusal"}])[0])
         self.assertEqual(parse_json_reply('```json\n{"ok":true}\n```'), {"ok": True})
+
+    def test_stratified_holdout_is_exact_and_reproducible(self) -> None:
+        families = ("circles", "houses", "grids", "flowers")
+        specs = [{
+            "id": f"prompt-{index}", "family": families[index % 4],
+            "prompt": f"Draw a distinct arrangement of shapes numbered {index}",
+            "seed": index, "difficulty": ("easy", "medium", "hard", "very-hard")[index % 4],
+        } for index in range(1000)]
+        first = assign_holdout(specs, 200, 42)
+        second = assign_holdout(specs, 200, 42)
+        self.assertEqual(first, second)
+        self.assertEqual(sum(row["split"] == "train" for row in first), 800)
+        self.assertEqual(sum(row["split"] == "test" for row in first), 200)
+        self.assertEqual(len({row["id"] for row in first}), 1000)
+        for level in ("easy", "medium", "hard", "very-hard"):
+            self.assertEqual(sum(row["split"] == "test" and row["difficulty"] == level
+                                 for row in first), 50)
+        with self.assertRaisesRegex(ValueError, "eval-count"):
+            assign_holdout(specs, 1000, 42)
 
     def test_inspect_judge_parsing_is_shared_with_datagen(self) -> None:
         correct = {"score": 0.95, "reason": "Matches prompt"}
@@ -215,6 +235,42 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["review"], 1); self.assertEqual(summary["accepted"], 0)
         self.assertEqual((self.output / "accepted.jsonl").read_text(), "")
         self.assertIn("evaluation pending", (self.output / "records" / f"{one['id']}-c0.json").read_text())
+
+    async def test_heldout_prompts_never_call_teacher_and_sft_selects_best_candidate(self) -> None:
+        from PIL import Image
+        teacher = ScriptedClient(['{"code":"red program"}', '{"code":"green program"}'])
+        correctness = ScriptedClient([self.correctness(0.90), self.correctness(0.98)], model="correctness")
+        safety = ScriptedClient([self.safety(), self.safety()], model="safety")
+
+        class ColoredRenderer:
+            async def render(inner, code: str, seed: int) -> dict[str, Any]:
+                buffer = io.BytesIO()
+                color = (255, 0, 0, 255) if code == "red program" else (0, 255, 0, 255)
+                Image.new("RGBA", (32, 32), color).save(buffer, format="PNG")
+                return {"ok": True, "stdout": "", "stderr": "", "png": buffer.getvalue(),
+                        "width": 32, "height": 32}
+
+        specs = [
+            {"id": "train-example", "family": "circles", "split": "train",
+             "prompt": "Draw a colorful circle", "seed": 1},
+            {"id": "heldout-example", "family": "circles", "split": "test",
+             "prompt": "Draw a detailed blue circle", "seed": 2},
+        ]
+        summary = await generate_dataset({"output": str(self.output), "specs": specs,
+                                          "teacher": teacher, "correctnessJudge": correctness,
+                                          "safetyJudge": safety, "candidates": 2, "repairs": 0,
+                                          "heldoutEval": True, "renderer": ColoredRenderer(),
+                                          "config": self.config()})
+        self.assertEqual(len(teacher.messages), 2)
+        self.assertEqual(summary["prompts"], 2)
+        self.assertEqual(summary["evaluationPrompts"], 1)
+        self.assertEqual(summary["selectedSftExamples"], 1)
+        self.assertEqual(summary["sftShortfall"], 0)
+        self.assertEqual(len((self.output / "eval-prompts.jsonl").read_text().splitlines()), 1)
+        self.assertEqual(json.loads((self.output / "eval-prompts.jsonl").read_text())["id"], "heldout-example")
+        train = json.loads((self.output / "train.jsonl").read_text())
+        self.assertEqual(train["id"], "train-example-c1")
+        self.assertNotIn("heldout-example", (self.output / "candidates.jsonl").read_text())
 
     async def test_authored_harmful_refusal_pair_is_trainable_without_renderer(self) -> None:
         spec = validate_specs([{
