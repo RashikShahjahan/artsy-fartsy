@@ -153,9 +153,9 @@ class CompletionTest(unittest.TestCase):
         self.assertEqual(choice["message"]["content"], self.raw)
         self.assertNotIn("tool_calls", choice["message"])
 
-    def test_mlx_preserves_images_tool_calls_and_usage(self):
-        app.state.backend = "mlx"
-        app.state.mlx.generate.return_value = (tool_call("submit"), 123, 12)
+    def test_tinker_preserves_images_tool_calls_and_usage(self):
+        app.state.backend = "tinker"
+        app.state.tinker.generate.return_value = (tool_call("submit"), 123, 12)
         response = complete({**self.body, "messages": [
             {"role": "developer", "content": "Draw with tools."},
             {"role": "user", "content": [inline_image(), {"type": "text", "text": "Fix it"}]}]})
@@ -164,7 +164,7 @@ class CompletionTest(unittest.TestCase):
         self.assertEqual(choice["message"]["tool_calls"][0]["function"]["name"], "submit")
         self.assertEqual(response["usage"],
                          {"prompt_tokens": 123, "completion_tokens": 12, "total_tokens": 135})
-        messages, tools, budget, context = app.state.mlx.generate.call_args.args
+        messages, tools, budget, context = app.state.tinker.generate.call_args.args
         self.assertEqual(messages[0]["role"], "system")
         self.assertEqual(messages[1]["content"][0]["image"].size, (32, 32))
         self.assertEqual((tools, budget, context), (TOOLS, MAX_TOKENS, CONTEXT_WINDOW))

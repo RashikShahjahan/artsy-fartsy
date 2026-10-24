@@ -7,14 +7,17 @@ episode environment, an Inspect SWE write → run → fix → submit loop, and a
 
 ## Setup
 
-Requires Python 3.12 and `uv`.
+Requires Python 3.14 and `uv`.
 Drawing and evaluation use Docker Engine 24.0.6+ and Docker Compose 2.22+;
 start Docker before running either command. Dataset generation and `.venv/bin/python -m drawing.run`
 continue to execute locally and require Cairo. Run commands from the repository root.
 
 ```sh
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -r inference/requirements.lock -r drawing/requirements.txt
+uv venv --python 3.14 .venv
+uv pip install --python .venv/bin/python -r inference/requirements-tinker.txt -r drawing/requirements.txt
+
+# Authenticate once, or set TINKER_API_KEY in .env:
+.venv/bin/tinker auth login
 
 # On Apple Silicon, also install the MLX backend (the default on macOS):
 uv pip install --python .venv/bin/python -r inference/requirements-mlx.txt
@@ -23,7 +26,11 @@ uv pip install --python .venv/bin/python -r inference/requirements-mlx.txt
 uv venv --python 3.12 .eval-venv
 uv pip install --python .eval-venv/bin/python -r evaluation/requirements.txt -r runtime/requirements.txt
 
+<<<<<<< HEAD
 # Starts a loopback-only server; the first start downloads Qwen3.5-4B.
+=======
+# Starts a loopback-only bridge to hosted Qwen3.5-4B sampling.
+>>>>>>> main
 HF_HOME="$PWD/.cache/huggingface" make serve
 ```
 
@@ -44,6 +51,7 @@ requests require a new episode directory. There is no Pi SQLite session or autom
 interrupted-session resume. Only one process should own an episode directory.
 
 `ARTSY_MODEL_URL` can point to another OpenAI-compatible serving endpoint, using
+<<<<<<< HEAD
 the same model identifier and tool-call support. The bundled server uses MLX on
 Apple Silicon Macs and PyTorch elsewhere, and translates
 Qwen's function/parameter tool-call tags into the OpenAI tool protocol. Tool
@@ -55,6 +63,23 @@ visual tokens (about one megapixel); original preview files retain their resolut
 Requests are serialized and capped at 2,048 generated tokens and a
 32,768-token context to bound inference, below Qwen's native context capacity.
 Set `ARTSY_BACKEND=torch` to select the CPU backend explicitly.
+=======
+the same model identifier and tool-call support. The bundled server uses Tinker
+for hosted inference and translates Qwen's function/parameter tool-call tags into
+the OpenAI tool protocol. Tool arguments are decoded as data; the bridge never
+evaluates generated expressions. Only tokenizer and image processor metadata are
+loaded locally at the pinned revision; Tinker manages the model weights.
+The `qwen3_5_disable_thinking` renderer matches the Tinker training pipeline.
+Image inputs use OpenAI `image_url` blocks containing inline base64 data URLs.
+Previews are decoded with Pillow and resized to at most 1,024 visual tokens
+(about one megapixel); original preview files retain their resolution.
+Requests are capped at 2,048 generated tokens and a 32,768-token context.
+The bridge accepts concurrent Tinker requests. Set `ARTSY_TINKER_MODEL_PATH` to a
+`tinker://` sampler checkpoint to evaluate trained weights instead of the base model.
+The bridge loads `.env` automatically and also supports credentials saved by
+`tinker auth login`. For local CPU inference, install `inference/requirements.lock`
+and set `ARTSY_BACKEND=torch`.
+>>>>>>> main
 This is a small development server, not a public API service.
 
 ## Drawing API
@@ -339,77 +364,94 @@ within its output directory. Use higher `--difficulty` settings to stress repair
 there is no dedicated repair-prompt quota or warmup selection workflow.
 
 
-## Supervised fine-tuning with TRL
+## Supervised fine-tuning with Tinker
 
-`training/sft.py` uses TRL's `SFTTrainer` and the full
-`Qwen3_5ForConditionalGeneration` model, including its vision encoder. It defaults
-to the same model revision and image resolution limits as the inference server.
-The trainer uses [TRL SFT](https://huggingface.co/docs/trl/sft_trainer) with a custom collator for selective assistant-turn loss.
-Use a separate Python 3.12 environment:
+`training/sft.py` trains a hosted LoRA adapter through
+[Tinker](https://tinker-docs.thinkingmachines.ai/). Artifact validation and
+tokenization run locally; a local GPU and model weights are unnecessary.
+The default training model is `Qwen/Qwen3.5-4B`, which is in
+[Tinker's hosted vision lineup](https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/).
+Training, the bundled inference server, and evaluation share the same model ID
+from `drawing/config.py`. Local inference and training tokenization also share
+a pinned Hugging Face revision. SFT uses text-only inputs. Tinker training
+produces an adapter for this base model; use that adapter for trained-checkpoint
+evaluation, with thinking disabled.
+
+Use the project environment (`uv sync`) or a separate training environment:
 
 ```sh
 uv venv --python 3.12 .sft-venv
 uv pip install --python .sft-venv/bin/python -r training/requirements.txt
 
-# Inspect an actual converted datapoint without loading a model or dependencies:
-python3 -m training.sft --dry-run
-python3 -m training.sft --dry-run --sample-id d925c993f23372c735329d70-c0
-python3 -m training.sft --dry-run --export /tmp/artsy-sft.jsonl
+# Validate recorded artifacts and inspect a converted example without API calls:
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl --dry-run
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl \
+  --dry-run --export /tmp/artsy-sft.jsonl
 
-# Load just the processor and verify all image inputs and token/label lengths:
-HF_HOME="$PWD/.cache/huggingface" .sft-venv/bin/python -m training.sft --check-batch
+# Download just tokenizer metadata and check every training example locally:
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl --check-batch
 
-# Full-parameter training; defaults: 1 epoch, batch 1, accumulation 8, LR 2e-5.
-# Review the selected drawings first. For an experimental run that explicitly
-# includes the 84 selected rows still marked pending review:
-HF_HOME="$PWD/.cache/huggingface" .sft-venv/bin/python -m training.sft \
-  --allow-unreviewed --output-dir checkpoints/sft-warmup
+# Configure Tinker authentication in your shell, then start hosted training:
+export TINKER_API_KEY=your-tinker-api-key
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl \
+  --output-dir checkpoints/sft-run
+
+# Resume weights, optimizer state and deterministic data order from local metadata:
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl \
+  --output-dir checkpoints/sft-run \
+  --resume-from-checkpoint checkpoints/sft-run/checkpoint-000050.json
 ```
 
-Each of the 100 selected records becomes one complete conversation, retaining the
-80/20 one-shot/repair mix. The conversation contains the request, earlier attempts
-and feedback, the final successful write-and-preview bash call, its recorded PNG,
-and the submit call. `trainable_message_indices` identifies the two successful
-assistant actions that receive loss. The adapter synthesizes bash wrappers around the teacher's
-recorded Python; these are converted demonstrations, not collected Mini SWE
-transcripts. Earlier executed failures and malformed replies remain in the conversation
-and receive no loss. Prior previews are loaded through the multimodal processor.
-Judge scores, critiques, and final approval labels are excluded from model input;
-visual repairs must follow the original request and the actual preview image.
+Pass the path to your recorded training dataset with `--dataset`. Each record
+becomes a text-only conversation containing the request, earlier attempts and
+textual execution feedback, the final successful write-and-preview bash call,
+and submission. Recorded PNGs and image observations are validated as artifacts
+but excluded from model inputs, along with prompts to inspect those images.
+The adapter synthesizes bash wrappers around the teacher's recorded Python;
+these are converted demonstrations, not collected Mini SWE transcripts.
+Source/image hashes, API documentation version, training split, and explicit
+legacy duplicate exceptions are checked during conversion. Review pending records
+before training, or explicitly include them with `--allow-unreviewed`.
 
-Only the final successful program action and submission receive loss. User/system
-messages, failed assistant actions, tool outputs, image tokens, assistant headers,
-and padding are masked. The collator adds generation spans around the selected
-assistant bodies in Qwen's native template and verifies that the rendered text
-is unchanged. The multimodal processor maps those spans through image-token
-expansion. Thinking is disabled and the bash schema is included. Sequences are never
-truncated or packed; every example is checked before model allocation and those
-over `--max-length` (default 32,768) fail explicitly. Source/image hashes,
-documentation version, training split, and explicit duplicate exceptions are
-checked during conversion. Training defaults to the completed warmup `train.jsonl`;
-the old `spec.split` is provenance when `warmup.split="train"` is present.
+Only the final successful program action and submission receive cross-entropy
+loss. Each selected action is encoded as its own conversation prefix, ending at
+that action. Earlier assistant turns, including successful actions in a later
+prefix, stay masked context. User/system messages, tool feedback,
+and assistant headers also receive zero weight. Judge scores and critiques
+are excluded from model input. The Cookbook Qwen3.5 renderer supplies the bash
+tool schema, native tool-call format, and disabled-thinking prefix. No image
+processor is loaded, and the encoder rejects non-text content. The conversion
+version prevents resuming an older multimodal checkpoint with these text-only inputs.
 
-CUDA uses bfloat16 when supported; CPU uses float32. This is full-parameter SFT,
-so choose batch size and hardware after measuring memory use. No training run is
-started by `--dry-run` or `--check-batch`. Use `--max-steps 1` for an optimizer
-smoke run, `--device cpu --dtype float32` to force CPU, and
-`--resume-from-checkpoint checkpoints/sft-warmup/checkpoint-N` to resume with
-optimizer state. Checkpoints, metrics, and a data/model/version manifest go under
-`--output-dir`; the final model and processor are saved in its `final/` directory.
-Use the fresh `evaluation/prompts.jsonl` for behavioral evaluation; the script
-does not split the warmup records into a misleading held-out set.
+Sequences are never packed or truncated. Preflight checks every prefix against
+`--max-length` (default 32,768) before creating a hosted training client.
+`--dry-run` and `--check-batch` make no Tinker API calls. The latter may download
+Hugging Face tokenizer metadata. Training defaults to one epoch, eight
+selected assistant actions per optimizer step, LoRA rank 32, and learning rate
+2e-4. Loss weights are normalized across all supervised tokens in each batch.
+Use `--max-steps 1` for a hosted optimizer smoke run. `--model` selects another
+supported Qwen3.5 vision chat model; local checkpoints, device selection, and
+full-parameter training options are replaced by hosted LoRA training.
 
-The current data preflight measures a maximum of 14,970 conversation tokens and
-4,012 supervised tokens across both actions in a conversation. The longest single
-program action is 3,978 tokens. The bundled server and Mini SWE configuration currently
-cap each response at 2,048 tokens and the server pins the base model. To evaluate
-the trained checkpoint, load `final/` in a compatible vision/tool inference service
-and choose a sufficient generation limit in both serving and harness configuration.
+The output directory contains `training-manifest.json`, `metrics.jsonl`, and
+`checkpoint-NNNNNN.json` files holding remote `tinker://` state paths. Checkpoints
+include optimizer state and are saved every `--save-every` steps (default 50)
+and at the end. Resume validates dataset/model/settings and continues at the
+next deterministic batch; `--epochs` and `--max-steps` describe the total run and
+can be increased. `final.json` records both the training state and the sampler
+weights path. Use Tinker's sampling client or
+[adapter export workflow](https://tinker-docs.thinkingmachines.ai/cookbook/deployment/lora-adapter/)
+for inference. No local full-model `final/` directory is produced.
+Use the fresh `evaluation/prompts.jsonl` for behavioral evaluation with sufficient
+generation limits in both the serving endpoint and harness.
 
 All commands run directly as Python modules; no Node.js or compilation step is required.
 The Makefile provides `serve`, `draw`, `render`, `dataset`, and
 `eval` shortcuts. Pass CLI arguments with `ARGS`, for example
 `make dataset ARGS="--dry-run --count 20"`.
+
+See [pipeline diagrams](docs/pipeline-diagrams.md) for the current datagen,
+evaluation, and training flows.
 
 ## Verification
 
@@ -430,12 +472,12 @@ invalid drawing code and exhausted its episode budget. No valid submission was
 reported. Repair tests use scripted responses; Qwen drawing
 quality must be evaluated separately before training.
 
-A live Qwen vision smoke test identified a blue circle and returned a parsed
+A historical Qwen3.5-0.8B vision smoke test identified a blue circle and returned a parsed
 `report(color="blue", shape="circle")` tool call from the image. The CPU path took
 about 107 seconds for that image-plus-tool request; full drawing performance and
 quality still need benchmarking.
 
-References: [Qwen model card](https://huggingface.co/Qwen/Qwen3.5-0.8B),
+References: [Qwen model card](https://huggingface.co/Qwen/Qwen3.5-4B),
 [Inspect SWE](https://meridianlabs-ai.github.io/inspect_swe/),
 [Mini SWE Agent](https://mini-swe-agent.com/),
 [original Artsy post](https://blog.rashik.sh/tech/can-ai-learn-to-draw/).

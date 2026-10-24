@@ -3,7 +3,8 @@
 The shell wrapper is synthesized; the Python source and execution feedback are
 recorded evidence. Each record produces one complete conversation. Only its final
 successful write/preview action and submission are selected for language-model
-loss; earlier attempts, tool feedback, and images remain masked context.
+loss; earlier attempts and textual tool feedback remain masked context. Images
+are validated as recorded artifacts but excluded from model inputs.
 """
 
 import hashlib
@@ -34,11 +35,8 @@ def artifact(root: Path, name: str, expected_hash: str | None = None) -> Path:
     return path
 
 
-def message(role: str, text: str, image: Path | None = None, **kwargs) -> dict:
-    content = [{"type": "text", "text": text}]
-    if image:
-        content.append({"type": "image", "image": str(image)})
-    return {"role": role, "content": content, **kwargs}
+def message(role: str, text: str, **kwargs) -> dict:
+    return {"role": role, "content": [{"type": "text", "text": text}], **kwargs}
 
 
 def action(command: str, call_id: str) -> dict:
@@ -74,7 +72,7 @@ def system_prompt() -> str:
         "Fulfill the drawing request by writing /workspace/program.py. "
         "Use the installed ArtCanvas module to save output.png at 1920×1200. "
         "Use bash commands to write, run, and fix your program. "
-        "Use the preview command to receive both execution feedback and the actual PNG image. "
+        "Use the preview command to receive textual execution feedback. "
         "The final program is executed again in a fresh directory with no other files. "
         "A text answer or a pre-existing PNG does not count. "
         'If you cannot fulfill the request, write only refusal.json containing {"reason":"..."} '
@@ -126,11 +124,9 @@ def convert_record(record: dict, root: Path) -> dict:
     for index, step in enumerate(trace):
         if step.get("observation"):
             observation = step["observation"]
-            image = artifact(root, observation["image"], observation["imageHash"])
-            # The preceding tool result already carries this preview. Never pass
-            # judge scores, verdicts, or privileged critique to the student.
-            if not any(p.get("image") == str(image) for p in messages[-1]["content"]):
-                messages.append(message("user", "Inspect this preview against the drawing request.", image))
+            # Preserve provenance checks without adding images or privileged
+            # judge feedback to the text-only student conversation.
+            artifact(root, observation["image"], observation["imageHash"])
         feedback = step.get("feedback")
         if feedback is None:
             # A malformed/truncated JSON reply was never executed. Preserve it
@@ -151,17 +147,16 @@ def convert_record(record: dict, root: Path) -> dict:
         messages.append(target)
         visible = {key: feedback[key] for key in ("ok", "stdout", "stderr", "error", "exitCode", "width", "height")
                    if key in feedback}
-        image = None
         if feedback.get("ok"):
             # Feedback paths reference the original machine/dataset. Resolve the
             # preview basename within the copied portable episode directory.
             name = Path(feedback["artifact"]).name
             if not name.startswith("preview-") or not name.endswith(".png"):
                 raise ValueError(f"{rid}: invalid preview reference")
-            image = artifact(root, str(Path(record["artifacts"]["directory"]) / name),
-                             record["imageHash"] if final else None)
+            artifact(root, str(Path(record["artifacts"]["directory"]) / name),
+                     record["imageHash"] if final else None)
         messages.append(message("tool", "Return code: " + str(feedback.get("exitCode", 0))
-                                + "\n" + json.dumps(visible), image, tool_call_id=call_id))
+                                + "\n" + json.dumps(visible), tool_call_id=call_id))
     trainable_message_indices.append(len(messages))
     messages.append(action(SUBMIT, "call_submit"))
     return {"id": rid, "messages": messages,
@@ -205,6 +200,7 @@ def load_examples(path: Path) -> tuple[list[dict], dict]:
                               for level in DIFFICULTIES},
         "unreviewed_records": sum(r.get("status") != "accepted" for r in records),
         "examples_with_images": sum(any(p["type"] == "image" for m in e["messages"] for p in m["content"]) for e in examples),
+        "input_mode": "text-only",
         "api_doc_sha256": digest((ROOT / "docs/artcanvas.md").read_bytes()),
-        "conversion": "bash-conversation-selective-loss-v2",
+        "conversion": "bash-conversation-text-only-selective-loss-v3",
     }

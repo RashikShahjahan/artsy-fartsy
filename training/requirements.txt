@@ -1,8 +1,4 @@
-# Separate environment from inference and Inspect. Reuse their model version.
-torch==2.14.1
+# Local tokenization and artifact validation; model training runs on Tinker.
+tinker==0.35.0
+tinker-cookbook==0.5.8
 torchvision==0.29.1
-transformers==5.20.2
-pillow==12.0.0
-trl==1.16.0
-datasets==5.1.0
-accelerate==1.15.0
