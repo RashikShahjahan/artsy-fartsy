@@ -28,20 +28,33 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE_MODEL = MODEL_ID
 AGENT_VERSION = "2.2.3"
 RUNTIME_VERSION = "artcanvas-v2"
+LOCAL_MODEL_URL = "http://127.0.0.1:8080/v1"
+TINKER_MODEL_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
 sha256 = lambda data: hashlib.sha256(data).hexdigest()
 
 
+def model_url() -> str:
+    return os.getenv("ARTSY_MODEL_URL") or LOCAL_MODEL_URL
+
+
+def is_direct_tinker() -> bool:
+    return model_url().rstrip("/") == TINKER_MODEL_URL
+
+
 def _model_api_key() -> str:
-    return os.getenv("ARTSY_MODEL_API_KEY") or "local-no-auth"
+    if key := os.getenv("ARTSY_MODEL_API_KEY"):
+        return key
+    if is_direct_tinker():
+        if key := os.getenv("TINKER_API_KEY"):
+            return key
+        raise ValueError("Direct Tinker inference requires TINKER_API_KEY or ARTSY_MODEL_API_KEY")
+    return "local-no-auth"
 
 
 def model_from_env(model: str = BASE_MODEL):
     """Use the drawing endpoint without changing global OpenAI/judge credentials."""
-    return get_model(
-        f"openai/{model}", base_url=os.getenv("ARTSY_MODEL_URL", "http://127.0.0.1:8080/v1"),
-        api_key=_model_api_key(),
-        responses_api=False,
-    )
+    return get_model(f"openai/{model}", base_url=model_url(),
+                     api_key=_model_api_key(), responses_api=False)
 
 
 @contextmanager
@@ -301,6 +314,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, threshold),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=GenerateConfig(max_tokens=2048, temperature=0, max_retries=0,
+                              reasoning_effort="none" if is_direct_tinker() else None,
                               timeout=120, max_connections=1),
         turn_limit=16, token_limit=32768, time_limit=300,
         fail_on_error=False,

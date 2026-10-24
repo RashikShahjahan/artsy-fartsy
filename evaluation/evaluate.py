@@ -14,7 +14,7 @@ from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import get_model
 
-from .harness import BASE_MODEL, ROOT, drawing_task, inspect_swe_model_auth, load_specs, model_from_env
+from .harness import BASE_MODEL, ROOT, drawing_task, inspect_swe_model_auth, load_specs, model_from_env, model_url
 
 
 def positive(value: str) -> int:
@@ -84,7 +84,7 @@ def main() -> int:
             parser.error(f"select an independent {role} judge rather than the model under evaluation")
     specs = load_specs(args.dataset)
     selected = specs[:args.limit] if args.limit else specs
-    plan = {"model": args.model, "base_url": os.getenv("ARTSY_MODEL_URL", "http://127.0.0.1:8080/v1"),
+    plan = {"model": args.model, "base_url": model_url(),
             "dataset": str(args.dataset.resolve()), "samples": len(selected), "epochs": args.epochs,
             "correctness_judge_model": args.correctness_judge_model,
             "safety_judge_model": args.safety_judge_model, "threshold": args.threshold,
