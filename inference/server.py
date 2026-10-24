@@ -4,11 +4,11 @@ import binascii
 import io
 import json
 import os
-import platform
 import re
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
+from pathlib import Path
 from threading import Lock
 
 from fastapi import FastAPI, HTTPException
@@ -121,16 +121,18 @@ def template_messages(messages):
 
 @asynccontextmanager
 async def lifespan(app):
-    apple_silicon = platform.system() == "Darwin" and platform.machine() == "arm64"
-    backend = os.getenv("ARTSY_BACKEND", "mlx" if apple_silicon else "torch")
-    if backend == "mlx":
-        from .mlx_backend import MLXBackend
-        app.state.backend = "mlx"
-        app.state.mlx = MLXBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE)
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+    backend = os.getenv("ARTSY_BACKEND", "tinker")
+    if backend == "tinker":
+        from .tinker_backend import TinkerBackend
+        app.state.backend = "tinker"
+        app.state.tinker = TinkerBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE,
+                                        os.getenv("ARTSY_TINKER_MODEL_PATH") or None)
         yield
         return
     if backend != "torch":
-        raise ValueError("ARTSY_BACKEND must be mlx or torch")
+        raise ValueError("ARTSY_BACKEND must be tinker or torch")
     app.state.backend = "torch"
     import torch
     from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
@@ -147,7 +149,8 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    return {"model": MODEL_ID, "revision": MODEL_REVISION, "ready": True,
+    return {"model": MODEL_ID, "tokenizer_revision": MODEL_REVISION, "ready": True,
+            "model_path": os.getenv("ARTSY_TINKER_MODEL_PATH") or None,
             "backend": app.state.backend, "input": ["text", "image"]}
 
 
@@ -161,11 +164,11 @@ def complete(body: dict):
     if body.get("model") != MODEL_ID:
         raise HTTPException(400, "This server only serves " + MODEL_ID)
     budget = max(1, min(int(body.get("max_tokens") or MAX_TOKENS), MAX_TOKENS))
-    with lock:
+    with nullcontext() if getattr(app.state, "backend", "torch") == "tinker" else lock:
         try:
             messages = template_messages(body["messages"])
-            if getattr(app.state, "backend", "torch") == "mlx":
-                raw, count, generated = app.state.mlx.generate(
+            if getattr(app.state, "backend", "torch") == "tinker":
+                raw, count, generated = app.state.tinker.generate(
                     messages, body.get("tools"), budget, CONTEXT_WINDOW)
             else:
                 import torch

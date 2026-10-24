@@ -7,23 +7,23 @@ episode environment, an Inspect SWE write → run → fix → submit loop, and a
 
 ## Setup
 
-Requires Python 3.12 and `uv`.
+Requires Python 3.14 and `uv`.
 Drawing and evaluation use Docker Engine 24.0.6+ and Docker Compose 2.22+;
 start Docker before running either command. Dataset generation and `.venv/bin/python -m drawing.run`
 continue to execute locally and require Cairo. Run commands from the repository root.
 
 ```sh
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -r inference/requirements.lock -r drawing/requirements.txt
+uv venv --python 3.14 .venv
+uv pip install --python .venv/bin/python -r inference/requirements-tinker.txt -r drawing/requirements.txt
 
-# On Apple Silicon, also install the MLX backend (the default on macOS):
-uv pip install --python .venv/bin/python -r inference/requirements-mlx.txt
+# Authenticate once, or set TINKER_API_KEY in .env:
+.venv/bin/tinker auth login
 
 # Inspect has separate dependency constraints from the inference server.
 uv venv --python 3.12 .eval-venv
 uv pip install --python .eval-venv/bin/python -r evaluation/requirements.txt -r runtime/requirements.txt
 
-# Starts a loopback-only server; the first start downloads Qwen3.5-4B.
+# Starts a loopback-only bridge to hosted Qwen3.5-4B sampling.
 HF_HOME="$PWD/.cache/huggingface" make serve
 ```
 
@@ -44,17 +44,21 @@ requests require a new episode directory. There is no Pi SQLite session or autom
 interrupted-session resume. Only one process should own an episode directory.
 
 `ARTSY_MODEL_URL` can point to another OpenAI-compatible serving endpoint, using
-the same model identifier and tool-call support. The bundled server uses MLX on
-Apple Silicon Macs and PyTorch elsewhere, and translates
-Qwen's function/parameter tool-call tags into the OpenAI tool protocol. Tool
-arguments are decoded as data; the bridge never evaluates generated expressions.
-It loads the full vision-language model at a pinned revision, with thinking
-disabled. Image inputs use OpenAI `image_url` blocks containing inline base64
-image data URLs. Images are decoded with Pillow and resized to at most 1,024
-visual tokens (about one megapixel); original preview files retain their resolution.
-Requests are serialized and capped at 2,048 generated tokens and a
-32,768-token context to bound inference, below Qwen's native context capacity.
-Set `ARTSY_BACKEND=torch` to select the CPU backend explicitly.
+the same model identifier and tool-call support. The bundled server uses Tinker
+for hosted inference and translates Qwen's function/parameter tool-call tags into
+the OpenAI tool protocol. Tool arguments are decoded as data; the bridge never
+evaluates generated expressions. Only tokenizer and image processor metadata are
+loaded locally at the pinned revision; Tinker manages the model weights.
+The `qwen3_5_disable_thinking` renderer matches the Tinker training pipeline.
+Image inputs use OpenAI `image_url` blocks containing inline base64 data URLs.
+Previews are decoded with Pillow and resized to at most 1,024 visual tokens
+(about one megapixel); original preview files retain their resolution.
+Requests are capped at 2,048 generated tokens and a 32,768-token context.
+The bridge accepts concurrent Tinker requests. Set `ARTSY_TINKER_MODEL_PATH` to a
+`tinker://` sampler checkpoint to evaluate trained weights instead of the base model.
+The bridge loads `.env` automatically and also supports credentials saved by
+`tinker auth login`. For local CPU inference, install `inference/requirements.lock`
+and set `ARTSY_BACKEND=torch`.
 This is a small development server, not a public API service.
 
 ## Drawing API
