@@ -26,11 +26,7 @@ uv pip install --python .venv/bin/python -r inference/requirements-mlx.txt
 uv venv --python 3.12 .eval-venv
 uv pip install --python .eval-venv/bin/python -r evaluation/requirements.txt -r runtime/requirements.txt
 
-<<<<<<< HEAD
-# Starts a loopback-only server; the first start downloads Qwen3.5-4B.
-=======
 # Starts a loopback-only bridge to hosted Qwen3.5-4B sampling.
->>>>>>> main
 HF_HOME="$PWD/.cache/huggingface" make serve
 ```
 
