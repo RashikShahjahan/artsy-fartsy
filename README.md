@@ -304,6 +304,45 @@ For a frozen comparison, keep the resulting JSONL under version control or in
 a benchmark dataset; rerunning with the same seed alone cannot reproduce
 model-authored wording exactly. Keep evaluated tasks out of SFT training.
 
+### Create an 800-SFT / 200-evaluation dataset
+
+Use one LLM-authored prompt plan for 1,000 unique requests, with 200 reserved
+for Inspect evaluation and 800 eligible for SFT. The split is deterministic for
+the frozen prompt plan and stratified by difficulty, family, and refusal status.
+The held-out prompts are **never sent to the teacher** and remain separate from
+training. Set the prompt, teacher, correctness judge, and safety judge
+models/endpoints/keys as described below.
+
+```sh
+uv run python -m drawing.generate_dataset \
+  --count 1000 --eval-count 200 --difficulty mixed --seed 42 \
+  --candidates 2 --repairs 2 --workers 4 \
+  --output datasets/artsy-1000-v1
+
+# Inspect the counts and run each consumer on its own file:
+uv run python -m training.sft --dataset datasets/artsy-1000-v1/train.jsonl --dry-run
+.eval-venv/bin/python -m evaluation.evaluate \
+  --dataset datasets/artsy-1000-v1/eval-prompts.jsonl --dry-run
+```
+
+Use `--harmful-count N` if you want refusal examples in the 1,000 prompts
+(e.g. `--harmful-count 100` for 10%). The holdout stratification distributes
+these between train and eval. The output `prompts.jsonl` contains all 1,000
+specifications; `eval-prompts.jsonl` contains exactly 200 held-out prompt
+specifications; `train.jsonl` contains at most one accepted teacher solution
+per each of the 800 SFT prompts. With multiple candidates, the highest-scoring
+accepted candidate is chosen. Rejected or ungraded drawing candidates cannot
+become SFT examples, so `summary.json` reports `selectedSftExamples` and
+`sftShortfall`: **800 prompts does not guarantee 800 accepted demonstrations**.
+If either vision judge is missing, ordinary solutions go to `review.jsonl`
+rather than SFT. All rendering calls execute locally with your permissions.
+
+For a prompt-only audit, first run the same command with `--dry-run`, redirect
+the JSONL to a file, then run the full command with `--input FILE --eval-count 200`
+and omit `--harmful-count` (refusal prompts are already in the file). In this
+mode the dry-run JSONL includes split labels. Use the same `--seed` for the
+same holdout allocation. Save the plan; a seed alone cannot recreate LLM wording.
+
 **Add harmful-request/refusal pairs (opt-in):**
 
 ```sh
@@ -349,7 +388,9 @@ raw prompt-generation completions and token usage. Resuming the same command
 reuses the exact plan with no additional prompt-writing calls; changing its
 configuration requires a new output directory. Neither API keys nor credentials
 are persisted. For prompts only, `--dry-run` prints JSONL without split labels.
-For complete dataset runs, existing family-based training splits remain internal.
+For complete dataset runs without `--eval-count`, existing family-based
+training splits remain the default. An explicit train/test split in a custom
+input spec is now respected.
 
 For higher-difficulty training data, use `--difficulty hard` or
 `--difficulty very-hard` with a fresh output directory. Full generation saves the teacher's
