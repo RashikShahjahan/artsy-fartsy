@@ -2,8 +2,9 @@ import asyncio
 import base64
 import io
 import json
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 from inference.server import CONTEXT_WINDOW, MAX_TOKENS, MODEL_ID, app, complete, image_content, models, parse_tools, template_messages
@@ -29,6 +30,40 @@ def inline_image():
 
 
 class ToolProtocolTest(unittest.TestCase):
+    def test_native_tinker_renderer_receives_flat_tool_specs_and_preview_pixels(self):
+        from inference.tinker_backend import TinkerBackend
+        from tinker_cookbook.renderers import ToolCall
+
+        backend = TinkerBackend.__new__(TinkerBackend)
+        backend.image_processor = SimpleNamespace(patch_size=14, merge_size=2)
+        backend.image_size = {"shortest_edge": 28 * 28, "longest_edge": 56 * 56}
+        backend.renderer = Mock()
+        backend.renderer.create_conversation_prefix_with_tools.return_value = [
+            {"role": "system", "content": "tools available"}]
+        messages = template_messages([
+            {"role": "developer", "content": "Use bash to inspect drawings."},
+            {"role": "user", "content": [inline_image(), {"type": "text", "text": "Inspect this"}]},
+            {"role": "assistant", "content": None, "tool_calls": [{
+                "id": "call_1", "type": "function", "function": {
+                    "name": "bash", "arguments": '{"command":"pwd"}'}}]},
+        ])
+        tools = [{"type": "function", "function": {
+            "name": "bash", "description": "Run a command",
+            "parameters": {"type": "object", "properties": {"command": {"type": "string"}}}}}]
+
+        backend.render(messages, tools)
+
+        specs = backend.renderer.create_conversation_prefix_with_tools.call_args.args[0]
+        self.assertEqual(specs, [{"name": "bash", "description": "Run a command",
+                                  "parameters": tools[0]["function"]["parameters"]}])
+        self.assertEqual(backend.renderer.create_conversation_prefix_with_tools.call_args.kwargs,
+                         {"system_prompt": "Use bash to inspect drawings."})
+        native = backend.renderer.build_generation_prompt.call_args.args[0]
+        self.assertEqual(native[1]["content"][0]["image"].size, (28, 28))
+        self.assertEqual(native[1]["content"][0]["image"].getpixel((0, 0)), (0, 0, 255))
+        self.assertIsInstance(native[2]["tool_calls"][0], ToolCall)
+        self.assertEqual(messages[1]["content"][0]["image"].size, (32, 32))
+
     def test_developer_instructions_are_compatible_with_qwen_system_role(self):
         messages = [{"role": "developer", "content": "Use the bash tool to draw."},
                     {"role": "user", "content": "Draw a circle."}]

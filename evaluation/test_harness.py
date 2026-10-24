@@ -139,6 +139,7 @@ class EvaluationTest(unittest.TestCase):
                                      "ARTSY_SAFETY_JUDGE_URL": ""}), \
                  patch("evaluation.evaluate.get_model", side_effect=lambda name, **kw: name), \
                  patch("evaluation.evaluate.model_from_env", return_value="mockllm/student"), \
+                 patch("evaluation.evaluate.check_native_bridge"), \
                  patch("evaluation.evaluate.eval", return_value=[fake_log]) as run, \
                  patch.object(sys, "argv", ["evaluate", "--limit", "1", "--output", str(root / "run"),
                      "--correctness-judge-model", "mockllm/correct",
@@ -179,6 +180,7 @@ class EvaluationTest(unittest.TestCase):
                 samples=[SimpleNamespace(error=None), SimpleNamespace(error=object())],
                 results=None, stats=SimpleNamespace(model_dump=lambda mode: {}))
             with patch("evaluation.evaluate.eval", return_value=[header]), \
+                 patch("evaluation.evaluate.check_native_bridge"), \
                  patch("evaluation.evaluate.read_eval_log", return_value=saved) as read, \
                  patch("evaluation.evaluate.model_from_env", return_value="mockllm/student"), \
                  patch.object(sys, "argv", ["evaluate", "--execution-only", "--limit", "2",
@@ -276,6 +278,7 @@ class EvaluationTest(unittest.TestCase):
 
             from evaluation.evaluate import main
             with patch("evaluation.evaluate.eval", return_value=logs), \
+                 patch("evaluation.evaluate.check_native_bridge"), \
                  patch("evaluation.evaluate.model_from_env", return_value="mockllm/model"), \
                  patch.object(sys, "argv", ["evaluate", "--execution-only", "--limit", "1", "--output", str(root / "run")]), \
                  redirect_stdout(io.StringIO()):

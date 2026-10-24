@@ -55,8 +55,19 @@ class TinkerBackend:
                     raise ValueError("System instructions must contain text only")
                 content = "".join(part["text"] for part in content)
             system.append(content)
+        # Inspect/OpenAI describes functions as {"type": "function", "function": {...}};
+        # Tinker's renderer expects flat ToolSpec objects with name/description/parameters.
+        tool_specs = [
+            {
+                "name": function["name"],
+                "description": function.get("description", ""),
+                "parameters": function.get("parameters", {"type": "object", "properties": {}}),
+            }
+            for tool in tools or []
+            for function in [tool.get("function", tool)]
+        ]
         prefix = self.renderer.create_conversation_prefix_with_tools(
-            tools or [], system_prompt="\n\n".join(system))
+            tool_specs, system_prompt="\n\n".join(system))
         return self.renderer.build_generation_prompt(prefix + native)
 
     def generate(self, messages, tools, budget, context_window):

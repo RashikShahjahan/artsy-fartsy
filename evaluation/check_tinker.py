@@ -1,7 +1,8 @@
-"""Live compatibility smoke test for direct Tinker inference (uses API credits).
+"""Live tool-call and vision smoke test for Artsy's native Tinker bridge.
 
-Run `uv run python -m evaluation.check_tinker` before switching an Inspect eval
-to Tinker's beta OpenAI-compatible endpoint. No Docker or model server is needed.
+Start `make serve` in another terminal, then run
+`uv run python -m evaluation.check_tinker`. Uses hosted Tinker sampling credits;
+Docker is not required.
 """
 
 import argparse
@@ -14,7 +15,8 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from PIL import Image
 
-from .harness import BASE_MODEL, ROOT, TINKER_MODEL_URL, _model_api_key, model_url
+from .harness import (BASE_MODEL, LOCAL_MODEL_URL, ROOT, _model_api_key,
+                      check_native_bridge, model_url)
 
 
 def main() -> int:
@@ -22,8 +24,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default=os.getenv("ARTSY_MODEL", BASE_MODEL))
     args = parser.parse_args()
-    if model_url().rstrip("/") != TINKER_MODEL_URL:
-        parser.error("Set ARTSY_MODEL_URL to Tinker's direct OpenAI-compatible endpoint")
+    if model_url().rstrip("/") != LOCAL_MODEL_URL:
+        parser.error("Native Tinker requires the local bridge: remove ARTSY_MODEL_URL "
+                     "from .env (and your shell), then start `make serve`")
+    check_native_bridge(args.model)
 
     with OpenAI(base_url=model_url(), api_key=_model_api_key(),
                 timeout=120, max_retries=0) as client:
@@ -36,7 +40,7 @@ def main() -> int:
                 "parameters": {"type": "object", "properties": {
                     "command": {"type": "string"}}, "required": ["command"]}}}],
             tool_choice={"type": "function", "function": {"name": "bash"}},
-            max_tokens=128, temperature=0, reasoning_effort="none",
+            max_tokens=128, temperature=0,
         )
         calls = tool_reply.choices[0].message.tool_calls or []
         if not calls or calls[0].function.name != "bash":
@@ -56,13 +60,13 @@ def main() -> int:
                 {"type": "text", "text": "What is the dominant color of this image? Reply with one word."},
                 {"type": "image_url", "image_url": {"url": image_url}},
             ]}],
-            max_tokens=64, temperature=0, reasoning_effort="none",
+            max_tokens=64, temperature=0,
         )
         answer = vision_reply.choices[0].message.content or ""
         if "red" not in answer.lower():
             raise RuntimeError(f"Tinker failed the PNG vision check: {answer!r}")
         print("PNG vision: OK")
-    print("Direct Tinker passed both prerequisites for the Artsy Mini SWE agent.")
+    print("Native Tinker bridge passed both prerequisites for the Artsy Mini SWE agent.")
     return 0
 
 

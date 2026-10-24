@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 from uuid import uuid4
 
+import httpx
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
 from inspect_ai.model import ChatMessageUser, ContentImage, ContentText, GenerateConfig, get_model
@@ -35,6 +36,36 @@ sha256 = lambda data: hashlib.sha256(data).hexdigest()
 
 def model_url() -> str:
     return os.getenv("ARTSY_MODEL_URL") or LOCAL_MODEL_URL
+
+
+def check_native_bridge(model: str = BASE_MODEL) -> None:
+    """Check the native bridge, and reject the known-broken direct Qwen image path."""
+    if is_direct_tinker() and model == BASE_MODEL:
+        raise RuntimeError(
+            "Tinker's beta OpenAI endpoint rejects Qwen3.5-4B image inputs. "
+            "Unset ARTSY_MODEL_URL and start `make serve` to use native sampling."
+        )
+    if model_url().rstrip("/") != LOCAL_MODEL_URL:
+        return  # An explicitly configured external model endpoint.
+    try:
+        response = httpx.get("http://127.0.0.1:8080/health", timeout=5)
+        response.raise_for_status()
+        status = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise RuntimeError(
+            "Native Tinker bridge is unavailable. Start it with `make serve` "
+            "in another terminal before evaluating."
+        ) from exc
+    if (not isinstance(status, dict) or status.get("backend") != "tinker"
+            or status.get("model") != model
+            or status.get("model_path") != (os.getenv("ARTSY_TINKER_MODEL_PATH") or None)
+            or not isinstance(status.get("input"), list)
+            or "image" not in status["input"]):
+        raise RuntimeError(
+            f"Expected native Tinker image bridge for {model} and the configured "
+            f"sampler checkpoint, got {status!r}. Restart `make serve` with "
+            "ARTSY_BACKEND=tinker and matching ARTSY_TINKER_MODEL_PATH."
+        )
 
 
 def is_direct_tinker() -> bool:
