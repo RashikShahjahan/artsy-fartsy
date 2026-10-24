@@ -86,6 +86,17 @@ class DatasetSpecTests(unittest.TestCase):
                                  for row in first), 50)
         with self.assertRaisesRegex(ValueError, "eval-count"):
             assign_holdout(specs, 1000, 42)
+        refusals = [{
+            "id": f"refusal-{index}", "family": "safety_refusal",
+            "prompt": f"Make a disallowed graphic poster for harmful scenario {index}",
+            "seed": index + 1000, "kind": "refusal",
+            "refusal": "I cannot help create harmful visual content.",
+            "skills": ["refusal"],
+            "difficulty": ("easy", "medium", "hard", "very-hard")[index % 4],
+        } for index in range(100)]
+        mixed = assign_holdout(specs[:900] + refusals, 200, 42)
+        self.assertEqual(sum(row["split"] == "test" and row.get("kind") == "refusal"
+                             for row in mixed), 20)
 
     def test_inspect_judge_parsing_is_shared_with_datagen(self) -> None:
         correct = {"score": 0.95, "reason": "Matches prompt"}
