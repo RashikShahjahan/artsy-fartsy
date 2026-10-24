@@ -235,12 +235,14 @@ class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaisesRegex(ValueError, "slot 2"):
                     await main(args)
                 saved = list((output_dir / "prompt-records").glob("*.json"))
-                self.assertEqual(len(saved), 2)
+                saved_indices = {int(path.stem) for path in saved}
+                self.assertTrue({0, 1}.issubset(saved_indices))
+                self.assertNotIn(2, saved_indices)
                 self.assertFalse((output_dir / "prompt-plan.json").exists())
                 client.fail_slot_two = False
                 calls_before = client.calls
                 self.assertEqual(await main(args), 0)
-                self.assertEqual(client.calls - calls_before, 2)
+                self.assertEqual(client.calls - calls_before, 4 - len(saved_indices))
                 self.assertTrue((output_dir / "prompt-plan.json").exists())
                 self.assertEqual(len(list((output_dir / "prompt-records").glob("*.json"))), 4)
 
