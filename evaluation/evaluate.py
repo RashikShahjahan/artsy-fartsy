@@ -31,7 +31,7 @@ def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
     for spec in specs:
         level = spec.get("difficulty", "unspecified")
         group = groups.setdefault(level, {"completed": 0, "render_valid": 0,
-            "visual_pass": 0, "previews_observed": 0, "initial_execution_failures": 0,
+            "previews_observed": 0, "initial_execution_failures": 0,
             "revisions_attempted": 0, "execution_recoveries": 0})
         for epoch in range(1, epochs + 1):
             path = artifacts / f"{spec['id']}-{epoch}" / "result.json"
@@ -42,7 +42,6 @@ def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
             trajectory = result.get("trajectory") or {}
             group["completed"] += 1
             group["render_valid"] += int(bool(scores.get("render_valid")))
-            group["visual_pass"] += int(bool(scores.get("visual_pass")))
             group["previews_observed"] += int(trajectory.get("initialRenderValid") is not None)
             group["initial_execution_failures"] += int(trajectory.get("initialRenderValid") is False)
             group["revisions_attempted"] += int(bool(trajectory.get("revisionAttempted")))
@@ -50,8 +49,6 @@ def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
     for group in groups.values():
         group["render_rate"] = (group["render_valid"] / group["completed"]
                                 if group["completed"] else None)
-        group["visual_pass_rate"] = (group["visual_pass"] / group["completed"]
-                                     if group["completed"] else None)
         group["execution_recovery_rate"] = (
             group["execution_recoveries"] / group["initial_execution_failures"]
             if group["initial_execution_failures"] else None)
@@ -71,15 +68,12 @@ def main() -> int:
                         help="Vision model for prompt correctness; optionally set ARTSY_CORRECTNESS_JUDGE_URL/API_KEY")
     parser.add_argument("--safety-judge-model", default=os.getenv("ARTSY_SAFETY_JUDGE_MODEL"),
                         help="Vision model for harmful content; optionally set ARTSY_SAFETY_JUDGE_URL/API_KEY")
-    parser.add_argument("--threshold", type=float, default=0.85)
     parser.add_argument("--execution-only", action="store_true", help="Smoke test rendering without either vision judge")
     parser.add_argument("--dry-run", action="store_true", help="Validate specs and show the plan without Docker or model requests")
     args = parser.parse_args()
     if args.execution_only:
         args.correctness_judge_model = None
         args.safety_judge_model = None
-    if not 0 <= args.threshold <= 1:
-        parser.error("threshold must be between 0 and 1")
     for role, model in (("correctness", args.correctness_judge_model), ("safety", args.safety_judge_model)):
         if model and model.removeprefix("openai/") == args.model:
             parser.error(f"select an independent {role} judge rather than the model under evaluation")
@@ -88,7 +82,7 @@ def main() -> int:
     plan = {"model": args.model, "base_url": model_url(),
             "dataset": str(args.dataset.resolve()), "samples": len(selected), "epochs": args.epochs,
             "correctness_judge_model": args.correctness_judge_model,
-            "safety_judge_model": args.safety_judge_model, "threshold": args.threshold,
+            "safety_judge_model": args.safety_judge_model,
             "mode": "execution-only" if args.execution_only else "full",
             "difficulty_counts": {level: sum(s.get("difficulty", "unspecified") == level for s in selected)
                                   for level in sorted({s.get("difficulty", "unspecified") for s in selected})},
@@ -117,7 +111,7 @@ def main() -> int:
     with inspect_swe_model_auth():
         logs = eval(
             drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
-                         args.safety_judge_model, args.threshold),
+                         args.safety_judge_model),
             model=model_from_env(args.model), model_roles=roles,
             log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=16,
         )

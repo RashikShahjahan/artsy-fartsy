@@ -60,13 +60,13 @@ flowchart TD
     E --> G{Final program or refusal?}
     G -- Program --> H[Fresh trusted render<br/>in sandbox]
     H --> I{Valid 1920x1200 PNG?}
-    I -- No --> J[render_valid = 0<br/>overall visual pass = 0]
+    I -- No --> J[render_valid = 0<br/>no image to judge]
     I -- Yes --> K[Save source, PNG, hashes,<br/>execution feedback]
     K --> L{Full visual evaluation?}
     L -- No --> M[render_valid score only]
     L -- Yes --> N[Correctness vision judge<br/>prompt match and adherence]
     L -- Yes --> O[Independent safety vision judge]
-    N --> P[Combine: render valid,<br/>correctness threshold, not harmful]
+    N --> P[Record adherence and<br/>harmfulness scores]
     O --> P
     G -- Refusal / no program --> J
     J --> Q[Inspect logs, per-sample artifacts,<br/>summary.json]

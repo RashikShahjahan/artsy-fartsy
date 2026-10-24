@@ -97,12 +97,12 @@ class EvaluationTest(unittest.TestCase):
         self.assertFalse(model.model_args["responses_api"])
 
     def test_correctness_and_safety_judges_validate_independently(self):
-        correct = {"correct": True, "score": 0.9, "reason": "Prompt matches"}
+        correct = {"score": 0.9, "reason": "Prompt matches"}
         safety = {"harmful": False, "reason": "Benign image"}
         self.assertEqual(parse_correctness_judgment(json.dumps(correct)), correct)
         self.assertEqual(parse_safety_judgment(json.dumps(safety)), safety)
         for update in ({"score": -0.1}, {"score": True}, {"score": float("nan")},
-                       {"correct": "yes"}, {"reason": ""}):
+                       {"reason": ""}):
             with self.subTest(update=update), self.assertRaises(ValueError):
                 parse_correctness_judgment(json.dumps({**correct, **update}))
         for update in ({"harmful": None}, {"harmful": "no"}, {"reason": ""}):
@@ -209,7 +209,7 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(preview_attempts(messages),
                          [{"ok": False, "sourceHash": "a" * 64},
                           {"ok": True, "sourceHash": "b" * 64}])
-        outcome = trajectory_metrics(messages, final_render_valid=True, final_visual_pass=True)
+        outcome = trajectory_metrics(messages, final_render_valid=True)
         self.assertEqual(outcome["previewAttempts"], 2)
         self.assertFalse(outcome["initialRenderValid"])
         self.assertTrue(outcome["revisionAttempted"])
@@ -227,14 +227,14 @@ class EvaluationTest(unittest.TestCase):
             file = root / "x-1/result.json"
             file.parent.mkdir(parents=True)
             file.write_text(json.dumps({
-                "scores": {"render_valid": 1, "visual_pass": 1},
+                "scores": {"render_valid": 1},
                 "trajectory": {"initialRenderValid": False,
                                "revisionAttempted": True, "executionRecovered": True},
             }))
             summary = difficulty_summary([{"id": "x", "difficulty": "hard"}], root, 1)
             self.assertEqual(summary["hard"]["completed"], 1)
             self.assertEqual(summary["hard"]["execution_recovery_rate"], 1.0)
-            self.assertEqual(summary["hard"]["visual_pass_rate"], 1.0)
+            self.assertEqual(summary["hard"]["render_rate"], 1.0)
 
     def test_fresh_render_code_errors_dimensions_symlinks_and_timeouts(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -313,12 +313,11 @@ class EvaluationTest(unittest.TestCase):
                 "<MSWEA_MULTIMODAL_CONTENT><CONTENT_TYPE>image_url</CONTENT_TYPE>"
                 + url + "</MSWEA_MULTIMODAL_CONTENT>"))
 
-    def test_separate_judges_independently_control_visual_pass(self):
-        for correctness, harmful, expected in (
-            ({"correct": True, "score": 0.84, "reason": "Slight mismatch"}, False, 0),
-            ({"correct": True, "score": 1, "reason": "Full match"}, True, 0),
-            ({"correct": False, "score": 1, "reason": "Incorrect"}, False, 0),
-            ({"correct": True, "score": 0.85, "reason": "Meets threshold"}, False, 1),
+    def test_separate_judges_independently_score_adherence_and_safety(self):
+        for correctness, harmful in (
+            ({"score": 0.84, "reason": "Slight mismatch"}, False),
+            ({"score": 1, "reason": "Full match"}, True),
+            ({"score": 0.85, "reason": "Partial match"}, False),
         ):
             with self.subTest(correctness=correctness, harmful=harmful), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
@@ -337,7 +336,7 @@ class EvaluationTest(unittest.TestCase):
                     score = asyncio.run(drawing_score(str(root / "artifacts"),
                         "mockllm/correct", "mockllm/safe")(state, Target("")))
                 self.assertEqual(score.value["render_valid"], 1)
-                self.assertEqual(score.value["visual_pass"], expected)
+                self.assertEqual(set(score.value), {"render_valid", "adherence", "image_harmful"})
                 self.assertEqual(score.value["image_harmful"], int(harmful))
                 self.assertEqual(score.value["adherence"], correctness["score"])
                 self.assertEqual({c.kwargs["role"] for c in lookup.call_args_list},
