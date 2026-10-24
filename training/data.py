@@ -57,6 +57,16 @@ def write_command(code: str, seed: int) -> str:
             "--output /workspace/preview --preview < /workspace/program.py")
 
 
+def refusal_command(reason: str) -> str:
+    payload = json.dumps({"reason": reason}, ensure_ascii=False)
+    delimiter = "ARTSY_REFUSAL"
+    while delimiter in payload.splitlines():
+        delimiter += "_"
+    return ("rm -f /workspace/program.py\n"
+            f"cat > /workspace/refusal.json <<'{delimiter}'\n"
+            f"{payload}\n{delimiter}")
+
+
 def parse_source(text: str) -> str:
     text = text.strip()
     if text.startswith("```json\n") and text.endswith("\n```"):
@@ -100,6 +110,26 @@ def convert_record(record: dict, root: Path) -> dict:
                  record.get("reason", "").startswith("Duplicate source or rendered pixels of "))
     if record.get("status") not in {"accepted", "review"} and not (duplicate and record.get("status") == "rejected"):
         raise ValueError(f"{rid}: record is not selected for training")
+    if record["spec"].get("kind") == "refusal":
+        spec = record["spec"]
+        if (record.get("status") != "accepted" or record.get("refusal") != spec["refusal"]
+                or record.get("refusalSource") != "prompt_plan"
+                or record.get("trace") or record.get("code")
+                or record.get("artifacts")):
+            raise ValueError(f"{rid}: invalid authored refusal pair")
+        seed = spec["seed"]
+        preview_command = (f"python /opt/artsy/render.py --seed {seed} "
+                           "--output /workspace/preview --preview < /workspace/program.py")
+        messages = [message("system", system_prompt()),
+                    message("user", spec["prompt"] + "\n\nPreview with: " + preview_command)]
+        first = len(messages)
+        messages.append(action(refusal_command(spec["refusal"]), "call_refusal"))
+        messages.append(message("tool", "Return code: 0\nRefusal recorded", tool_call_id="call_refusal"))
+        second = len(messages)
+        messages.append(action(SUBMIT, "call_submit"))
+        return {"id": rid, "messages": messages,
+                "trainable_message_indices": [first, second], "tools": TOOLS}
+
     generation = record.get("generation", {})
     if generation and generation.get("initialDraft") != "natural":
         raise ValueError(f"{rid}: synthetic repair excluded")
@@ -177,9 +207,10 @@ def is_observed_repair(record: dict) -> bool:
             continue
         feedback = step.get("feedback") or {}
         evaluation = step.get("evaluation") or {}
+        correctness = evaluation.get("correctness") or evaluation
+        score = correctness.get("score")
         if (feedback.get("ok") is False or evaluation.get("correct") is False
-                or (isinstance(evaluation.get("score"), (int, float))
-                    and evaluation["score"] < 0.85)):
+                or (type(score) in (int, float) and score < 0.85)):
             return True
     return False
 
@@ -196,11 +227,12 @@ def load_examples(path: Path) -> tuple[list[dict], dict]:
         "one_shot": sum(len(r.get("trace", [])) == 1 and
                         (r["trace"][0].get("feedback") or {}).get("ok") is True for r in records),
         "repairs": sum(is_observed_repair(r) for r in records),
+        "refusal_pairs": sum(r["spec"].get("kind") == "refusal" for r in records),
         "difficulty_counts": {level: sum(r["spec"].get("difficulty") == level for r in records)
                               for level in DIFFICULTIES},
         "unreviewed_records": sum(r.get("status") != "accepted" for r in records),
         "examples_with_images": sum(any(p["type"] == "image" for m in e["messages"] for p in m["content"]) for e in examples),
         "input_mode": "text-only",
         "api_doc_sha256": digest((ROOT / "docs/artcanvas.md").read_bytes()),
-        "conversion": "bash-conversation-text-only-selective-loss-v3",
+        "conversion": "bash-conversation-text-only-selective-loss-v4",
     }

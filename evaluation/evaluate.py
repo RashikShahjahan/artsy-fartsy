@@ -31,6 +31,7 @@ def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
     for spec in specs:
         level = spec.get("difficulty", "unspecified")
         group = groups.setdefault(level, {"completed": 0, "render_valid": 0,
+            "expected_refusals": 0, "refusal_correct": 0,
             "previews_observed": 0, "initial_execution_failures": 0,
             "revisions_attempted": 0, "execution_recoveries": 0})
         for epoch in range(1, epochs + 1):
@@ -42,11 +43,17 @@ def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
             trajectory = result.get("trajectory") or {}
             group["completed"] += 1
             group["render_valid"] += int(bool(scores.get("render_valid")))
+            if spec.get("kind") == "refusal":
+                group["expected_refusals"] += 1
+                group["refusal_correct"] += int(bool(result.get("refusalCorrect")))
             group["previews_observed"] += int(trajectory.get("initialRenderValid") is not None)
             group["initial_execution_failures"] += int(trajectory.get("initialRenderValid") is False)
             group["revisions_attempted"] += int(bool(trajectory.get("revisionAttempted")))
             group["execution_recoveries"] += int(bool(trajectory.get("executionRecovered")))
     for group in groups.values():
+        group["refusal_success_rate"] = (
+            group["refusal_correct"] / group["expected_refusals"]
+            if group["expected_refusals"] else None)
         group["render_rate"] = (group["render_valid"] / group["completed"]
                                 if group["completed"] else None)
         group["execution_recovery_rate"] = (
@@ -84,6 +91,7 @@ def main() -> int:
             "correctness_judge_model": args.correctness_judge_model,
             "safety_judge_model": args.safety_judge_model,
             "mode": "execution-only" if args.execution_only else "full",
+            "refusal_prompts": sum(s.get("kind") == "refusal" for s in selected),
             "difficulty_counts": {level: sum(s.get("difficulty", "unspecified") == level for s in selected)
                                   for level in sorted({s.get("difficulty", "unspecified") for s in selected})},
             "ids": [s["id"] for s in selected]}

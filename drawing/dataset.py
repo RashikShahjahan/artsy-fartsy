@@ -18,7 +18,7 @@ from .judges import (
 )
 from .dataset_specs import compact_json, sha256, validate_specs
 
-DATASET_VERSION = "artsy-dataset-v3"
+DATASET_VERSION = "artsy-dataset-v4"
 EVALUATOR_VERSION = JUDGE_VERSION
 
 
@@ -78,6 +78,27 @@ def _pixel_hash(png: bytes) -> str:
     from PIL import Image
     image = Image.open(io.BytesIO(png)).convert("RGBA")
     return sha256(f"{image.width}x{image.height}:".encode() + image.tobytes())
+
+
+def _refusal_candidate(spec: dict[str, Any], api_doc: str, config: dict[str, Any]) -> dict[str, Any]:
+    """A prompt-writer-authored refusal pair; no unsafe program is executed."""
+    return {
+        "version": DATASET_VERSION,
+        "id": f"{spec['id']}-c0",
+        "spec": spec,
+        "candidate": 0,
+        "status": "accepted",
+        "reason": "Authored harmful-request refusal target; human audit recommended",
+        "refusal": spec["refusal"],
+        "generation": {"initialDraft": "authored_refusal"},
+        "refusalSource": "prompt_plan",
+        "trace": [],
+        "evaluations": [],
+        "artifacts": {},
+        "runtimeVersion": config["runtimeVersion"],
+        "apiDocHash": sha256(api_doc),
+        "humanReviewed": False,
+    }
 
 
 async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, api_doc: str) -> dict[str, Any]:
@@ -285,7 +306,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             hashes = [[name, sha256((Path(directory) / "records" / name).read_bytes())] for name in names]
             draft_sources.append({"directory": os.path.relpath(Path(directory).resolve(), output), "recordsHash": sha256(compact_json(hashes))})
         config = options.get("config") or _default_config()
-        teacher = _provenance(options["teacher"])
+        teacher = _provenance(options["teacher"]) if options.get("teacher") else None
         manifest: dict[str, Any] = {"version": DATASET_VERSION, "promptVersion": "artsy-specs-v1", "specs": specs,
             "candidates": candidates, "repairs": repairs, "maxTokens": max_tokens, "threshold": threshold,
             "teacher": teacher,
@@ -310,14 +331,18 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
 
         async def process_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
             saved_records = []
-            for index in range(candidates):
+            candidate_count = 1 if spec.get("kind") == "refusal" else candidates
+            for index in range(candidate_count):
                 path = records_path / f"{spec['id']}-c{index}.json"
                 saved_records.append(json.loads(path.read_text(encoding="utf-8")) if path.exists() else None)
             out: list[dict[str, Any]] = []
             for index, saved in enumerate(saved_records):
                 filename = f"{spec['id']}-c{index}.json"
                 retry = saved and saved.get("status") == "infrastructure_error" and options.get("retryErrors")
-                record = saved if saved and not retry else await _candidate({**options, "output": str(output)}, spec, index, api_doc)
+                record = saved if saved and not retry else (
+                    _refusal_candidate(spec, api_doc, config) if spec.get("kind") == "refusal"
+                    else await _candidate({**options, "output": str(output)}, spec, index, api_doc)
+                )
                 if retry:
                     record["previousAttempts"] = [*(saved.get("previousAttempts", [])), {k: v for k, v in saved.items() if k != "previousAttempts"}]
                 if record.get("id") != f"{spec['id']}-c{index}" or record.get("spec") != spec:
@@ -357,6 +382,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         count = len(records)
         summary = {"version": DATASET_VERSION, "prompts": len(specs), "candidates": count,
             "accepted": sum(r["status"] == "accepted" for r in records), "review": sum(r["status"] == "review" for r in records),
+            "refusalPairs": sum(r["spec"].get("kind") == "refusal" and r["status"] == "accepted" for r in records),
             "rejected": sum(r["status"] == "rejected" for r in records), "infrastructureErrors": sum(r["status"] == "infrastructure_error" for r in records),
             "requests": len(completions), "promptTokens": sum(c.get("usage", {}).get("prompt_tokens", 0) for c in completions),
             "completionTokens": sum(c.get("usage", {}).get("completion_tokens", 0) for c in completions),

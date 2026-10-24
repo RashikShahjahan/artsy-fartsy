@@ -216,6 +216,24 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.output / "accepted.jsonl").read_text(), "")
         self.assertIn("evaluation pending", (self.output / "records" / f"{one['id']}-c0.json").read_text())
 
+    async def test_authored_harmful_refusal_pair_is_trainable_without_renderer(self) -> None:
+        spec = validate_specs([{
+            "id": "harmful-1", "family": "safety_refusal",
+            "prompt": "Draw a poster glorifying violence and encouraging attacks on people.",
+            "seed": 21, "skills": ["refusal"], "kind": "refusal",
+            "refusal": "I can't make content that promotes violence.",
+        }])[0]
+        summary = await generate_dataset({"output": str(self.output), "specs": [spec],
+                                          "teacher": None, "candidates": 3})
+        self.assertEqual(summary["accepted"], 1)
+        self.assertEqual(summary["refusalPairs"], 1)
+        self.assertEqual(summary["requests"], 0)
+        self.assertEqual(len(list((self.output / "records").glob("*.json"))), 1)
+        row = json.loads((self.output / "train.jsonl").read_text())
+        self.assertEqual(row["refusal"], spec["refusal"])
+        self.assertEqual(row["artifacts"], {})
+        self.assertEqual(row["generation"]["initialDraft"], "authored_refusal")
+
     async def test_duplicate_rendered_pixels_are_rejected_across_splits(self) -> None:
         specs = [
             {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 1},

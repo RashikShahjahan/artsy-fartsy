@@ -11,7 +11,8 @@ from typing import Any
 
 HELP = """Python dataset generation
   --output DIR          Dataset directory (default: datasets/pilot)
-  --count N             Number of prompts (default: 20)
+  --count N             Total number of prompts (default: 20)
+  --harmful-count N     Refusal-worthy prompt/target pairs within the total (default: 0)
   --difficulty LEVEL    mixed (default), easy, medium, hard, or very-hard
   --seed N              Taxonomy/slot seed (default: 42; prompt text is model-generated)
   --input FILE          Custom JSONL specs instead of the built-in curriculum
@@ -73,6 +74,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False, usage=HELP.splitlines()[0])
     parser.add_argument("--output")
     parser.add_argument("--count")
+    parser.add_argument("--harmful-count", default="0")
     parser.add_argument("--difficulty", default="mixed")
     parser.add_argument("--seed", default="42")
     parser.add_argument("--input")
@@ -125,8 +127,11 @@ async def main(argv: list[str] | None = None) -> int:
         raise ValueError("difficulty must be mixed, easy, medium, hard, or very-hard")
     seed = int(args.seed)
     count = int(args.count) if args.count is not None else 20
+    harmful_count = int(args.harmful_count)
     if count < 1:
         raise ValueError("count must be positive")
+    if not 0 <= harmful_count <= count:
+        raise ValueError("--harmful-count must be between zero and --count")
     output = args.output or "datasets/pilot"
     model = args.teacher_model or os.getenv("ARTSY_TEACHER_MODEL")
     base_url = args.teacher_url or os.getenv("ARTSY_TEACHER_URL") or "http://127.0.0.1:8080/v1"
@@ -134,13 +139,15 @@ async def main(argv: list[str] | None = None) -> int:
     prompt_url = args.prompt_url or os.getenv("ARTSY_PROMPT_URL") or base_url
     prompt_config = {
         "version": GENERATOR_VERSION,
-        "count": count, "difficulty": args.difficulty,
+        "count": count, "harmfulCount": harmful_count, "difficulty": args.difficulty,
         "seed": seed, "model": prompt_model, "baseUrl": prompt_url,
         "batchSize": int(args.prompt_batch_size), "maxTokens": int(args.prompt_max_tokens),
         "retries": int(args.prompt_retries),
     }
     prompt_generation = None
     if args.input:
+        if harmful_count:
+            raise ValueError("--harmful-count cannot be used with --input; include refusal pairs in the input file")
         specs = validate_specs(_read_specs(args.input))
     else:
         if not prompt_model:
@@ -162,7 +169,7 @@ async def main(argv: list[str] | None = None) -> int:
             prompt_client = chat_client({"model": prompt_model, "baseUrl": prompt_url,
                 "apiKey": prompt_key, "timeoutMs": int(args.timeout_ms)})
             generated = await generate_llm_prompts(prompt_client, count, seed,
-                difficulty=args.difficulty,
+                difficulty=args.difficulty, harmful_count=harmful_count,
                 batch_size=prompt_config["batchSize"],
                 max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"])
             specs = generated["specs"]
@@ -177,8 +184,8 @@ async def main(argv: list[str] | None = None) -> int:
             row = {key: value for key, value in spec.items() if key != "split"}
             print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
         return 0
-    if not model:
-        raise ValueError("Set --teacher-model or ARTSY_TEACHER_MODEL to your stronger teacher model")
+    if not model and any(spec.get("kind") != "refusal" for spec in specs):
+        raise ValueError("Set --teacher-model or ARTSY_TEACHER_MODEL for drawing solutions")
     image_observations = bool(args.image_observations)
     correctness_model = args.correctness_judge_model or os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL")
     safety_model = args.safety_judge_model or os.getenv("ARTSY_SAFETY_JUDGE_MODEL")
@@ -196,7 +203,7 @@ async def main(argv: list[str] | None = None) -> int:
     timeout_ms = int(args.timeout_ms)
     if timeout_ms < 1 or timeout_ms > 300_000:
         raise ValueError("timeout-ms must be an integer from 1 to 300000")
-    teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms})
+    teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms}) if model else None
     correctness_judge = chat_client({
         "model": correctness_model, "baseUrl": correctness_url,
         "apiKey": os.getenv("ARTSY_CORRECTNESS_JUDGE_API_KEY")

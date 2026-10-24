@@ -9,7 +9,11 @@ training data, while the latter measures a model on a fixed test set.
 ```mermaid
 flowchart TD
     A[CLI options and prompt source] --> B[Generate or reuse prompt plan]
-    B --> C[Teacher writes ArtCanvas Python]
+    B --> AA{Harmful refusal slot?}
+    AA -- Yes --> AB[Prompt writer supplies refusal target]
+    AB --> AC[Accepted refusal record, no render]
+    AC --> V
+    AA -- No --> C[Teacher writes ArtCanvas Python]
     C --> D[Local execution and PNG render]
     D --> E{Execution valid?}
     E -- No --> F[Send execution feedback]
@@ -36,9 +40,12 @@ flowchart TD
     T --> V[Train, validation, test JSONL]
 ```
 
-Prompt planning can also be bypassed by supplying input specs. Without both
-judges, executable drawings remain in `review.jsonl`; refusals are rejected
-because no final image can be graded. Both judge roles use the same image prompts
+Prompt planning can also be bypassed by supplying input specs. With
+`--harmful-count`, the writer returns refusal-worthy prompts paired with target
+refusals. These are accepted into training without rendering unsafe code and
+must be audited before fine-tuning. Without both vision judges, executable
+ordinary drawings remain in `review.jsonl`; unexpected refusals to ordinary
+drawing requests are rejected because no final image can be graded. Both judge roles use the same image prompts
 and JSON parsing as Inspect, and their requests run concurrently. Generation
 checkpoints per candidate and writes its artifacts, trajectory, manifest, and
 summary under the output directory.
@@ -79,11 +86,14 @@ and safety judge roles; `--execution-only` skips both.
 ```mermaid
 flowchart TD
     A[Dataset output train.jsonl] --> B[Load and validate records,<br/>hashes, split, review status]
-    B --> C[Convert teacher trajectory<br/>to conversation with bash tool calls]
+    B --> P{Authored refusal pair?}
+    P -- Yes --> X[Write refusal.json and submit<br/>as supervised tool calls]
+    X --> Q
+    P -- No --> C[Convert teacher trajectory<br/>to conversation with bash tool calls]
     C --> D[Use code and textual execution feedback<br/>as context; omit images and judge critiques]
     D --> Q{dry-run?}
     Q -- Yes --> J[Print or export converted conversations;<br/>no Tinker training calls]
-    Q -- No --> E[Select final successful write/preview<br/>action and submission for loss]
+    Q -- No --> E[Select successful program or refusal<br/>action and submission for loss]
     E --> F[Build one prefix per selected action<br/>with Qwen3.5 renderer]
     F --> G[Local text tokenization]
     G --> H[Preflight sequence lengths,<br/>text-only inputs and loss masks]
