@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import re
+import urllib.error
 from typing import Any, Callable
 
 from .dataset_client import parse_json_reply
@@ -197,9 +198,9 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
                         on_record(record)
                     accepted[index] = record
                 return
-            except (ValueError, KeyError, TypeError, RuntimeError) as error:
+            except (ValueError, KeyError, TypeError, RuntimeError, urllib.error.URLError) as error:
                 failure = str(error)
-                if isinstance(error, RuntimeError) and attempt < retries:
+                if isinstance(error, (RuntimeError, urllib.error.URLError)) and attempt < retries:
                     await asyncio.sleep(min(2 ** (attempt - 1), 8))
         raise ValueError(f"Could not generate valid prompt for slot {index} "
                          f"after {retries} attempts: {failure}")
