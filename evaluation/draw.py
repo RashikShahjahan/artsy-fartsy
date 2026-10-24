@@ -10,7 +10,8 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from inspect_ai import eval
 
-from .harness import BASE_MODEL, ROOT, drawing_task, inspect_swe_model_auth, model_from_env, model_url, sha256
+from .harness import (BASE_MODEL, ROOT, check_native_bridge, drawing_task,
+                      inspect_swe_model_auth, model_from_env, model_url, sha256)
 
 
 def main() -> int:
@@ -46,6 +47,7 @@ def main() -> int:
                 print(json.dumps(result, indent=2))
                 return 0
         parser.error("Episode is incomplete or its artifacts changed; choose a new --episode directory")
+    check_native_bridge(args.model)
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "episode.json").write_text(json.dumps(request, indent=2) + "\n")
     spec = {"id": "drawing", "prompt": prompt, "seed": args.seed}

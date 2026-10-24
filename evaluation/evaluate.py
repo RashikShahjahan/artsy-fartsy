@@ -14,7 +14,8 @@ from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import get_model
 
-from .harness import BASE_MODEL, ROOT, drawing_task, inspect_swe_model_auth, load_specs, model_from_env, model_url
+from .harness import (BASE_MODEL, ROOT, check_native_bridge, drawing_task,
+                      inspect_swe_model_auth, load_specs, model_from_env, model_url)
 
 
 def positive(value: str) -> int:
@@ -98,6 +99,7 @@ def main() -> int:
     if not args.execution_only and not (args.correctness_judge_model and args.safety_judge_model):
         parser.error("Full evaluation requires both --correctness-judge-model and --safety-judge-model "
                      "(or the corresponding ARTSY_*_JUDGE_MODEL variables); use --execution-only for render tests")
+    check_native_bridge(args.model)
     args.output.mkdir(parents=True, exist_ok=False)
 
     # Inspect records each role and its model calls in the evaluation log.
