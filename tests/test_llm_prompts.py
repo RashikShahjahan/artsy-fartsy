@@ -113,6 +113,27 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "harmful_count"):
             await generate_llm_prompts(client, count=3, harmful_count=4)
 
+    async def test_network_error_retries_only_the_affected_prompt(self) -> None:
+        class TransientFailure(PromptClient):
+            def __init__(self):
+                super().__init__()
+                self.failed_once = False
+                self.total_requests = 0
+
+            async def complete(self, messages: list[dict], max_tokens: int) -> dict:
+                self.total_requests += 1
+                slot = json.loads(messages[1]["content"])["slots"][0]
+                if slot["index"] == 1 and not self.failed_once:
+                    self.failed_once = True
+                    raise ConnectionError("Temporary provider failure")
+                return await super().complete(messages, max_tokens)
+
+        client = TransientFailure()
+        result = await generate_llm_prompts(client, count=3, batch_size=2, retries=3)
+        self.assertEqual(client.total_requests, 4)
+        self.assertEqual(result["batches"][1]["attempts"], 2)
+        self.assertEqual(len(result["specs"]), 3)
+
     async def test_difficulty_can_be_selected_without_repair_labels(self) -> None:
         hard = await generate_llm_prompts(PromptClient(), count=8, difficulty="hard")
         self.assertTrue(all(x["difficulty"] == "hard" for x in hard["specs"]))
