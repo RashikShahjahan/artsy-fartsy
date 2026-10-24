@@ -139,43 +139,19 @@ class ToolProtocolTest(unittest.TestCase):
 
 class CompletionTest(unittest.TestCase):
     def setUp(self):
-        import torch
         self.raw = tool_call("submit") + "<|im_end|>"
-        self.prompt_length = 3
-        self.template_options = None
-        self.template_messages = None
-        self.generation_options = None
-        owner = self
-
-        class Tokenizer:
-            eos_token_id = 248044
-
-            def apply_chat_template(self, messages, **kwargs):
-                owner.template_options = kwargs
-                owner.template_messages = messages
-                inputs = {"input_ids": torch.zeros((1, owner.prompt_length), dtype=torch.long)}
-                if any(isinstance(message["content"], list) and any(part["type"] == "image" for part in message["content"]) for message in messages):
-                    inputs["pixel_values"] = torch.ones((1, 3, 32, 32))
-                return inputs
-
-            def decode(self, tokens, **kwargs):
-                return owner.raw
-
-        class Model:
-            def generate(self, input_ids, **kwargs):
-                owner.generation_options = kwargs
-                return torch.cat([input_ids, torch.ones((1, 2), dtype=torch.long)], dim=1)
-
         self.state_patch = patch.object(app, "state")
         state = self.state_patch.start()
         self.addCleanup(self.state_patch.stop)
-        state.tokenizer, state.processor, state.model = Tokenizer(), Tokenizer(), Model()
+        state.backend = "tinker"
+        state.tinker.generate.return_value = (self.raw, 3, 2)
         self.body = {"model": MODEL_ID, "messages": [{"role": "user", "content": "Draw a circle"}], "tools": TOOLS}
 
-    def test_completion_uses_qwen_template_and_openai_tool_response(self):
+    def test_completion_uses_tinker_and_openai_tool_response(self):
         response = complete({**self.body, "max_tokens": MAX_TOKENS + 1})
-        self.assertFalse(self.template_options["enable_thinking"])
-        self.assertEqual(self.generation_options["max_new_tokens"], MAX_TOKENS)
+        messages, tools, budget, context = app.state.tinker.generate.call_args.args
+        self.assertEqual(messages, self.body["messages"])
+        self.assertEqual((tools, budget, context), (TOOLS, MAX_TOKENS, CONTEXT_WINDOW))
         choice = response["choices"][0]
         self.assertEqual(choice["finish_reason"], "tool_calls")
         self.assertEqual(choice["message"]["tool_calls"][0]["function"], {"name": "submit", "arguments": "{}"})
@@ -184,12 +160,12 @@ class CompletionTest(unittest.TestCase):
 
     def test_malformed_call_is_returned_as_text(self):
         self.raw = tool_call("run_code") + '<tool_call>\n<function=submit>'
+        app.state.tinker.generate.return_value = (self.raw, 3, 2)
         choice = complete(self.body)["choices"][0]
         self.assertEqual(choice["message"]["content"], self.raw)
         self.assertNotIn("tool_calls", choice["message"])
 
     def test_tinker_preserves_images_tool_calls_and_usage(self):
-        app.state.backend = "tinker"
         app.state.tinker.generate.return_value = (tool_call("submit"), 123, 12)
         response = complete({**self.body, "messages": [
             {"role": "developer", "content": "Draw with tools."},
@@ -220,15 +196,15 @@ class CompletionTest(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             complete({**self.body, "model": "LiquidAI/LFM2.5-230M"})
         self.assertEqual(error.exception.status_code, 400)
-        self.prompt_length = CONTEXT_WINDOW
+        app.state.tinker.generate.side_effect = ValueError("Context exceeds model capacity")
         with self.assertRaises(HTTPException) as error:
             complete(self.body)
         self.assertEqual(error.exception.status_code, 400)
 
     def test_image_input_is_passed_to_model_generation(self):
         response = complete({**self.body, "messages": [{"role": "user", "content": [inline_image(), {"type": "text", "text": "Describe"}]}]})
-        self.assertIn("pixel_values", self.generation_options)
-        self.assertEqual(self.template_messages[0]["content"][0]["image"].getpixel((0, 0)), (0, 0, 255))
+        messages = app.state.tinker.generate.call_args.args[0]
+        self.assertEqual(messages[0]["content"][0]["image"].getpixel((0, 0)), (0, 0, 255))
         self.assertEqual(response["model"], MODEL_ID)
 
     def test_bad_image_is_an_http_400(self):
@@ -238,9 +214,8 @@ class CompletionTest(unittest.TestCase):
 
     def test_invalid_chat_template_is_an_http_400(self):
         from jinja2 import TemplateError
-        with patch.object(app.state.processor, "apply_chat_template",
-                          side_effect=TemplateError("Unexpected message role.")), \
-             self.assertRaises(HTTPException) as error:
+        app.state.tinker.generate.side_effect = TemplateError("Unexpected message role.")
+        with self.assertRaises(HTTPException) as error:
             complete(self.body)
         self.assertEqual(error.exception.status_code, 400)
         self.assertEqual(error.exception.detail, "Unexpected message role.")

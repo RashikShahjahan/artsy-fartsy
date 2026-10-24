@@ -55,7 +55,7 @@ tool-call tags into OpenAI tool calls and uses
 the `qwen3_5_disable_thinking` renderer. It accepts inline base64 PNG previews
 and limits their visual-token resolution; the original preview is kept intact.
 Set `ARTSY_TINKER_MODEL_PATH` in `.env` to serve a `tinker://` sampler checkpoint.
-The local bridge is a development server, not a public API service.
+The local bridge is a development server, not a public API service.\nTinker is the only bundled inference backend; the retired MLX and local PyTorch paths\nare no longer installed or supported.
 
 **Do not set `ARTSY_MODEL_URL` to Tinker's beta OpenAI-compatible endpoint for
 Qwen3.5 vision evaluations.** That endpoint currently rejects image inputs for

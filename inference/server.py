@@ -4,13 +4,11 @@ import binascii
 import io
 import json
 import os
-import platform
 import re
 import time
 import uuid
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import asynccontextmanager
 from pathlib import Path
-from threading import Lock
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -21,7 +19,6 @@ from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
 CONTEXT_WINDOW = 32768
 MAX_TOKENS = 2048
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-lock = Lock()
 
 
 def parse_tools(text, tools=None):
@@ -124,26 +121,13 @@ def template_messages(messages):
 async def lifespan(app):
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parents[1] / ".env")
-    backend = os.getenv("ARTSY_BACKEND", "tinker")
-    if backend == "tinker":
-        from .tinker_backend import TinkerBackend
-        app.state.backend = "tinker"
-        app.state.tinker = TinkerBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE,
-                                        os.getenv("ARTSY_TINKER_MODEL_PATH") or None)
-        yield
-        return
-    if backend != "torch":
-        raise ValueError("ARTSY_BACKEND must be tinker or torch")
-    app.state.backend = "torch"
-    import torch
-    from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
-    torch.set_num_threads(min(8, os.cpu_count() or 1))
-    app.state.processor = AutoProcessor.from_pretrained(MODEL_ID, revision=MODEL_REVISION, size=IMAGE_SIZE)
-    app.state.tokenizer = app.state.processor.tokenizer
-    app.state.model = Qwen3_5ForConditionalGeneration.from_pretrained(
-        MODEL_ID, revision=MODEL_REVISION, dtype=torch.float32).eval()
+    if os.getenv("ARTSY_BACKEND", "tinker") != "tinker":
+        raise ValueError("ARTSY_BACKEND must be tinker")
+    from .tinker_backend import TinkerBackend
+    app.state.backend = "tinker"
+    app.state.tinker = TinkerBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE,
+                                    os.getenv("ARTSY_TINKER_MODEL_PATH") or None)
     yield
-
 
 app = FastAPI(lifespan=lifespan)
 
@@ -165,28 +149,12 @@ def complete(body: dict):
     if body.get("model") != MODEL_ID:
         raise HTTPException(400, "This server only serves " + MODEL_ID)
     budget = max(1, min(int(body.get("max_tokens") or MAX_TOKENS), MAX_TOKENS))
-    with nullcontext() if getattr(app.state, "backend", "torch") == "tinker" else lock:
-        try:
-            messages = template_messages(body["messages"])
-            if getattr(app.state, "backend", "torch") == "tinker":
-                raw, count, generated = app.state.tinker.generate(
-                    messages, body.get("tools"), budget, CONTEXT_WINDOW)
-            else:
-                import torch
-                tokenizer, processor, model = app.state.tokenizer, app.state.processor, app.state.model
-                with torch.inference_mode():
-                    inputs = processor.apply_chat_template(messages, tools=body.get("tools") or None,
-                        tokenize=True, add_generation_prompt=True, enable_thinking=False,
-                        return_tensors="pt", return_dict=True)
-                    count = inputs["input_ids"].shape[-1]
-                    if count + budget > CONTEXT_WINDOW:
-                        raise ValueError("Context exceeds model capacity")
-                    output = model.generate(**inputs, max_new_tokens=budget, do_sample=False,
-                                            pad_token_id=tokenizer.eos_token_id)
-                    raw = tokenizer.decode(output[0, count:], skip_special_tokens=False)
-                    generated = int(output.shape[-1] - count)
-        except (ValueError, TemplateError) as error:
-            raise HTTPException(400, str(error)) from error
+    try:
+        messages = template_messages(body["messages"])
+        raw, count, generated = app.state.tinker.generate(
+            messages, body.get("tools"), budget, CONTEXT_WINDOW)
+    except (ValueError, TemplateError) as error:
+        raise HTTPException(400, str(error)) from error
     try:
         text, calls = parse_tools(raw, body.get("tools"))
     except (ValueError, SyntaxError):
