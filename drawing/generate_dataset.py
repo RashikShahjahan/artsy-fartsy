@@ -13,6 +13,7 @@ HELP = """Python dataset generation
   --output DIR          Dataset directory (default: datasets/pilot)
   --count N             Total number of prompts (default: 20)
   --harmful-count N     Refusal-worthy prompt/target pairs within the total (default: 0)
+  --eval-count N        Reserve exactly N prompts for Inspect evaluation (default: 0)
   --difficulty LEVEL    mixed (default), easy, medium, hard, or very-hard
   --seed N              Taxonomy/slot seed (default: 42; prompt text is model-generated)
   --input FILE          Custom JSONL specs instead of the built-in curriculum
@@ -35,7 +36,7 @@ HELP = """Python dataset generation
   --safety-judge-model ID       Vision safety judge, or ARTSY_SAFETY_JUDGE_MODEL
   --safety-judge-url URL        Safety endpoint (defaults to teacher URL)
   --timeout-ms N        Per-request deadline (default: 60000)
-  --dry-run             LLM-generate prompt JSONL (no rendering, no split labels)
+  --dry-run             LLM-generate prompt JSONL (split labels if --eval-count is set)
   --retry-errors        Retry checkpointed infrastructure failures on resume
   --help, -h            Show this help
 
@@ -75,6 +76,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output")
     parser.add_argument("--count")
     parser.add_argument("--harmful-count", default="0")
+    parser.add_argument("--eval-count", default="0")
     parser.add_argument("--difficulty", default="mixed")
     parser.add_argument("--seed", default="42")
     parser.add_argument("--input")
@@ -120,7 +122,7 @@ async def main(argv: list[str] | None = None) -> int:
         print(HELP)
         return 0
     _load_env_file()
-    from .dataset_specs import compact_json, sha256, validate_specs
+    from .dataset_specs import assign_holdout, compact_json, sha256, validate_specs
     from .llm_prompts import GENERATOR_VERSION, generate_llm_prompts
     from .dataset_client import chat_client
     if args.difficulty not in ("mixed", "easy", "medium", "hard", "very-hard"):
@@ -128,10 +130,13 @@ async def main(argv: list[str] | None = None) -> int:
     seed = int(args.seed)
     count = int(args.count) if args.count is not None else 20
     harmful_count = int(args.harmful_count)
+    eval_count = int(args.eval_count)
     if count < 1:
         raise ValueError("count must be positive")
     if not 0 <= harmful_count <= count:
         raise ValueError("--harmful-count must be between zero and --count")
+    if not args.input and not 0 <= eval_count < count:
+        raise ValueError("--eval-count must be between zero and count - 1")
     output = args.output or "datasets/pilot"
     model = args.teacher_model or os.getenv("ARTSY_TEACHER_MODEL")
     base_url = args.teacher_url or os.getenv("ARTSY_TEACHER_URL") or "http://127.0.0.1:8080/v1"
@@ -144,11 +149,15 @@ async def main(argv: list[str] | None = None) -> int:
         "batchSize": int(args.prompt_batch_size), "maxTokens": int(args.prompt_max_tokens),
         "retries": int(args.prompt_retries),
     }
+    if eval_count:
+        prompt_config["evalCount"] = eval_count
     prompt_generation = None
     if args.input:
         if harmful_count:
             raise ValueError("--harmful-count cannot be used with --input; include refusal pairs in the input file")
         specs = validate_specs(_read_specs(args.input))
+        if eval_count:
+            specs = assign_holdout(specs, eval_count, seed)
     else:
         if not prompt_model:
             raise ValueError("Set --prompt-model or ARTSY_PROMPT_MODEL (or a teacher model) to generate prompts")
@@ -172,7 +181,7 @@ async def main(argv: list[str] | None = None) -> int:
                 difficulty=args.difficulty, harmful_count=harmful_count,
                 batch_size=prompt_config["batchSize"],
                 max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"])
-            specs = generated["specs"]
+            specs = assign_holdout(generated["specs"], eval_count, seed) if eval_count else generated["specs"]
             if not args.dry_run:
                 Path(output).mkdir(parents=True, exist_ok=True)
                 from .dataset import _write_json
@@ -181,7 +190,7 @@ async def main(argv: list[str] | None = None) -> int:
         prompt_generation = {**prompt_config, "specsHash": sha256(compact_json(specs))}
     if args.dry_run:
         for spec in specs:
-            row = {key: value for key, value in spec.items() if key != "split"}
+            row = spec if eval_count else {key: value for key, value in spec.items() if key != "split"}
             print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
         return 0
     if not model and any(spec.get("kind") != "refusal" for spec in specs):
@@ -222,7 +231,7 @@ async def main(argv: list[str] | None = None) -> int:
         "retryErrors": args.retry_errors, "imageObservations": image_observations,
         "draftsFrom": args.drafts_from, "teacher": teacher,
         "correctnessJudge": correctness_judge, "safetyJudge": safety_judge,
-        "promptGenerator": prompt_generation,
+        "promptGenerator": prompt_generation, "heldoutEval": bool(eval_count),
         "onRecord": lambda record: print(f"{record['id']} {record['status']}: {record['reason']}", file=sys.stderr)}
     from .dataset import generate_dataset
     summary = await generate_dataset({**options, "specs": specs})
