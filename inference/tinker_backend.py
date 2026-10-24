@@ -21,7 +21,6 @@ class TinkerBackend:
 
     def render(self, messages, tools):
         from tinker_cookbook.renderers import ToolCall
-        from transformers.models.qwen3_vl.image_processing_qwen3_vl import smart_resize
 
         native = []
         for original in messages:
@@ -30,6 +29,10 @@ class TinkerBackend:
                 parts = []
                 for part in message["content"]:
                     if part["type"] == "image":
+                        # Qwen3-VL reuses the Qwen2-VL image resize utility;
+                        # transformers 5.x does not ship image_processing_qwen3_vl.
+                        # Import only for images so text/tool requests stay independent.
+                        from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
                         image = part["image"]
                         height, width = smart_resize(
                             image.height, image.width,
