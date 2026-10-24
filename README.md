@@ -1,6 +1,6 @@
 # Artsy drawing environment
 
-Qwen/Qwen3.5-0.8B → Mini SWE Agent → Python/ArtCanvas → PNG + editable source.
+Qwen/Qwen3.5-4B → Mini SWE Agent → Python/ArtCanvas → PNG + editable source.
 
 Includes the Qwen model adapter, a versioned drawing API, a model-independent
 episode environment, an Inspect SWE write → run → fix → submit loop, and a base-model evaluation script.
@@ -16,11 +16,14 @@ continue to execute locally and require Cairo. Run commands from the repository 
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r inference/requirements.lock -r drawing/requirements.txt
 
+# On Apple Silicon, also install the MLX backend (the default on macOS):
+uv pip install --python .venv/bin/python -r inference/requirements-mlx.txt
+
 # Inspect has separate dependency constraints from the inference server.
 uv venv --python 3.12 .eval-venv
 uv pip install --python .eval-venv/bin/python -r evaluation/requirements.txt -r runtime/requirements.txt
 
-# Starts a loopback-only server; the first start downloads Qwen3.5-0.8B.
+# Starts a loopback-only server; the first start downloads Qwen3.5-4B.
 HF_HOME="$PWD/.cache/huggingface" make serve
 ```
 
@@ -41,7 +44,8 @@ requests require a new episode directory. There is no Pi SQLite session or autom
 interrupted-session resume. Only one process should own an episode directory.
 
 `ARTSY_MODEL_URL` can point to another OpenAI-compatible serving endpoint, using
-the same model identifier and tool-call support. The bundled CPU server translates
+the same model identifier and tool-call support. The bundled server uses MLX on
+Apple Silicon Macs and PyTorch elsewhere, and translates
 Qwen's function/parameter tool-call tags into the OpenAI tool protocol. Tool
 arguments are decoded as data; the bridge never evaluates generated expressions.
 It loads the full vision-language model at a pinned revision, with thinking
@@ -49,7 +53,8 @@ disabled. Image inputs use OpenAI `image_url` blocks containing inline base64
 image data URLs. Images are decoded with Pillow and resized to at most 1,024
 visual tokens (about one megapixel); original preview files retain their resolution.
 Requests are serialized and capped at 2,048 generated tokens and a
-32,768-token context to bound CPU inference, below Qwen's native context capacity.
+32,768-token context to bound inference, below Qwen's native context capacity.
+Set `ARTSY_BACKEND=torch` to select the CPU backend explicitly.
 This is a small development server, not a public API service.
 
 ## Drawing API
@@ -153,9 +158,9 @@ cross-platform pixel identity is not guaranteed.
 
 The drawing CLI and evaluation use the same Inspect SWE Mini SWE harness, model
 endpoint, API documentation, limits, and fresh final-render scorer.
-The checked-in `evaluation/prompts.jsonl` contains eight new test specifications
-covering overlap, repeated layouts, dashes, rounded shapes, gradients, curves,
-transforms, and sectors. Keep these out of SFT data; the old pilot splits were
+The checked-in `evaluation/prompts.jsonl` contains twenty test specifications,
+with five each at easy, medium, hard, and very-hard difficulty, covering landscapes,
+flowers, grids, houses, and interlinked rings. Keep these out of SFT data; the old pilot splits were
 partly consumed by warmup selection. This small suite is a smoke baseline, not a
 calibrated benchmark or a claim of template-family separation from training.
 
@@ -179,11 +184,13 @@ export ARTSY_SAFETY_JUDGE_URL=http://127.0.0.1:9002/v1
 ```
 
 Set `ARTSY_MODEL_URL` and optionally `ARTSY_MODEL_API_KEY` to select a different
-chat-completions endpoint. The Inspect SWE bridge temporarily supplies this model
+chat-completions endpoint. The drawing and evaluation CLIs load settings from the
+repository's `.env` before reading model and judge defaults; exported variables take
+precedence. The Inspect SWE bridge temporarily supplies this model
 key (or `local-no-auth` for the bundled server) when recreating the OpenAI-compatible
 client, then restores `OPENAI_API_KEY`. A real OpenAI key is not needed to evaluate
-local Qwen. `--model` overrides the default `Qwen/Qwen3.5-0.8B`.
-Runs use one sample at a time to match the bundled serialized CPU server.
+local Qwen. `--model` overrides the default `Qwen/Qwen3.5-4B`.
+Runs use one sample at a time to match the bundled serialized model server.
 Use a fresh output directory for every run. The first run builds the Docker image.
 
 `render_valid` checks code execution and a valid PNG of the expected dimensions.

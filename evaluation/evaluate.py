@@ -9,7 +9,9 @@ import json
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from inspect_ai import eval
+from inspect_ai.log import read_eval_log
 from inspect_ai.model import get_model
 
 from .harness import BASE_MODEL, ROOT, drawing_task, inspect_swe_model_auth, load_specs, model_from_env
@@ -56,6 +58,8 @@ def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
 
 
 def main() -> int:
+    # Read endpoint/judge settings before constructing defaults and model clients.
+    load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=ROOT / "evaluation/prompts.jsonl")
     parser.add_argument("--model", default=os.getenv("ARTSY_MODEL", BASE_MODEL), help="Model ID served by ARTSY_MODEL_URL")
@@ -115,6 +119,9 @@ def main() -> int:
             model=model_from_env(args.model), model_roles=roles,
             log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=1,
         )
+    # An interrupted eval can return headers without its completed samples.
+    # Reload the finalized files so partial runs retain their scores and errors.
+    logs = [read_eval_log(log.location) if Path(log.location).is_file() else log for log in logs]
     samples = [sample for log in logs for sample in (log.samples or [])]
     errors = sum(sample.error is not None for sample in samples)
     summary = {**plan, "completed_samples": len(samples), "sample_errors": errors,

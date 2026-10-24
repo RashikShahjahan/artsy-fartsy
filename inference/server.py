@@ -4,6 +4,7 @@ import binascii
 import io
 import json
 import os
+import platform
 import re
 import time
 import uuid
@@ -12,13 +13,13 @@ from threading import Lock
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
+from jinja2 import TemplateError
 
-MODEL_ID = "Qwen/Qwen3.5-0.8B"
-MODEL_REVISION = "2fc06364715b967f1860aea9cf38778875588b17"
+from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
+
 CONTEXT_WINDOW = 32768
 MAX_TOKENS = 2048
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-IMAGE_SIZE = {"shortest_edge": 256 * 256, "longest_edge": 1024 * 1024}
 lock = Lock()
 
 
@@ -90,6 +91,10 @@ def template_messages(messages):
     result = []
     for original in messages:
         message = dict(original)
+        # OpenAI-compatible clients may send instructions as `developer`.
+        # Qwen's template uses `system` for the same instruction role.
+        if message.get("role") == "developer":
+            message["role"] = "system"
         content = message.get("content") or ""
         if isinstance(content, list):
             parts = []
@@ -116,6 +121,17 @@ def template_messages(messages):
 
 @asynccontextmanager
 async def lifespan(app):
+    apple_silicon = platform.system() == "Darwin" and platform.machine() == "arm64"
+    backend = os.getenv("ARTSY_BACKEND", "mlx" if apple_silicon else "torch")
+    if backend == "mlx":
+        from .mlx_backend import MLXBackend
+        app.state.backend = "mlx"
+        app.state.mlx = MLXBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE)
+        yield
+        return
+    if backend != "torch":
+        raise ValueError("ARTSY_BACKEND must be mlx or torch")
+    app.state.backend = "torch"
     import torch
     from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
     torch.set_num_threads(min(8, os.cpu_count() or 1))
@@ -131,7 +147,8 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 def health():
-    return {"model": MODEL_ID, "revision": MODEL_REVISION, "ready": True, "input": ["text", "image"]}
+    return {"model": MODEL_ID, "revision": MODEL_REVISION, "ready": True,
+            "backend": app.state.backend, "input": ["text", "image"]}
 
 
 @app.get("/v1/models")
@@ -141,24 +158,31 @@ def models():
 
 @app.post("/v1/chat/completions")
 def complete(body: dict):
-    import torch
     if body.get("model") != MODEL_ID:
         raise HTTPException(400, "This server only serves " + MODEL_ID)
     budget = max(1, min(int(body.get("max_tokens") or MAX_TOKENS), MAX_TOKENS))
-    tokenizer, processor, model = app.state.tokenizer, app.state.processor, app.state.model
-    with lock, torch.inference_mode():
+    with lock:
         try:
-            inputs = processor.apply_chat_template(template_messages(body["messages"]), tools=body.get("tools") or None,
-                                                   tokenize=True, add_generation_prompt=True, enable_thinking=False,
-                                                   return_tensors="pt", return_dict=True)
-        except ValueError as error:
+            messages = template_messages(body["messages"])
+            if getattr(app.state, "backend", "torch") == "mlx":
+                raw, count, generated = app.state.mlx.generate(
+                    messages, body.get("tools"), budget, CONTEXT_WINDOW)
+            else:
+                import torch
+                tokenizer, processor, model = app.state.tokenizer, app.state.processor, app.state.model
+                with torch.inference_mode():
+                    inputs = processor.apply_chat_template(messages, tools=body.get("tools") or None,
+                        tokenize=True, add_generation_prompt=True, enable_thinking=False,
+                        return_tensors="pt", return_dict=True)
+                    count = inputs["input_ids"].shape[-1]
+                    if count + budget > CONTEXT_WINDOW:
+                        raise ValueError("Context exceeds model capacity")
+                    output = model.generate(**inputs, max_new_tokens=budget, do_sample=False,
+                                            pad_token_id=tokenizer.eos_token_id)
+                    raw = tokenizer.decode(output[0, count:], skip_special_tokens=False)
+                    generated = int(output.shape[-1] - count)
+        except (ValueError, TemplateError) as error:
             raise HTTPException(400, str(error)) from error
-        count = inputs["input_ids"].shape[-1]
-        if count + budget > CONTEXT_WINDOW:
-            raise HTTPException(400, "Context exceeds model capacity")
-        output = model.generate(**inputs, max_new_tokens=budget, do_sample=False,
-                                pad_token_id=tokenizer.eos_token_id)
-        raw = tokenizer.decode(output[0, count:], skip_special_tokens=False)
     try:
         text, calls = parse_tools(raw, body.get("tools"))
     except (ValueError, SyntaxError):
@@ -167,9 +191,9 @@ def complete(body: dict):
     message = {"role": "assistant", "content": text or None}
     if calls:
         message["tool_calls"] = calls
-    finish = "tool_calls" if calls else "length" if output.shape[-1] - count >= budget else "stop"
+    finish = "tool_calls" if calls else "length" if generated >= budget else "stop"
     common = {"id": "chatcmpl-" + uuid.uuid4().hex, "created": int(time.time()), "model": MODEL_ID}
-    usage = {"prompt_tokens": count, "completion_tokens": int(output.shape[-1] - count), "total_tokens": int(output.shape[-1])}
+    usage = {"prompt_tokens": count, "completion_tokens": generated, "total_tokens": count + generated}
     if not body.get("stream"):
         return {**common, "object": "chat.completion", "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage}
 
