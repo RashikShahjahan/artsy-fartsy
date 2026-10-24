@@ -276,6 +276,12 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
 
 async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     specs = validate_specs(options["specs"])
+    heldout_eval = bool(options.get("heldoutEval"))
+    eval_specs = [spec for spec in specs if spec["split"] == "test"] if heldout_eval else []
+    render_specs = [spec for spec in specs if spec["split"] == "train"] if heldout_eval else specs
+    if heldout_eval and (not eval_specs or not render_specs or
+                         any(spec["split"] not in ("train", "test") for spec in specs)):
+        raise ValueError("Held-out evaluation requires train and test prompts only")
     output = Path(options["output"]).resolve()
     candidates, repairs = options.get("candidates", 2), options.get("repairs", 2)
     max_tokens, threshold, workers = options.get("maxTokens", 4096), options.get("threshold", 0.85), options.get("workers", 1)
@@ -319,12 +325,15 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             manifest["promptGenerator"] = options["promptGenerator"]
         if options.get("imageObservations"): manifest["imageObservations"] = True
         if draft_sources: manifest["draftSources"] = draft_sources
+        if heldout_eval: manifest["heldoutEval"] = True
         manifest_path = output / "manifest.json"
         if manifest_path.exists():
             previous = json.loads(manifest_path.read_text(encoding="utf-8"))
             if previous != manifest: raise ValueError("Dataset configuration changed; use a new output directory")
         else: _write_json(manifest_path, manifest)
         (output / "prompts.jsonl").write_text("".join(compact_json(s) + "\n" for s in specs), encoding="utf-8")
+        if heldout_eval:
+            _write_jsonl_atomic(output / "eval-prompts.jsonl", eval_specs)
         records_path = output / "records"; records_path.mkdir(parents=True, exist_ok=True)
         records: list[dict[str, Any]] = []
         seen_source: dict[str, str] = {}; seen_pixels: dict[str, str] = {}
@@ -360,18 +369,34 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
                 if callback: callback(record)
             return out
 
-        for offset in range(0, len(specs), workers):
-            # Parallelism is bounded by independent specifications, matching TS batching.
-            batch = await asyncio.gather(*(process_spec(s) for s in specs[offset:offset + workers]), return_exceptions=True)
+        for offset in range(0, len(render_specs), workers):
+            # Held-out prompts never reach the teacher or renderer.
+            batch = await asyncio.gather(*(process_spec(s) for s in render_specs[offset:offset + workers]), return_exceptions=True)
             error = next((result for result in batch if isinstance(result, BaseException)), None)
             if error: raise error
             for group in batch: records.extend(group)
         order = {s["id"]: i for i, s in enumerate(specs)}
         records.sort(key=lambda r: (order[r["spec"]["id"]], r["candidate"]))
+        selected_train = [r for r in records if r["status"] == "accepted" and r["spec"]["split"] == "train"]
+        if heldout_eval:
+            # One SFT example per prompt, even when several teacher candidates passed.
+            best: dict[str, dict[str, Any]] = {}
+            def quality(record: dict[str, Any]) -> float:
+                for grade in reversed(record.get("evaluations", [])):
+                    result = (grade.get("correctness") or {}).get("result") or {}
+                    if isinstance(result.get("score"), (int, float)):
+                        return float(result["score"])
+                return 0.0
+            for record in selected_train:
+                key = record["spec"]["id"]
+                if key not in best or quality(record) > quality(best[key]):
+                    best[key] = record
+            selected_train = sorted(best.values(), key=lambda r: order[r["spec"]["id"]])
         for name, rows in [("candidates", records), ("accepted", [r for r in records if r["status"] == "accepted"]),
                            ("review", [r for r in records if r["status"] == "review"]),
                            ("rejected", [r for r in records if r["status"] in ("rejected", "infrastructure_error")]),
-                           *[(split, [r for r in records if r["status"] == "accepted" and r["spec"]["split"] == split]) for split in ("train", "validation", "test")]]:
+                           ("train", selected_train),
+                           *[(split, [r for r in records if r["status"] == "accepted" and r["spec"]["split"] == split]) for split in ("validation", "test")]]:
             _write_jsonl_atomic(output / f"{name}.jsonl", rows)
         completions = []
         for record in records:
@@ -389,6 +414,10 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             "requestsWithoutUsage": sum("usage" not in c for c in completions),
             "reusedDrafts": sum(any(t.get("reusedDraft") for t in r.get("trace", [])) for r in records),
             "acceptanceRate": sum(r["status"] == "accepted" for r in records) / count if count else float("nan")}
+        if heldout_eval:
+            summary.update(trainPrompts=len(render_specs), evaluationPrompts=len(eval_specs),
+                           selectedSftExamples=len(selected_train),
+                           sftShortfall=len(render_specs) - len(selected_train))
         _write_json(output / "summary.json", summary)
         return summary
     finally:
