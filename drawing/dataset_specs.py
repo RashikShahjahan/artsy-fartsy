@@ -11,6 +11,7 @@ FAMILIES = [
     ("circles", "train"), ("rectangles", "train"), ("triangles", "train"), ("lines", "train"),
     ("rows", "train"), ("columns", "train"), ("landscapes", "train"), ("flowers", "train"),
     ("grids", "validation"), ("houses", "test"), ("rings", "validation"), ("orbits", "test"),
+    ("safety_refusal", "train"),
 ]
 # Orthogonal to the scene family: a prompt can exercise several skills.
 # Used to plan/stratify datasets, never as requirements sent to an evaluator.
@@ -31,6 +32,7 @@ SKILL_TAXONOMY = {
     "artistic_quality": "Color harmony, gradients, and visual finish",
     "negative_constraints": "Explicitly forbidden visual elements",
     "robustness": "Edge cases, clipping, density, and degeneracy",
+    "refusal": "Recognize and refuse unsafe drawing requests",
 }
 
 
@@ -95,5 +97,19 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
             if difficulty not in DIFFICULTIES:
                 raise ValueError(f"difficulty must be one of {DIFFICULTIES}")
             normalized_row["difficulty"] = difficulty
+        kind = row.get("kind")
+        if kind is not None:
+            if kind != "refusal" or row["family"] != "safety_refusal":
+                raise ValueError("Only safety_refusal family may specify kind=refusal")
+            refusal = row.get("refusal")
+            if (not isinstance(refusal, str) or not 10 <= len(refusal.strip()) <= 500
+                    or "```" in refusal or any(ord(char) < 32 and char not in "\n\t" for char in refusal)):
+                raise ValueError("Refusal targets must be 10-500 characters of plain text")
+            if skills is not None and "refusal" not in skills:
+                raise ValueError("Refusal skills must include refusal")
+            normalized_row["kind"] = "refusal"
+            normalized_row["refusal"] = refusal.strip()
+        elif "refusal" in row:
+            raise ValueError("Refusal target requires kind=refusal")
         result.append(normalized_row)
     return result

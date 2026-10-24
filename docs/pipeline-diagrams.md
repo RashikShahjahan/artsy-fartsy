@@ -8,45 +8,47 @@ training data, while the latter measures a model on a fixed test set.
 
 ```mermaid
 flowchart TD
-    A[CLI options and prompt source] --> B{Prompt plan exists?}
-    B -- No --> C[Prompt-writing LLM<br/>taxonomy, skills, difficulty, seed]
-    B -- Yes --> D[Load saved prompt plan]
-    C --> E[Save prompts.jsonl and manifest]
-    D --> F[Specs]
-    E --> F
-    F --> G[Teacher LLM<br/>complete ArtCanvas Python or refusal]
-    G --> H[DrawingEnvironment<br/>local Python renderer and episode budgets]
-    H --> I{Execution succeeds?}
-    I -- No --> J[Send execution feedback to teacher]
-    J --> G
-    I -- Yes --> K{Vision judge configured?}
-    K -- Yes --> L[Judge rendered image against original prompt<br/>and assess safety]
-    L --> M{Safe, correct, score meets threshold?}
-    M -- No / uncertain --> N[Rejected or review]
-    M -- Yes --> O[Fresh submission render]
-    K -- No --> O
-    O --> P{Submission valid?}
-    P -- No --> J
-    P -- Yes --> Q{Judge configured?}
-    Q -- Yes --> R[Judge final submitted image]
-    R --> S{Safe, correct, score meets threshold?}
-    S -- Yes --> T[accepted]
+    A[CLI options and prompt source] --> B[Generate or reuse prompt plan]
+    B --> AA{Harmful refusal slot?}
+    AA -- Yes --> AB[Prompt writer supplies refusal target]
+    AB --> AC[Accepted refusal record, no render]
+    AC --> V
+    AA -- No --> C[Teacher writes ArtCanvas Python]
+    C --> D[Local execution and PNG render]
+    D --> E{Execution valid?}
+    E -- No --> F[Send execution feedback]
+    F --> C
+    E -- Yes --> G{Both judges configured?}
+    G -- No --> H[Fresh submission]
+    G -- Yes --> I[Correctness vision judge]
+    G -- Yes --> J[Independent safety vision judge]
+    I --> K{Score passes and image safe?}
+    J --> K
+    K -- Low score --> M[Send visual critique]
+    M --> C
+    K -- Harmful --> N[Reject]
+    K -- Pass --> H
+    H --> O{Fresh render valid?}
+    O -- No --> F
+    O -- Yes --> P{Both judges configured?}
+    P -- No --> Q[Review queue]
+    P -- Yes --> R[Rejudge final PNG with both roles]
+    R --> S{Score meets threshold and safe?}
+    S -- Yes --> T[Accept and deduplicate]
     S -- No --> N
-    Q -- No --> U[review: executable, not visually evaluated]
-    V[Refusal] --> W{Judge configured?}
-    W -- No --> U
-    W -- Yes --> X[Judge refusal safety and correctness]
-    X --> Y[accepted, review, or rejected]
-    T --> Z[Deduplicate source and rendered pixels]
-    Z --> AA[candidates.jsonl, accepted.jsonl,<br/>train.jsonl, validation.jsonl, test.jsonl]
-    N --> AA
-    U --> AA
+    U[Refusal] --> N
+    T --> V[Train, validation, test JSONL]
 ```
 
-Prompt planning can also be bypassed by supplying input specs. Without a judge,
-executable drawings and refusals remain in `review.jsonl`; they are not accepted
-automatically. Generation checkpoints per candidate and writes its artifacts,
-trajectory, manifest, and summary under the output directory.
+Prompt planning can also be bypassed by supplying input specs. With
+`--harmful-count`, the writer returns refusal-worthy prompts paired with target
+refusals. These are accepted into training without rendering unsafe code and
+must be audited before fine-tuning. Without both vision judges, executable
+ordinary drawings remain in `review.jsonl`; unexpected refusals to ordinary
+drawing requests are rejected because no final image can be graded. Both judge roles use the same image prompts
+and JSON parsing as Inspect, and their requests run concurrently. Generation
+checkpoints per candidate and writes its artifacts, trajectory, manifest, and
+summary under the output directory.
 
 ## Evaluation (`evaluation.evaluate`)
 
@@ -84,11 +86,14 @@ and safety judge roles; `--execution-only` skips both.
 ```mermaid
 flowchart TD
     A[Dataset output train.jsonl] --> B[Load and validate records,<br/>hashes, split, review status]
-    B --> C[Convert teacher trajectory<br/>to conversation with bash tool calls]
+    B --> P{Authored refusal pair?}
+    P -- Yes --> X[Write refusal.json and submit<br/>as supervised tool calls]
+    X --> Q
+    P -- No --> C[Convert teacher trajectory<br/>to conversation with bash tool calls]
     C --> D[Use code and textual execution feedback<br/>as context; omit images and judge critiques]
     D --> Q{dry-run?}
     Q -- Yes --> J[Print or export converted conversations;<br/>no Tinker training calls]
-    Q -- No --> E[Select final successful write/preview<br/>action and submission for loss]
+    Q -- No --> E[Select successful program or refusal<br/>action and submission for loss]
     E --> F[Build one prefix per selected action<br/>with Qwen3.5 renderer]
     F --> G[Local text tokenization]
     G --> H[Preflight sequence lengths,<br/>text-only inputs and loss masks]

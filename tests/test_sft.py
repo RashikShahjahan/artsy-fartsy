@@ -9,7 +9,7 @@ import unittest
 
 from PIL import Image
 
-from training.data import ROOT, SUBMIT, convert_record, digest, is_observed_repair, write_command
+from training.data import ROOT, SUBMIT, convert_record, digest, is_observed_repair, write_command, refusal_command
 
 
 class ConversionTests(unittest.TestCase):
@@ -47,6 +47,32 @@ class ConversionTests(unittest.TestCase):
         self.assertTrue(is_observed_repair(record))
         record["trace"] = record["trace"][-1:]
         self.assertFalse(is_observed_repair(record))
+
+    def test_authored_refusal_pair_trains_tool_call_and_submission(self):
+        target = "I can't generate imagery that encourages violence."
+        record = {
+            "id": "refusal-example",
+            "spec": {"family": "safety_refusal", "kind": "refusal",
+                     "prompt": "Create a violent propaganda poster.",
+                     "refusal": target, "seed": 9, "split": "train"},
+            "status": "accepted", "refusal": target, "refusalSource": "prompt_plan",
+            "runtimeVersion": "artcanvas-v2",
+            "apiDocHash": digest((ROOT / "docs/artcanvas.md").read_bytes()),
+            "trace": [], "artifacts": {},
+            "generation": {"initialDraft": "authored_refusal"},
+        }
+        example = convert_record(record, self.root)
+        targets = [example["messages"][i] for i in example["trainable_message_indices"]]
+        self.assertEqual(len(targets), 2)
+        command = targets[0]["tool_calls"][0]["function"]["arguments"]["command"]
+        self.assertIn("/workspace/refusal.json", command)
+        self.assertIn(target, command)
+        self.assertEqual(targets[1]["tool_calls"][0]["function"]["arguments"]["command"], SUBMIT)
+        self.assertNotIn(target, example["messages"][1]["content"][0]["text"])
+        broken = copy.deepcopy(record)
+        broken["refusal"] = "Modified refusal"
+        with self.assertRaisesRegex(ValueError, "invalid authored refusal"):
+            convert_record(broken, self.root)
 
     def test_one_conversation_supervises_only_success_and_submission(self):
         example = convert_record(self.record, self.root)
@@ -91,7 +117,7 @@ class ConversionTests(unittest.TestCase):
         summary = json.loads(output.getvalue())["summary"]
         self.assertEqual(summary["input_mode"], "text-only")
         self.assertEqual(summary["examples_with_images"], 0)
-        self.assertEqual(summary["conversion"], "bash-conversation-text-only-selective-loss-v3")
+        self.assertEqual(summary["conversion"], "bash-conversation-text-only-selective-loss-v4")
         example = json.loads(exported.read_text())
         self.assertEqual(len(example["trainable_message_indices"]), 2)
         self.assertTrue(all(part["type"] == "text" for msg in example["messages"] for part in msg["content"]))
@@ -240,7 +266,7 @@ class TinkerAPITests(unittest.TestCase):
                                              "weights": tinker.TensorData(data=[0.0, 1.0], dtype="float32", shape=[2])})
                 for token in (11, 21)]
         manifest = {"dataset_sha256": "dataset", "api_doc_sha256": "docs",
-                    "conversion": "bash-conversation-text-only-selective-loss-v3"}
+                    "conversion": "bash-conversation-text-only-selective-loss-v4"}
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp)
             args = parser().parse_args(["--dataset", "train.jsonl", "--output-dir", temp,
