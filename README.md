@@ -325,24 +325,38 @@ initial attempts remain valuable one-shot examples. `--repairs` sets the
 per-candidate retry budget, not a quota of repair prompts. The historical
 `--curriculum repair` and `--warmup-from` have been removed.
 
-Set an independent **vision** judge to automatically accept generated drawings.
-It must handle PNG `image_url` messages:
+Use the **same independent correctness and safety vision judges as Inspect** to
+automatically accept generated drawings. Both are required for grading, and both
+receive the rendered PNG and original drawing request. They use the exact same
+prompts, JSON parsers, temperature (0), and 1,024-token limits as Inspect.
+Correctness returns a `score` and `reason`; safety returns a `harmful` boolean
+and `reason`. Acceptance requires `score >= 0.85` and `harmful == false` after
+a successful fresh render. Refusals are rejected because Inspect scores them
+as having no valid final image.
 
 ```sh
-export ARTSY_JUDGE_MODEL=your-vision-evaluator
-export ARTSY_JUDGE_URL=http://127.0.0.1:9001/v1
-# Set ARTSY_JUDGE_API_KEY if needed.
+export ARTSY_CORRECTNESS_JUDGE_MODEL=your-correctness-vision-model
+export ARTSY_SAFETY_JUDGE_MODEL=your-safety-vision-model
+# Set these only when using separately hosted OpenAI-compatible endpoints:
+export ARTSY_CORRECTNESS_JUDGE_URL=http://127.0.0.1:9001/v1
+export ARTSY_SAFETY_JUDGE_URL=http://127.0.0.1:9002/v1
+# Set ARTSY_CORRECTNESS_JUDGE_API_KEY and ARTSY_SAFETY_JUDGE_API_KEY if needed.
 .venv/bin/python -m drawing.generate_dataset --count 20 --output datasets/llm-graded
 ```
+
+The two judge calls run concurrently for each candidate preview and final render.
+Use `--correctness-judge-model` and `--safety-judge-model` (plus the corresponding
+`--*-judge-url` flags) to override the environment. The older
+`ARTSY_JUDGE_MODEL`/`ARTSY_JUDGE_URL` and `--judge-model`/`--judge-url`
+settings are no longer used.
 
 The teacher endpoint must support non-streaming OpenAI-compatible
 `POST /chat/completions`. Candidate replies are either a JSON object with
 `code` or `refusal`. The execution and evaluation loops, repair budget
 (maximum two retries), source/pixel deduplication, and checkpoint semantics
-are unchanged. Without a judge, valid programs remain in `review.jsonl`;
-`accepted.jsonl` is empty. The judge scores PNG correctness, content safety,
-and refusal appropriateness against the original request; a score of at least
-0.85 is needed for automatic acceptance, subject to separate human audit.
+are otherwise unchanged. Without both judges, valid programs remain in
+`review.jsonl` and `accepted.jsonl` is empty. Judge results are recorded
+separately for correctness and safety, subject to separate human audit.
 
 Custom prompt files still bypass the planner:
 

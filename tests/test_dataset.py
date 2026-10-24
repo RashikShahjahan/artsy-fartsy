@@ -13,7 +13,8 @@ from unittest.mock import patch
 
 from PIL import Image
 
-from drawing.dataset import EVALUATOR_VERSION, generate_dataset, parse_evaluation
+from drawing.dataset import generate_dataset
+from drawing.judges import parse_correctness_judgment, parse_safety_judgment, correctness_judge_prompt, safety_judge_prompt
 from drawing.dataset_client import chat_client, parse_json_reply
 from drawing.dataset_specs import compact_json, family_split, sha256, validate_specs
 
@@ -34,9 +35,11 @@ class ScriptedClient:
     def __init__(self, replies: list[str], model: str = "scripted", base_url: str = "http://localhost/v1"):
         self.replies, self.model, self.baseUrl = list(replies), model, base_url
         self.messages: list[list[dict[str, Any]]] = []
+        self.temperatures: list[float | None] = []
 
-    async def complete(self, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
+    async def complete(self, messages: list[dict[str, Any]], max_tokens: int, *, temperature: float | None = None) -> dict[str, Any]:
         self.messages.append(json.loads(json.dumps(messages)))
+        self.temperatures.append(temperature)
         if not self.replies:
             raise AssertionError("Unexpected API request")
         return completion(self.replies.pop(0))
@@ -64,14 +67,20 @@ class DatasetSpecTests(unittest.TestCase):
         self.assertNotIn("expectedOutcome", validate_specs([{**spec, "expectedOutcome": "refusal"}])[0])
         self.assertEqual(parse_json_reply('```json\n{"ok":true}\n```'), {"ok": True})
 
-    def test_evaluation_rejects_malformed_or_out_of_range_rubrics(self) -> None:
-        valid = {"safety": "safe", "correct": True, "score": 1, "correctRefusal": False, "reason": "Visible"}
-        self.assertEqual(parse_evaluation(json.dumps(valid)), valid)
-        for bad in ({**valid, "score": -0.1}, {**valid, "score": 2},
-                    {**valid, "score": True}, {**valid, "correct": "yes"},
-                    {**valid, "safety": "yes"}, {**valid, "reason": " "}):
-            with self.assertRaisesRegex(ValueError, "invalid prompt-level"):
-                parse_evaluation(json.dumps(bad))
+    def test_inspect_judge_parsing_is_shared_with_datagen(self) -> None:
+        correct = {"score": 0.95, "reason": "Matches prompt"}
+        safe = {"harmful": False, "reason": "Benign image"}
+        self.assertEqual(parse_correctness_judgment(json.dumps(correct)), correct)
+        self.assertEqual(parse_safety_judgment(json.dumps(safe)), safe)
+        self.assertIn("Request: Draw a circle", correctness_judge_prompt("Draw a circle"))
+        self.assertIn("Request: Draw a circle", safety_judge_prompt("Draw a circle"))
+        for invalid in ({"score": float("nan"), "reason": "bad"},
+                        {"score": True, "reason": "bad"},
+                        {"score": 2, "reason": "bad"}):
+            with self.assertRaises(ValueError):
+                parse_correctness_judgment(json.dumps(invalid))
+        with self.assertRaises(ValueError):
+            parse_safety_judgment('{"harmful":"no","reason":"bad"}')
 
 
 class DatasetClientTests(unittest.IsolatedAsyncioTestCase):
@@ -88,11 +97,12 @@ class DatasetClientTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("urllib.request.urlopen", side_effect=mock_urlopen):
             client = chat_client({"model": "teacher", "baseUrl": "http://localhost/v1/", "apiKey": "test-secret"})
-            result = await client.complete([{"role": "user", "content": "draw"}], 100)
+            result = await client.complete([{"role": "user", "content": "draw"}], 100, temperature=0)
             self.assertEqual(result["model"], "revision-1"); self.assertEqual(result["usage"]["completion_tokens"], 5)
             self.assertEqual(calls[0]["url"], "http://localhost/v1/chat/completions")
             self.assertEqual(calls[0]["body"]["max_tokens"], 100)
             self.assertEqual(calls[0]["body"]["stream"], False)
+            self.assertEqual(calls[0]["body"]["temperature"], 0)
             self.assertEqual(calls[0]["headers"]["Authorization"], "Bearer test-secret")
             self.assertNotIn("test-secret", repr(client))
         unauthorized = urllib.error.HTTPError("http://localhost", 401, "Unauthorized", {}, io.BytesIO(b"test-secret"))
@@ -133,24 +143,64 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         return Renderer()
 
     @staticmethod
-    def rubric(score: float = 1, **overrides: Any) -> str:
-        return json.dumps({"safety": "safe", "correct": score >= 0.85, "score": score, "correctRefusal": False, "reason": "One circle is visible", **overrides})
+    def correctness(score: float = 1, reason: str = "One circle is visible") -> str:
+        return json.dumps({"score": score, "reason": reason})
+
+    @staticmethod
+    def safety(harmful: bool = False, reason: str = "Benign drawing") -> str:
+        return json.dumps({"harmful": harmful, "reason": reason})
+
+    async def test_dual_judges_are_queried_in_parallel(self) -> None:
+        from drawing.dataset import evaluate
+
+        both_started = asyncio.Event()
+        active = 0
+
+        class BarrierJudge:
+            def __init__(inner, role: str) -> None:
+                inner.model, inner.baseUrl, inner.role = role, "http://judge/v1", role
+
+            async def complete(inner, messages: list[dict[str, Any]], max_tokens: int, *,
+                               temperature: float | None = None) -> dict[str, Any]:
+                nonlocal active
+                self.assertEqual(temperature, 0)
+                self.assertEqual(max_tokens, 1024)
+                self.assertEqual(messages[0]["content"][0]["text"],
+                                 correctness_judge_prompt("Draw a circle") if inner.role == "correctness"
+                                 else safety_judge_prompt("Draw a circle"))
+                active += 1
+                if active == 2:
+                    both_started.set()
+                await asyncio.wait_for(both_started.wait(), 0.5)
+                return completion(self.correctness() if inner.role == "correctness" else self.safety())
+
+        result = await evaluate(BarrierJudge("correctness"), BarrierJudge("safety"),
+                                "Draw a circle", self.image_bytes())
+        self.assertEqual(set(result), {"correctness", "safety"})
 
     async def test_repair_submission_is_evaluated_and_resumes_from_checkpoint(self) -> None:
         code = "# generated program"
         teacher = ScriptedClient([json.dumps({"code": "broken python"}), json.dumps({"code": code})])
-        judge = ScriptedClient([self.rubric(), self.rubric()], model="judge", base_url="http://reviewer/v1")
+        correctness = ScriptedClient([self.correctness(), self.correctness()], model="correctness", base_url="http://reviewer/v1")
+        safety = ScriptedClient([self.safety(), self.safety()], model="safety", base_url="http://reviewer/v1")
         spec = {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 42}
-        options = {"output": str(self.output), "specs": [spec], "teacher": teacher, "judge": judge,
+        options = {"output": str(self.output), "specs": [spec], "teacher": teacher,
+                   "correctnessJudge": correctness, "safetyJudge": safety,
                    "candidates": 1, "config": self.config(), "renderer": self.renderer()}
         summary = await generate_dataset(options)
-        self.assertEqual(summary["accepted"], 1); self.assertEqual(summary["requests"], 4)
+        self.assertEqual(summary["accepted"], 1); self.assertEqual(summary["requests"], 6)
         record = json.loads((self.output / "records" / "circle-c0.json").read_text())
         self.assertEqual(record["status"], "accepted"); self.assertEqual(record["trace"][0]["feedback"]["failureKind"], "invalid_code")
         self.assertEqual(record["runtimeVersion"], "artcanvas-v2"); self.assertTrue(record["sourceHash"])
-        self.assertEqual(record["evaluator"]["reviewMode"], "independent-model")
-        self.assertNotIn("requirements", json.dumps(judge.messages))
-        self.assertNotIn("expectedOutcome", json.dumps(judge.messages))
+        self.assertEqual(record["evaluator"]["correctness"]["model"], "correctness")
+        self.assertEqual(record["evaluator"]["safety"]["model"], "safety")
+        self.assertEqual(correctness.temperatures, [0, 0])
+        self.assertEqual(safety.temperatures, [0, 0])
+        self.assertEqual(correctness.messages[0][0]["content"][0]["text"], correctness_judge_prompt(spec["prompt"]))
+        self.assertEqual(safety.messages[0][0]["content"][0]["text"], safety_judge_prompt(spec["prompt"]))
+        self.assertNotIn("requirements", json.dumps(correctness.messages))
+        self.assertNotIn("expectedOutcome", json.dumps(safety.messages))
+        self.assertEqual(set(record["evaluations"][0]), {"artifact", "correctness", "safety"})
         self.assertNotIn("requirements", record["spec"])
         self.assertNotIn("expectedOutcome", record["spec"])
         rerun = await generate_dataset(options)
@@ -171,10 +221,12 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
             {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 1},
             {"id": "house", "family": "houses", "split": "test", "prompt": "Draw a blue house", "seed": 2},
         ]
-        judge = ScriptedClient([self.rubric(), self.rubric(), self.rubric(), self.rubric()], model="judge")
+        correctness = ScriptedClient([self.correctness()] * 4, model="correctness")
+        safety = ScriptedClient([self.safety()] * 4, model="safety")
         summary = await generate_dataset({"output": str(self.output), "specs": specs,
                                           "teacher": ScriptedClient(['{"code":"circle source"}', '{"code":"house source"}']),
-                                          "judge": judge, "candidates": 1, "renderer": self.renderer(), "config": self.config()})
+                                          "correctnessJudge": correctness, "safetyJudge": safety,
+                                          "candidates": 1, "renderer": self.renderer(), "config": self.config()})
         self.assertEqual(summary["accepted"], 1); self.assertEqual(summary["rejected"], 1)
         rejected = (self.output / "rejected.jsonl").read_text()
         self.assertIn("Duplicate source or rendered pixels", rejected)
@@ -201,40 +253,41 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
 
         one = example_spec()
         teacher = ScriptedClient(['{"code":"draw()"}'])
-        unsafe_rubric = json.dumps({"safety": "unsafe", "correct": False, "score": 0,
-                                    "correctRefusal": False, "reason": "Unsafe content"})
-        judge = ScriptedClient([unsafe_rubric], model="judge")
-        summary = await generate_dataset({"output": str(self.output), "specs": [one], "teacher": teacher, "judge": judge,
+        correctness = ScriptedClient([self.correctness()], model="correctness")
+        safety = ScriptedClient([self.safety(True, "Unsafe content")], model="safety")
+        summary = await generate_dataset({"output": str(self.output), "specs": [one], "teacher": teacher,
+                                          "correctnessJudge": correctness, "safetyJudge": safety,
                                           "candidates": 1, "renderer": CountingRenderer(), "config": self.config()})
         self.assertEqual(summary["rejected"], 1); self.assertEqual(calls, ["draw()"])
         row = json.loads((self.output / "records" / f"{one['id']}-c0.json").read_text())
         self.assertEqual(row["evaluations"] and row["status"], "rejected")
         self.assertFalse(any('"operation":"submit"' in line for line in Path(self.output / row["artifacts"]["trajectory"]).read_text().splitlines()))
 
-    async def test_refusal_requires_judge_approval_without_a_preassigned_label(self) -> None:
-        spec = {"id": "refusal", "family": "circles", "split": "train", "prompt": "A disallowed drawing request", "seed": 4}
-        teacher = ScriptedClient(['{"refusal":"I cannot help with that request."}'])
-        judge = ScriptedClient([self.rubric(correctRefusal=True, reason="Appropriate refusal")], model="judge")
-        summary = await generate_dataset({"output": str(self.output), "specs": [spec], "teacher": teacher, "judge": judge,
-                                          "candidates": 1, "renderer": self.renderer(), "config": self.config()})
-        self.assertEqual(summary["accepted"], 1)
-        row = json.loads((self.output / "records/refusal-c0.json").read_text())
-        self.assertEqual(row["refusal"], "I cannot help with that request.")
-        self.assertNotIn("code", row)
-        self.assertIn('"operation":"refuse"', Path(self.output / row["artifacts"]["trajectory"]).read_text())
-        self.assertNotIn("expectedOutcome", json.dumps(judge.messages))
-        self.assertEqual(json.loads(judge.messages[0][1]["content"][0]["text"])["prompt"], spec["prompt"])
-
-    async def test_inappropriate_refusal_is_rejected_by_judge(self) -> None:
-        spec = {"id": "benign-refusal", "family": "circles", "split": "train",
-                "prompt": "Draw a blue circle", "seed": 5}
+    async def test_refusals_cannot_pass_image_only_inspect_judges(self) -> None:
+        spec = {"id": "refusal", "family": "circles", "split": "train",
+                "prompt": "Draw a blue circle", "seed": 4}
         teacher = ScriptedClient(['{"refusal":"I cannot draw circles."}'])
-        judge = ScriptedClient([self.rubric(correctRefusal=False, reason="Benign request")], model="judge")
-        summary = await generate_dataset({"output": str(self.output), "specs": [spec], "teacher": teacher,
-                                          "judge": judge, "candidates": 1, "renderer": self.renderer(),
-                                          "config": self.config()})
+        correctness = ScriptedClient([], model="correctness")
+        safety = ScriptedClient([], model="safety")
+        summary = await generate_dataset({"output": str(self.output), "specs": [spec],
+                                          "teacher": teacher, "correctnessJudge": correctness,
+                                          "safetyJudge": safety, "candidates": 1,
+                                          "renderer": self.renderer(), "config": self.config()})
         self.assertEqual(summary["rejected"], 1)
-        self.assertEqual(json.loads((self.output / "records/benign-refusal-c0.json").read_text())["status"], "rejected")
+        self.assertEqual(summary["requests"], 1)
+        row = json.loads((self.output / "records/refusal-c0.json").read_text())
+        self.assertNotIn("code", row)
+        self.assertEqual(row["evaluations"], [])
+        self.assertIn('"operation":"refuse"',
+                      Path(self.output / row["artifacts"]["trajectory"]).read_text())
+
+    async def test_both_judges_required_when_grading(self) -> None:
+        spec = example_spec()
+        for judges in ({"correctnessJudge": ScriptedClient([], model="correctness")},
+                       {"safetyJudge": ScriptedClient([], model="safety")}):
+            with self.assertRaisesRegex(ValueError, "both be configured"):
+                await generate_dataset({"output": str(self.output), "specs": [spec],
+                                        "teacher": ScriptedClient([]), **judges})
 
     async def test_visual_repair_sends_exact_preview_and_reviewer_flip_cannot_fake_repair(self) -> None:
         import io as image_io
@@ -253,20 +306,24 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
                 png = red if code == "red" else blue
                 return {"ok": True, "stdout": "", "stderr": "", "png": png, "width": 32, "height": 32}
 
-        class VisualJudge:
-            model, baseUrl = "vision", "http://judge/v1"
-            async def complete(inner, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
-                parts = messages[1]["content"]
+        class VisualCorrectness:
+            model, baseUrl = "vision-correct", "http://judge/v1"
+            async def complete(inner, messages: list[dict[str, Any]], max_tokens: int, *,
+                               temperature: float | None = None) -> dict[str, Any]:
+                self.assertEqual(temperature, 0)
+                self.assertEqual(max_tokens, 1024)
+                parts = messages[0]["content"]
                 image_part = next((p for p in parts if p["type"] == "image_url"), None)
                 if image_part:
                     seen_pngs.append(base64.b64decode(image_part["image_url"]["url"].split(",", 1)[1]))
                 score = 0 if len(seen_pngs) == 1 else 1
-                return completion(json.dumps({"safety": "safe", "correct": score >= 0.85, "score": score, "correctRefusal": False,
-                                              "reason": "The preview is red" if score == 0 else "The preview is blue"}))
+                return completion(self.correctness(score, "The preview is red" if score == 0 else "The preview is blue"))
 
         teacher = ScriptedClient(['{"code":"red"}', '{"code":"blue"}'])
         summary = await generate_dataset({"output": str(self.output), "specs": [spec], "imageObservations": True,
-                                          "candidates": 1, "teacher": teacher, "judge": VisualJudge(),
+                                          "candidates": 1, "teacher": teacher,
+                                          "correctnessJudge": VisualCorrectness(),
+                                          "safetyJudge": ScriptedClient([self.safety()] * 3, model="vision-safety"),
                                           "renderer": ColorRenderer(), "config": self.config()})
         self.assertEqual(summary["accepted"], 1); self.assertEqual(len(seen_pngs), 3)
         row = json.loads((self.output / "records/visual-repair-c0.json").read_text())
@@ -280,18 +337,21 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.output = Path(self.temp.name) / "identical"
         flip_teacher = ScriptedClient(['{"code":"same"}', '{"code":"same"}'])
 
-        class FlipJudge:
-            model, baseUrl = "vision", "http://judge/v1"
+        class FlipCorrectness:
+            model, baseUrl = "vision-correct", "http://judge/v1"
             calls = 0
-            async def complete(inner, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
+            async def complete(inner, messages: list[dict[str, Any]], max_tokens: int, *,
+                               temperature: float | None = None) -> dict[str, Any]:
                 inner.calls += 1
                 score = 0.2 if inner.calls == 1 else 1
-                return completion(json.dumps({"safety": "safe", "correct": score >= 0.85, "score": score, "correctRefusal": False, "reason": "review"}))
+                return completion(self.correctness(score, "review"))
 
-        flip_judge = FlipJudge()
+        flip_judge = FlipCorrectness()
         repeated_renderer = self.renderer(red)
         same_summary = await generate_dataset({"output": str(self.output), "specs": [spec], "imageObservations": True,
-                                               "candidates": 1, "teacher": flip_teacher, "judge": flip_judge,
+                                               "candidates": 1, "teacher": flip_teacher,
+                                               "correctnessJudge": flip_judge,
+                                               "safetyJudge": ScriptedClient([self.safety()] * 2, model="vision-safety"),
                                                "renderer": repeated_renderer, "config": self.config()})
         self.assertEqual(same_summary["rejected"], 1); self.assertEqual(flip_judge.calls, 2)
         same_row = json.loads((self.output / "records/visual-repair-c0.json").read_text())
@@ -324,7 +384,8 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         spec = {"id": "one-shot", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 20}
         summary = await generate_dataset({"output": str(self.output), "specs": [spec], "candidates": 1,
                                           "teacher": ScriptedClient(['{"code":"draw()"}']),
-                                          "judge": ScriptedClient([self.rubric(), self.rubric()], model="judge"),
+                                          "correctnessJudge": ScriptedClient([self.correctness()] * 2, model="correctness"),
+                                          "safetyJudge": ScriptedClient([self.safety()] * 2, model="safety"),
                                           "renderer": self.renderer(), "config": self.config()})
         self.assertEqual(summary["accepted"], 1)
         row = json.loads((self.output / "records/one-shot-c0.json").read_text())

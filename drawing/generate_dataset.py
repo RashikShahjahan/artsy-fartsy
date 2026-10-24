@@ -29,15 +29,17 @@ HELP = """Python dataset generation
   --prompt-retries N    Validation attempts per batch, 1–5 (default: 3)
   --teacher-model ID    Required for rendering, or set ARTSY_TEACHER_MODEL
   --teacher-url URL     Chat base URL (default: http://127.0.0.1:8080/v1)
-  --judge-model ID      Optional vision evaluator, or ARTSY_JUDGE_MODEL
-  --judge-url URL       Evaluator base URL (defaults to teacher URL)
+  --correctness-judge-model ID  Vision correctness judge, or ARTSY_CORRECTNESS_JUDGE_MODEL
+  --correctness-judge-url URL   Correctness endpoint (defaults to teacher URL)
+  --safety-judge-model ID       Vision safety judge, or ARTSY_SAFETY_JUDGE_MODEL
+  --safety-judge-url URL        Safety endpoint (defaults to teacher URL)
   --timeout-ms N        Per-request deadline (default: 60000)
   --dry-run             LLM-generate prompt JSONL (no rendering, no split labels)
   --retry-errors        Retry checkpointed infrastructure failures on resume
   --help, -h            Show this help
 
-Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_JUDGE_API_KEY.
-No judge: executable examples go to review.jsonl; accepted/train/validation/test
+Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_CORRECTNESS_JUDGE_API_KEY, ARTSY_SAFETY_JUDGE_API_KEY.
+Both vision judges are required for automatic acceptance. No judges: executable examples go to review.jsonl; accepted/train/validation/test
 remain empty. Repeating the same command resumes completed candidate records.
 Generated Python runs locally with your current permissions, as with the drawing CLI.
 The prompt plan is saved before rendering and reused on resume."""
@@ -88,8 +90,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-retries", default="3")
     parser.add_argument("--teacher-model")
     parser.add_argument("--teacher-url")
-    parser.add_argument("--judge-model")
-    parser.add_argument("--judge-url")
+    parser.add_argument("--correctness-judge-model")
+    parser.add_argument("--correctness-judge-url")
+    parser.add_argument("--safety-judge-model")
+    parser.add_argument("--safety-judge-url")
     parser.add_argument("--timeout-ms", default="60000")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--retry-errors", action="store_true")
@@ -176,20 +180,41 @@ async def main(argv: list[str] | None = None) -> int:
     if not model:
         raise ValueError("Set --teacher-model or ARTSY_TEACHER_MODEL to your stronger teacher model")
     image_observations = bool(args.image_observations)
-    judge_model = args.judge_model or os.getenv("ARTSY_JUDGE_MODEL") or (model if image_observations else None)
-    judge_url = args.judge_url or os.getenv("ARTSY_JUDGE_URL") or base_url
+    correctness_model = args.correctness_judge_model or os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL")
+    safety_model = args.safety_judge_model or os.getenv("ARTSY_SAFETY_JUDGE_MODEL")
+    if bool(correctness_model) != bool(safety_model):
+        raise ValueError("Set both correctness and safety judge models, or neither")
+    if image_observations and not correctness_model:
+        raise ValueError("--image-observations requires both vision judges")
+    correctness_url = args.correctness_judge_url or os.getenv("ARTSY_CORRECTNESS_JUDGE_URL") or base_url
+    safety_url = args.safety_judge_url or os.getenv("ARTSY_SAFETY_JUDGE_URL") or base_url
+    for role, judge_model, judge_url in (("correctness", correctness_model, correctness_url),
+                                          ("safety", safety_model, safety_url)):
+        if judge_model and judge_model.removeprefix("openai/") == model and judge_url == base_url:
+            raise ValueError(f"Select an independent {role} judge instead of the teacher model")
     teacher_key = os.getenv("ARTSY_TEACHER_API_KEY") or os.getenv("TEACHER_API_KEY")
     timeout_ms = int(args.timeout_ms)
     if timeout_ms < 1 or timeout_ms > 300_000:
         raise ValueError("timeout-ms must be an integer from 1 to 300000")
     teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms})
-    judge = chat_client({"model": judge_model, "baseUrl": judge_url,
-        "apiKey": os.getenv("ARTSY_JUDGE_API_KEY") or (teacher_key if judge_url == base_url else None), "timeoutMs": timeout_ms}) if judge_model else None
+    correctness_judge = chat_client({
+        "model": correctness_model, "baseUrl": correctness_url,
+        "apiKey": os.getenv("ARTSY_CORRECTNESS_JUDGE_API_KEY")
+                  or (teacher_key if correctness_url == base_url else None),
+        "timeoutMs": timeout_ms,
+    }) if correctness_model else None
+    safety_judge = chat_client({
+        "model": safety_model, "baseUrl": safety_url,
+        "apiKey": os.getenv("ARTSY_SAFETY_JUDGE_API_KEY")
+                  or (teacher_key if safety_url == base_url else None),
+        "timeoutMs": timeout_ms,
+    }) if safety_model else None
     options = {"output": output, "candidates": int(args.candidates or 2),
         "repairs": int(args.repairs), "maxTokens": int(args.max_tokens or 4096),
         "threshold": float(args.threshold), "workers": int(args.workers or 1),
         "retryErrors": args.retry_errors, "imageObservations": image_observations,
-        "draftsFrom": args.drafts_from, "teacher": teacher, "judge": judge,
+        "draftsFrom": args.drafts_from, "teacher": teacher,
+        "correctnessJudge": correctness_judge, "safetyJudge": safety_judge,
         "promptGenerator": prompt_generation,
         "onRecord": lambda record: print(f"{record['id']} {record['status']}: {record['reason']}", file=sys.stderr)}
     from .dataset import generate_dataset

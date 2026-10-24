@@ -30,19 +30,22 @@ class ChatClient:
     api_key: str | None = field(default=None, repr=False)
     timeout_ms: int = 60_000
 
-    async def complete(self, messages: list[Message], max_tokens: int) -> Completion:
+    async def complete(self, messages: list[Message], max_tokens: int, *, temperature: float | None = None) -> Completion:
         try:
-            return await asyncio.wait_for(asyncio.to_thread(self._complete, messages, max_tokens), self.timeout_ms / 1000)
+            return await asyncio.wait_for(asyncio.to_thread(self._complete, messages, max_tokens, temperature), self.timeout_ms / 1000)
         except asyncio.TimeoutError:
             raise RuntimeError("Chat endpoint request timed out") from None
 
-    def _complete(self, messages: list[Message], max_tokens: int) -> Completion:
-        payload = json.dumps({
+    def _complete(self, messages: list[Message], max_tokens: int, temperature: float | None = None) -> Completion:
+        request_body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "max_tokens": max_tokens,
             "stream": False,
-        }, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        }
+        if temperature is not None:
+            request_body["temperature"] = temperature
+        payload = json.dumps(request_body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
