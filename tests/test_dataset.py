@@ -239,8 +239,9 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
     async def test_heldout_prompts_never_call_teacher_and_sft_selects_best_candidate(self) -> None:
         from PIL import Image
         teacher = ScriptedClient(['{"code":"red program"}', '{"code":"green program"}'])
-        correctness = ScriptedClient([self.correctness(0.90), self.correctness(0.98)], model="correctness")
-        safety = ScriptedClient([self.safety(), self.safety()], model="safety")
+        correctness = ScriptedClient([self.correctness(0.90)] * 2 + [self.correctness(0.98)] * 2,
+                                     model="correctness")
+        safety = ScriptedClient([self.safety()] * 4, model="safety")
 
         class ColoredRenderer:
             async def render(inner, code: str, seed: int) -> dict[str, Any]:
