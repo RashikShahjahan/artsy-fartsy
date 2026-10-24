@@ -1,11 +1,13 @@
 """Tests for LLM-authored prompt planning and evaluation mixes."""
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import json
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -96,8 +98,9 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(spec["split"] == family_split(spec["family"]) for spec in specs))
         self.assertTrue(all("requirements" not in spec and "expectedOutcome" not in spec
                             and "repairTask" not in spec and "caseType" not in spec for spec in specs))
-        self.assertEqual(client.calls, 4)
-        self.assertEqual(len(result["batches"]), 4)
+        self.assertEqual(client.calls, 20)
+        self.assertEqual(len(result["batches"]), 20)
+        self.assertTrue(all(len(request["slots"]) == 1 for request in client.requests))
         self.assertEqual(validate_specs(specs), specs)
 
     async def test_harmful_count_produces_valid_refusal_pairs(self) -> None:
@@ -110,6 +113,27 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(validate_specs(result["specs"]), result["specs"])
         with self.assertRaisesRegex(ValueError, "harmful_count"):
             await generate_llm_prompts(client, count=3, harmful_count=4)
+
+    async def test_network_error_retries_only_the_affected_prompt(self) -> None:
+        class TransientFailure(PromptClient):
+            def __init__(self):
+                super().__init__()
+                self.failed_once = False
+                self.total_requests = 0
+
+            async def complete(self, messages: list[dict], max_tokens: int) -> dict:
+                self.total_requests += 1
+                slot = json.loads(messages[1]["content"])["slots"][0]
+                if slot["index"] == 1 and not self.failed_once:
+                    self.failed_once = True
+                    raise urllib.error.URLError("Temporary provider failure")
+                return await super().complete(messages, max_tokens)
+
+        client = TransientFailure()
+        result = await generate_llm_prompts(client, count=3, batch_size=2, retries=3)
+        self.assertEqual(client.total_requests, 4)
+        self.assertEqual(result["batches"][1]["attempts"], 2)
+        self.assertEqual(len(result["specs"]), 3)
 
     async def test_difficulty_can_be_selected_without_repair_labels(self) -> None:
         hard = await generate_llm_prompts(PromptClient(), count=8, difficulty="hard")
@@ -135,9 +159,34 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
                     self.first_prompt = json.loads(result["text"])["items"][0]["prompt"]
                 return result
         client = DuplicateOnce()
-        result = await generate_llm_prompts(client, count=4, batch_size=2)
-        self.assertEqual(client.calls, 3)
+        result = await generate_llm_prompts(client, count=4, batch_size=1)
+        self.assertEqual(client.calls, 5)
         self.assertEqual(result["batches"][1]["attempts"], 2)
+
+    async def test_prompt_requests_are_bounded_by_eight_concurrent_calls(self) -> None:
+        class TrackingClient(PromptClient):
+            def __init__(self):
+                super().__init__()
+                self.active = 0
+                self.maximum = 0
+                self.eight_entered = asyncio.Event()
+
+            async def complete(self, messages: list[dict], max_tokens: int) -> dict:
+                self.active += 1
+                self.maximum = max(self.maximum, self.active)
+                if self.active == 8:
+                    self.eight_entered.set()
+                await asyncio.wait_for(self.eight_entered.wait(), timeout=2)
+                try:
+                    return await super().complete(messages, max_tokens)
+                finally:
+                    self.active -= 1
+
+        client = TrackingClient()
+        result = await generate_llm_prompts(client, count=16)
+        self.assertEqual(len(result["specs"]), 16)
+        self.assertEqual(client.maximum, 8)
+        self.assertEqual(client.calls, 16)
 
     def test_invalid_fields_and_labels_are_rejected(self) -> None:
         slot = _slots(1, 42)[0]
@@ -163,7 +212,7 @@ class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(row["difficulty"] == "hard" for row in specs))
         self.assertTrue(all("caseType" not in row for row in specs))
         self.assertTrue(all("split" not in row for row in specs))
-        self.assertEqual(client.calls, 1)
+        self.assertEqual(client.calls, 4)
 
     async def test_dry_run_outputs_harmful_prompt_refusal_pairs(self) -> None:
         client = PromptClient()
@@ -176,6 +225,48 @@ class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(spec.get("kind") == "refusal" for spec in specs), 2)
         self.assertTrue(all("split" not in spec for spec in specs))
         self.assertTrue(all(spec["refusal"] for spec in specs if spec.get("kind") == "refusal"))
+
+    async def test_prompt_checkpoints_survive_failure_and_resume(self) -> None:
+        class FailingSlotClient(PromptClient):
+            def __init__(self):
+                super().__init__()
+                self.fail_slot_two = True
+
+            async def complete(self, messages: list[dict], max_tokens: int) -> dict:
+                request = json.loads(messages[1]["content"])
+                slot = request["slots"][0]
+                if self.fail_slot_two and slot["index"] == 2:
+                    self.calls += 1
+                    self.requests.append(request)
+                    return response([{**item(slot), "skills": ["invalid_skill"]}])
+                return await super().complete(messages, max_tokens)
+
+        client = FailingSlotClient()
+
+        async def no_render(_options: dict) -> dict:
+            return {"complete": True, "accepted": 0}
+
+        with tempfile.TemporaryDirectory() as folder:
+            output_dir = Path(folder) / "new-dataset"
+            args = ["--output", str(output_dir), "--count", "4",
+                    "--prompt-batch-size", "1", "--prompt-model", "prompt-writer",
+                    "--teacher-model", "teacher"]
+            with patch("drawing.dataset_client.chat_client", return_value=client), \
+                 patch("drawing.dataset.generate_dataset", side_effect=no_render), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaisesRegex(ValueError, "slot 2"):
+                    await main(args)
+                saved = list((output_dir / "prompt-records").glob("*.json"))
+                saved_indices = {int(path.stem) for path in saved}
+                self.assertTrue({0, 1}.issubset(saved_indices))
+                self.assertNotIn(2, saved_indices)
+                self.assertFalse((output_dir / "prompt-plan.json").exists())
+                client.fail_slot_two = False
+                calls_before = client.calls
+                self.assertEqual(await main(args), 0)
+                self.assertEqual(client.calls - calls_before, 4 - len(saved_indices))
+                self.assertTrue((output_dir / "prompt-plan.json").exists())
+                self.assertEqual(len(list((output_dir / "prompt-records").glob("*.json"))), 4)
 
     async def test_saved_prompt_plan_is_reused_without_new_model_calls(self) -> None:
         client = PromptClient()
@@ -191,5 +282,6 @@ class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
                  contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(await main(args), 0)
                 self.assertEqual(await main(args), 0)
-            self.assertEqual(client.calls, 1)
+            self.assertEqual(client.calls, 4)
             self.assertTrue((Path(folder) / "new-dataset" / "prompt-plan.json").is_file())
+            self.assertEqual(len(list((Path(folder) / "new-dataset" / "prompt-records").glob("*.json"))), 4)

@@ -343,13 +343,21 @@ export ARTSY_TEACHER_URL=http://127.0.0.1:9000/v1
 .venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --repairs 2 --output datasets/llm-pilot
 ```
 
-The output directory stores `prompt-plan.json` **before rendering**. This
-records the validated prompts, generator model/endpoint, taxonomy-slot settings,
-raw prompt-generation completions and token usage. Resuming the same command
-reuses the exact plan with no additional prompt-writing calls; changing its
-configuration requires a new output directory. Neither API keys nor credentials
-are persisted. For prompts only, `--dry-run` prints JSONL without split labels.
-For complete dataset runs, existing family-based training splits remain internal.
+The prompt writer generates **one prompt per LLM request**, with up to eight
+requests in flight (`--prompt-batch-size 8` by default). This setting is prompt
+concurrency, separate from `--workers` for teacher/render processing. A failed
+prompt is retried on its own (up to five attempts by default), without
+regenerating valid prompts. API errors are also retried with short backoff.
+
+During full generation, each validated prompt is atomically checkpointed in
+`prompt-records/000000.json` (and subsequent numbered files), with its raw
+completion and attempt count. `prompt-progress.json` pins the configuration.
+Repeating the same command resumes only missing prompts; once all are ready,
+`prompt-plan.json` freezes the complete ordered plan **before rendering**.
+Changing the prompt configuration requires a new output directory. Neither API
+keys nor credentials are persisted. `--dry-run` prints JSONL without split
+labels and does not checkpoint. For complete dataset runs, existing family-based
+training splits remain internal.
 
 For higher-difficulty training data, use `--difficulty hard` or
 `--difficulty very-hard` with a fresh output directory. Full generation saves the teacher's
