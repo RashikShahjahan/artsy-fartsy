@@ -14,7 +14,10 @@ flowchart TD
     AB --> AC[Accepted refusal record, no render]
     AC --> V
     AA -- No --> C[Teacher writes ArtCanvas Python]
-    C --> D[Local execution and PNG render]
+    C --> CS{Code-safety monitor}
+    CS -- Malicious --> N[Reject before execution]
+    CS -- Monitor error --> CE[Infrastructure error, no execution]
+    CS -- Safe / unconfigured --> D[Local execution and PNG render]
     D --> E{Execution valid?}
     E -- No --> F[Send execution feedback]
     F --> C
@@ -34,10 +37,12 @@ flowchart TD
     P -- No --> Q[Review queue]
     P -- Yes --> R[Rejudge final PNG with both roles]
     R --> S{Score meets threshold and safe?}
-    S -- Yes --> T[Accept and deduplicate]
+    S -- Yes --> CP{Code review passed?}
+    CP -- Yes --> T[Accept and deduplicate]
+    CP -- Unconfigured --> Q
     S -- No --> N
     U[Refusal] --> N
-    T --> V[Train, validation, test JSONL]
+    T --> V[Combined accepted JSONL]
 ```
 
 Prompt planning can also be bypassed by supplying input specs. With
@@ -49,6 +54,9 @@ drawing requests are rejected because no final image can be graded. Both judge r
 and JSON parsing as Inspect, and their requests run concurrently. Generation
 checkpoints per candidate and writes its artifacts, trajectory, manifest, and
 summary under the output directory.
+`--malicious-code-count` adds a distinct refusal category for unsafe computing
+actions. The code-safety monitor reviews every teacher source before execution;
+automatic drawing acceptance requires it in addition to both vision judges.
 
 ## Evaluation (`evaluation.evaluate`)
 
@@ -60,7 +68,9 @@ flowchart TD
     C --> E[Docker sandbox<br/>write program.py, preview, repair]
     F[ArtCanvas docs and trusted preview renderer] --> E
     E --> G{Final program or refusal?}
-    G -- Program --> H[Fresh trusted render<br/>in sandbox]
+    G -- Program --> CS{Audit Python and reported bash actions}
+    CS -- Malicious --> CB[Block final render, zero adherence]
+    CS -- Safe --> H[Fresh trusted render<br/>in sandbox]
     H --> I{Valid 1920x1200 PNG?}
     I -- No --> J[render_valid = 0<br/>no image to judge]
     I -- Yes --> K[Save source, PNG, hashes,<br/>execution feedback]
@@ -79,7 +89,8 @@ flowchart TD
 The benchmark agent runs in Docker; its calls to the model are proxied through the
 host endpoint. The final scorer re-runs the latest source with the trusted renderer,
 so a preview image alone cannot pass. Full evaluation needs separate correctness
-and safety judge roles; `--execution-only` skips both.
+and safety judge roles plus a code-safety role. The latter audits actions that
+already ran in Docker and gates the final render; `--execution-only` skips all three.
 
 ## Supervised fine-tuning (`training.sft`)
 

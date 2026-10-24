@@ -13,6 +13,7 @@ HELP = """Python dataset generation
   --output DIR          Dataset directory (default: datasets/pilot)
   --count N             Total number of prompts (default: 20)
   --harmful-count N     Refusal-worthy prompt/target pairs within the total (default: 0)
+  --malicious-code-count N  Additional malicious-code refusal pairs within the total (default: 0)
   --difficulty LEVEL    mixed (default), easy, medium, hard, or very-hard
   --seed N              Taxonomy/slot seed (default: 42; prompt text is model-generated)
   --input FILE          Custom JSONL specs instead of the built-in curriculum
@@ -34,13 +35,15 @@ HELP = """Python dataset generation
   --correctness-judge-url URL   Correctness endpoint (defaults to teacher URL)
   --safety-judge-model ID       Vision safety judge, or ARTSY_SAFETY_JUDGE_MODEL
   --safety-judge-url URL        Safety endpoint (defaults to teacher URL)
+  --code-safety-judge-model ID  Source-code monitor (defaults to safety judge model)
+  --code-safety-judge-url URL   Code monitor endpoint (defaults to safety judge URL)
   --timeout-ms N        Per-request deadline (default: 60000)
   --dry-run             LLM-generate prompt JSONL (no rendering)
   --retry-errors        Retry checkpointed infrastructure failures on resume
   --help, -h            Show this help
 
-Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_CORRECTNESS_JUDGE_API_KEY, ARTSY_SAFETY_JUDGE_API_KEY.
-Both vision judges are required for automatic acceptance. No judges: executable examples go to review.jsonl;
+Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_CORRECTNESS_JUDGE_API_KEY, ARTSY_SAFETY_JUDGE_API_KEY, ARTSY_CODE_SAFETY_JUDGE_API_KEY.
+Both vision judges and code safety review are required for automatic drawing acceptance. No judges: executable examples go to review.jsonl;
 authored refusal pairs can still enter accepted.jsonl. Repeating the same command resumes checkpointed prompts and candidate records.
 Generated Python runs locally with your current permissions, as with the drawing CLI.
 The prompt plan is saved before rendering and reused on resume."""
@@ -75,6 +78,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output")
     parser.add_argument("--count")
     parser.add_argument("--harmful-count", default="0")
+    parser.add_argument("--malicious-code-count", default="0")
     parser.add_argument("--difficulty", default="mixed")
     parser.add_argument("--seed", default="42")
     parser.add_argument("--input")
@@ -96,6 +100,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--correctness-judge-url")
     parser.add_argument("--safety-judge-model")
     parser.add_argument("--safety-judge-url")
+    parser.add_argument("--code-safety-judge-model")
+    parser.add_argument("--code-safety-judge-url")
     parser.add_argument("--timeout-ms", default="60000")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--retry-errors", action="store_true")
@@ -128,10 +134,13 @@ async def main(argv: list[str] | None = None) -> int:
     seed = int(args.seed)
     count = int(args.count) if args.count is not None else 20
     harmful_count = int(args.harmful_count)
+    malicious_code_count = int(args.malicious_code_count)
     if count < 1:
         raise ValueError("count must be positive")
     if not 0 <= harmful_count <= count:
         raise ValueError("--harmful-count must be between zero and --count")
+    if malicious_code_count < 0 or harmful_count + malicious_code_count > count:
+        raise ValueError("Refusal counts must be nonnegative and sum to at most --count")
     output = args.output or "datasets/pilot"
     model = args.teacher_model or os.getenv("ARTSY_TEACHER_MODEL")
     base_url = args.teacher_url or os.getenv("ARTSY_TEACHER_URL") or "http://127.0.0.1:8080/v1"
@@ -139,15 +148,16 @@ async def main(argv: list[str] | None = None) -> int:
     prompt_url = args.prompt_url or os.getenv("ARTSY_PROMPT_URL") or base_url
     prompt_config = {
         "version": GENERATOR_VERSION,
-        "count": count, "harmfulCount": harmful_count, "difficulty": args.difficulty,
+        "count": count, "harmfulCount": harmful_count, "maliciousCodeCount": malicious_code_count,
+        "difficulty": args.difficulty,
         "seed": seed, "model": prompt_model, "baseUrl": prompt_url,
         "batchSize": int(args.prompt_batch_size), "maxTokens": int(args.prompt_max_tokens),
         "retries": int(args.prompt_retries),
     }
     prompt_generation = None
     if args.input:
-        if harmful_count:
-            raise ValueError("--harmful-count cannot be used with --input; include refusal pairs in the input file")
+        if harmful_count or malicious_code_count:
+            raise ValueError("Refusal count options cannot be used with --input; include refusal pairs in the input file")
         specs = validate_specs(_read_specs(args.input))
     else:
         if not prompt_model:
@@ -208,6 +218,7 @@ async def main(argv: list[str] | None = None) -> int:
 
                 generated = await generate_llm_prompts(prompt_client, count, seed,
                     difficulty=args.difficulty, harmful_count=harmful_count,
+                    malicious_code_count=malicious_code_count,
                     batch_size=prompt_config["batchSize"],
                     max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"],
                     completed=completed, on_record=on_record)
@@ -235,8 +246,11 @@ async def main(argv: list[str] | None = None) -> int:
         raise ValueError("--image-observations requires both vision judges")
     correctness_url = args.correctness_judge_url or os.getenv("ARTSY_CORRECTNESS_JUDGE_URL") or base_url
     safety_url = args.safety_judge_url or os.getenv("ARTSY_SAFETY_JUDGE_URL") or base_url
+    code_safety_model = args.code_safety_judge_model or os.getenv("ARTSY_CODE_SAFETY_JUDGE_MODEL") or safety_model
+    code_safety_url = args.code_safety_judge_url or os.getenv("ARTSY_CODE_SAFETY_JUDGE_URL") or safety_url
     for role, judge_model, judge_url in (("correctness", correctness_model, correctness_url),
-                                          ("safety", safety_model, safety_url)):
+                                          ("safety", safety_model, safety_url),
+                                          ("code safety", code_safety_model, code_safety_url)):
         if judge_model and judge_model.removeprefix("openai/") == model and judge_url == base_url:
             raise ValueError(f"Select an independent {role} judge instead of the teacher model")
     teacher_key = os.getenv("ARTSY_TEACHER_API_KEY") or os.getenv("TEACHER_API_KEY")
@@ -256,12 +270,20 @@ async def main(argv: list[str] | None = None) -> int:
                   or (teacher_key if safety_url == base_url else None),
         "timeoutMs": timeout_ms,
     }) if safety_model else None
+    code_safety_judge = chat_client({
+        "model": code_safety_model, "baseUrl": code_safety_url,
+        "apiKey": os.getenv("ARTSY_CODE_SAFETY_JUDGE_API_KEY")
+                  or (os.getenv("ARTSY_SAFETY_JUDGE_API_KEY") if code_safety_url == safety_url else None)
+                  or (teacher_key if code_safety_url == base_url else None),
+        "timeoutMs": timeout_ms,
+    }) if code_safety_model else None
     options = {"output": output, "candidates": int(args.candidates or 2),
         "repairs": int(args.repairs), "maxTokens": int(args.max_tokens or 4096),
         "threshold": float(args.threshold), "workers": int(args.workers or 1),
         "retryErrors": args.retry_errors, "imageObservations": image_observations,
         "draftsFrom": args.drafts_from, "teacher": teacher,
         "correctnessJudge": correctness_judge, "safetyJudge": safety_judge,
+        "codeSafetyJudge": code_safety_judge,
         "promptGenerator": prompt_generation,
         "onRecord": lambda record: print(f"{record['id']} {record['status']}: {record['reason']}", file=sys.stderr)}
     from .dataset import generate_dataset

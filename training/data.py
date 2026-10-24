@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 
 from drawing.dataset_specs import DIFFICULTIES
+from drawing.judges import parse_code_safety_judgment
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = [{"type": "function", "function": {
@@ -150,6 +151,13 @@ def convert_record(record: dict, root: Path) -> dict:
         "user", record["spec"]["prompt"] + "\n\nPreview with: " + preview_command)]
     trainable_message_indices = []
     for index, step in enumerate(trace):
+        review = step.get("codeSafety")
+        if review:
+            judgment = parse_code_safety_judgment(review["completion"]["text"])
+            if judgment != review["result"] or judgment["malicious"]:
+                raise ValueError(f"{rid}: code safety review is unsafe or inconsistent")
+            if review["sourceHash"] != digest(step.get("executedCode", "").encode()):
+                raise ValueError(f"{rid}: code safety review does not match executed source")
         if step.get("observation"):
             observation = step["observation"]
             # Preserve provenance checks without adding images or privileged

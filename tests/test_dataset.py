@@ -248,12 +248,14 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         teacher = ScriptedClient([json.dumps({"code": "broken python"}), json.dumps({"code": code})])
         correctness = ScriptedClient([self.correctness(), self.correctness()], model="correctness", base_url="http://reviewer/v1")
         safety = ScriptedClient([self.safety(), self.safety()], model="safety", base_url="http://reviewer/v1")
+        code_safety = ScriptedClient(['{"malicious":false,"reason":"Drawing only"}'] * 2, model="code-safety")
         spec = {"id": "circle", "family": "circles", "prompt": "Draw a blue circle", "seed": 42}
         options = {"output": str(self.output), "specs": [spec], "teacher": teacher,
                    "correctnessJudge": correctness, "safetyJudge": safety,
+                   "codeSafetyJudge": code_safety,
                    "candidates": 1, "config": self.config(), "renderer": self.renderer()}
         summary = await generate_dataset(options)
-        self.assertEqual(summary["accepted"], 1); self.assertEqual(summary["requests"], 6)
+        self.assertEqual(summary["accepted"], 1); self.assertEqual(summary["requests"], 8)
         record = json.loads((self.output / "records" / "circle-c0.json").read_text())
         self.assertEqual(record["status"], "accepted"); self.assertEqual(record["trace"][0]["feedback"]["failureKind"], "invalid_code")
         self.assertEqual(record["runtimeVersion"], "artcanvas-v2"); self.assertTrue(record["sourceHash"])
@@ -319,6 +321,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         summary = await generate_dataset({"output": str(self.output), "specs": specs,
                                           "teacher": ScriptedClient(['{"code":"circle source"}', '{"code":"house source"}']),
                                           "correctnessJudge": correctness, "safetyJudge": safety,
+                                          "codeSafetyJudge": ScriptedClient(['{"malicious":false,"reason":"Drawing only"}'] * 2, model="code-safety"),
                                           "candidates": 1, "renderer": self.renderer(), "config": self.config()})
         self.assertEqual(summary["accepted"], 1); self.assertEqual(summary["rejected"], 1)
         rejected = (self.output / "rejected.jsonl").read_text()
@@ -420,6 +423,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         summary = await generate_dataset({"output": str(self.output), "specs": [spec], "imageObservations": True,
                                           "candidates": 1, "teacher": teacher,
                                           "correctnessJudge": VisualCorrectness(),
+                                          "codeSafetyJudge": ScriptedClient(['{"malicious":false,"reason":"Drawing only"}'] * 2, model="code-safety"),
                                           "safetyJudge": ScriptedClient([self.safety()] * 3, model="vision-safety"),
                                           "renderer": ColorRenderer(), "config": self.config()})
         self.assertEqual(summary["accepted"], 1); self.assertEqual(len(seen_pngs), 3)
@@ -482,6 +486,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         summary = await generate_dataset({"output": str(self.output), "specs": [spec], "candidates": 1,
                                           "teacher": ScriptedClient(['{"code":"draw()"}']),
                                           "correctnessJudge": ScriptedClient([self.correctness()] * 2, model="correctness"),
+                                          "codeSafetyJudge": ScriptedClient(['{"malicious":false,"reason":"Drawing only"}'], model="code-safety"),
                                           "safetyJudge": ScriptedClient([self.safety()] * 2, model="safety"),
                                           "renderer": self.renderer(), "config": self.config()})
         self.assertEqual(summary["accepted"], 1)

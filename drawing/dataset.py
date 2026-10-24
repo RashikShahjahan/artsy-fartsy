@@ -15,6 +15,7 @@ from .dataset_client import Message, parse_json_reply
 from .judges import (
     JUDGE_VERSION, JUDGE_MAX_TOKENS, correctness_judge_prompt, safety_judge_prompt,
     parse_correctness_judgment, parse_safety_judgment,
+    CODE_SAFETY_MAX_TOKENS, code_safety_judge_prompt, parse_code_safety_judgment,
 )
 from .dataset_specs import compact_json, sha256, validate_specs
 
@@ -88,7 +89,7 @@ def _refusal_candidate(spec: dict[str, Any], api_doc: str, config: dict[str, Any
         "spec": spec,
         "candidate": 0,
         "status": "accepted",
-        "reason": "Authored harmful-request refusal target; human audit recommended",
+        "reason": "Authored unsafe-request refusal target; human audit recommended",
         "refusal": spec["refusal"],
         "generation": {"initialDraft": "authored_refusal"},
         "refusalSource": "prompt_plan",
@@ -118,12 +119,15 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
     }
     correctness_judge = options.get("correctnessJudge")
     safety_judge = options.get("safetyJudge")
+    code_safety_judge = options.get("codeSafetyJudge")
     if correctness_judge:
         record["evaluator"] = {
             "version": EVALUATOR_VERSION,
             "correctness": _provenance(correctness_judge),
             "safety": _provenance(safety_judge),
         }
+    if code_safety_judge:
+        record.setdefault("evaluator", {"version": EVALUATOR_VERSION})["codeSafety"] = _provenance(code_safety_judge)
     record["generation"] = {"initialDraft": "natural", "executionFailures": 0}
     if options.get("imageObservations"):
         record["generation"].update({"visualFailures": 0, "imageObservations": True, "finalImagePassed": False})
@@ -207,7 +211,21 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                 # Inspect assigns no render validity or adherence to refusals.
                 record.update(status="rejected", reason="Refusal has no final drawing to grade")
                 break
-            trace["executedCode"] = target["code"]; record["code"] = target["code"]
+            record["code"] = target["code"]
+            if code_safety_judge:
+                review = {"sourceHash": sha256(target["code"])}
+                trace["codeSafety"] = review
+                code_completion = await code_safety_judge.complete([
+                    {"role": "user", "content": code_safety_judge_prompt(spec["prompt"], target["code"])}
+                ], CODE_SAFETY_MAX_TOKENS, temperature=0)
+                review["completion"] = code_completion
+                if code_completion.get("finishReason") == "length":
+                    raise ValueError("Code safety judge reply was truncated")
+                review["result"] = parse_code_safety_judgment(code_completion["text"])
+                if review["result"]["malicious"]:
+                    record["reason"] = "Malicious code blocked before execution: " + review["result"]["reason"]
+                    break
+            trace["executedCode"] = target["code"]
             feedback = await env.write_code(target["code"])
             if feedback.get("ok"): feedback = await env.run_code()
             trace["feedback"] = feedback
@@ -264,10 +282,14 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
             final_evaluation = await grade(image, artifact=record["artifacts"]["image"])
             accepted = final_evaluation["correctness"]["score"] >= threshold and not final_evaluation["safety"]["harmful"]
             record["status"] = "accepted" if accepted else "rejected"
+            if accepted and not code_safety_judge:
+                record["status"] = "review"
             if options.get("imageObservations"):
                 record["generation"]["finalImagePassed"] = accepted
             record["reason"] = (final_evaluation["safety"]["reason"] if final_evaluation["safety"]["harmful"]
                                 else final_evaluation["correctness"]["reason"])
+            if accepted and not code_safety_judge:
+                record["reason"] = "Vision checks passed; code safety evaluation pending"
             break
     except Exception as exc:
         record.update(status="infrastructure_error", reason=str(exc))
@@ -314,6 +336,9 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
                           "correctness": _provenance(correctness_judge),
                           "safety": _provenance(safety_judge)} if correctness_judge else None,
             "config": config, "apiDocHash": sha256(api_doc), "runtimeHashes": runtime_hashes}
+        if options.get("codeSafetyJudge"):
+            manifest["codeSafetyEvaluator"] = {"version": EVALUATOR_VERSION,
+                **_provenance(options["codeSafetyJudge"])}
         if options.get("promptGenerator"):
             manifest["promptVersion"] = options["promptGenerator"]["version"]
             manifest["promptGenerator"] = options["promptGenerator"]
@@ -376,12 +401,18 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         for record in records:
             for row in [record, *record.get("previousAttempts", [])]:
                 completions.extend(t["completion"] for t in row.get("trace", []) if not t.get("reusedDraft"))
+                completions.extend(t["codeSafety"]["completion"] for t in row.get("trace", [])
+                                   if t.get("codeSafety", {}).get("completion"))
                 completions.extend(e[role]["completion"] for e in row.get("evaluations", [])
                                    for role in ("correctness", "safety") if role in e)
         count = len(records)
         summary = {"version": DATASET_VERSION, "prompts": len(specs), "candidates": count,
             "accepted": sum(r["status"] == "accepted" for r in records), "review": sum(r["status"] == "review" for r in records),
             "refusalPairs": sum(r["spec"].get("kind") == "refusal" and r["status"] == "accepted" for r in records),
+            "maliciousCodeRefusalPairs": sum(r["spec"].get("safetyCategory") == "malicious_code"
+                                             and r["status"] == "accepted" for r in records),
+            "maliciousCodeBlocked": sum(any(t.get("codeSafety", {}).get("result", {}).get("malicious")
+                                             for t in r.get("trace", [])) for r in records),
             "rejected": sum(r["status"] == "rejected" for r in records), "infrastructureErrors": sum(r["status"] == "infrastructure_error" for r in records),
             "requests": len(completions), "promptTokens": sum(c.get("usage", {}).get("prompt_tokens", 0) for c in completions),
             "completionTokens": sum(c.get("usage", {}).get("completion_tokens", 0) for c in completions),

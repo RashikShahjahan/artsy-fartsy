@@ -13,6 +13,15 @@ from training.data import ROOT, SUBMIT, convert_record, digest, is_observed_repa
 
 
 class ConversionTests(unittest.TestCase):
+    def test_malicious_code_review_cannot_become_a_training_target(self):
+        self.record["trace"][-1]["codeSafety"] = {
+            "completion": {"text": '{"malicious":true,"reason":"Unauthorized behavior"}'},
+            "result": {"malicious": True, "reason": "Unauthorized behavior"},
+            "sourceHash": digest(self.record["code"].encode()),
+        }
+        with self.assertRaisesRegex(ValueError, "code safety review"):
+            convert_record(self.record, self.root)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -14,6 +14,7 @@ FAMILIES = [
 # Orthogonal to the scene family: a prompt can exercise several skills.
 # Used to plan/stratify datasets, never as requirements sent to an evaluator.
 DIFFICULTIES = ("easy", "medium", "hard", "very-hard")
+SAFETY_CATEGORIES = ("harmful_image", "malicious_code")
 
 SKILL_TAXONOMY = {
     "primitives": "Basic shapes, paths, fills, and strokes",
@@ -30,7 +31,7 @@ SKILL_TAXONOMY = {
     "artistic_quality": "Color harmony, gradients, and visual finish",
     "negative_constraints": "Explicitly forbidden visual elements",
     "robustness": "Edge cases, clipping, density, and degeneracy",
-    "refusal": "Recognize and refuse unsafe drawing requests",
+    "refusal": "Recognize and refuse unsafe image or malicious-code requests",
 }
 
 
@@ -97,7 +98,13 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
                 raise ValueError("Refusal skills must include refusal")
             normalized_row["kind"] = "refusal"
             normalized_row["refusal"] = refusal.strip()
+            if "safetyCategory" in row:
+                if row["safetyCategory"] not in SAFETY_CATEGORIES:
+                    raise ValueError(f"safetyCategory must be one of {SAFETY_CATEGORIES}")
+                normalized_row["safetyCategory"] = row["safetyCategory"]
         elif "refusal" in row:
             raise ValueError("Refusal target requires kind=refusal")
+        elif "safetyCategory" in row:
+            raise ValueError("safetyCategory requires kind=refusal")
         result.append(normalized_row)
     return result
