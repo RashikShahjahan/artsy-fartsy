@@ -314,7 +314,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, threshold),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=GenerateConfig(max_tokens=2048, temperature=0, max_retries=0,
-                              reasoning_effort="none" if is_direct_tinker() else None,
+                              extra_body={"reasoning_effort": False} if is_direct_tinker() else None,
                               timeout=120, max_connections=1),
         turn_limit=16, token_limit=32768, time_limit=300,
         fail_on_error=False,

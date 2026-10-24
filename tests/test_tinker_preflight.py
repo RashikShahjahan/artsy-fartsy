@@ -32,8 +32,8 @@ class TinkerPreflightTests(unittest.TestCase):
             tool_request, vision_request = [call.kwargs for call in
                                             client.chat.completions.create.call_args_list]
         self.assertEqual(tool_request["tool_choice"]["function"]["name"], "bash")
-        self.assertEqual(tool_request["reasoning_effort"], "none")
-        self.assertEqual(vision_request["reasoning_effort"], "none")
+        self.assertEqual(tool_request["extra_body"], {"reasoning_effort": False})
+        self.assertEqual(vision_request["extra_body"], {"reasoning_effort": False})
         image_url = vision_request["messages"][0]["content"][1]["image_url"]["url"]
         self.assertTrue(image_url.startswith("data:image/png;base64,"))
         self.assertTrue(base64.b64decode(image_url.split(",", 1)[1]).startswith(b"\x89PNG"))

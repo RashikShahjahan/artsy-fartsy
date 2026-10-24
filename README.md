@@ -217,8 +217,8 @@ API is a beta feature: before evaluating, verify both mandatory Mini SWE feature
 
 The direct endpoint performs model-side prompt rendering and applies Qwen's
 default chat template, so results may not be identical to the bundled server's
-custom renderer. The evaluation requests `reasoning_effort=none` for direct
-Tinker to retain the non-thinking baseline. To use the old local bridge instead,
+custom renderer. The evaluation sends `reasoning_effort=false` for direct
+Tinker to retain the non-thinking baseline (Qwen3.5 expects a boolean). To use the old local bridge instead,
 unset `ARTSY_MODEL_URL`, start `make serve`, and keep using the same eval command.
 Runs use one sample at a time to match the bundled serialized model server.
 Use a fresh output directory for every run. The first run builds the Docker image.

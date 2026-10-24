@@ -36,7 +36,8 @@ def main() -> int:
                 "parameters": {"type": "object", "properties": {
                     "command": {"type": "string"}}, "required": ["command"]}}}],
             tool_choice={"type": "function", "function": {"name": "bash"}},
-            max_tokens=128, temperature=0, reasoning_effort="none",
+            max_tokens=128, temperature=0,
+            extra_body={"reasoning_effort": False},
         )
         calls = tool_reply.choices[0].message.tool_calls or []
         if not calls or calls[0].function.name != "bash":
@@ -56,7 +57,8 @@ def main() -> int:
                 {"type": "text", "text": "What is the dominant color of this image? Reply with one word."},
                 {"type": "image_url", "image_url": {"url": image_url}},
             ]}],
-            max_tokens=64, temperature=0, reasoning_effort="none",
+            max_tokens=64, temperature=0,
+            extra_body={"reasoning_effort": False},
         )
         answer = vision_reply.choices[0].message.content or ""
         if "red" not in answer.lower():

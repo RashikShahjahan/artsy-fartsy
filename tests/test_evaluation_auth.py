@@ -51,7 +51,7 @@ class InspectSWEModelAuthTests(unittest.TestCase):
             self.assertEqual(os.environ["OPENAI_API_KEY"], "independent-judge-key")
             task = drawing_task([{"id": "smoke", "prompt": "Draw a circle", "seed": 0}],
                                 "/tmp/artsy-test-artifacts")
-            self.assertEqual(task.config.reasoning_effort, "none")
+            self.assertEqual(task.config.extra_body, {"reasoning_effort": False})
 
     def test_direct_tinker_requires_credentials_and_supports_explicit_override(self):
         with patch.dict(os.environ, {"ARTSY_MODEL_URL": TINKER_MODEL_URL}, clear=True):
