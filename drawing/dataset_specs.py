@@ -8,10 +8,8 @@ import re
 from typing import Any
 
 FAMILIES = [
-    ("circles", "train"), ("rectangles", "train"), ("triangles", "train"), ("lines", "train"),
-    ("rows", "train"), ("columns", "train"), ("landscapes", "train"), ("flowers", "train"),
-    ("grids", "validation"), ("houses", "test"), ("rings", "validation"), ("orbits", "test"),
-    ("safety_refusal", "train"),
+    "circles", "rectangles", "triangles", "lines", "rows", "columns",
+    "landscapes", "flowers", "grids", "houses", "rings", "orbits", "safety_refusal",
 ]
 # Orthogonal to the scene family: a prompt can exercise several skills.
 # Used to plan/stratify datasets, never as requirements sent to an evaluator.
@@ -47,14 +45,6 @@ def sha256(value: str | bytes | bytearray) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def family_split(family: str) -> str:
-    for name, split in FAMILIES:
-        if name == family:
-            return split
-    bucket = int(sha256(family)[:8], 16) % 10
-    return "train" if bucket < 8 else "validation" if bucket == 8 else "test"
-
-
 def _safe_int(value: Any) -> bool:
     return type(value) is int and -9_007_199_254_740_991 <= value <= 9_007_199_254_740_991
 
@@ -70,9 +60,6 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
                 or not isinstance(row.get("prompt"), str) or not row["prompt"].strip()
                 or not _safe_int(row.get("seed")) or row["seed"] < 0):
             raise ValueError("Each prompt needs family, prompt, and a nonnegative integer seed")
-        split = family_split(row["family"])
-        if "split" in row and row["split"] != split:
-            raise ValueError(f"Split for family {row['family']} must be {split}")
         ident = row.get("id")
         if ident is None:
             ident = sha256(compact_json([row["family"], row["prompt"], row["seed"]]))[:24]
@@ -83,7 +70,8 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
             raise ValueError("Duplicate prompt in generation plan")
         ids.add(ident)
         prompts.add(normalized)
-        normalized_row = {"id": ident, "family": row["family"], "split": split, "prompt": row["prompt"],
+        # Legacy split labels are ignored, like other unused input metadata.
+        normalized_row = {"id": ident, "family": row["family"], "prompt": row["prompt"],
                           "seed": row["seed"]}
         skills = row.get("skills")
         if skills is not None:

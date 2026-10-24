@@ -370,8 +370,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         records.sort(key=lambda r: (order[r["spec"]["id"]], r["candidate"]))
         for name, rows in [("candidates", records), ("accepted", [r for r in records if r["status"] == "accepted"]),
                            ("review", [r for r in records if r["status"] == "review"]),
-                           ("rejected", [r for r in records if r["status"] in ("rejected", "infrastructure_error")]),
-                           *[(split, [r for r in records if r["status"] == "accepted" and r["spec"]["split"] == split]) for split in ("train", "validation", "test")]]:
+                           ("rejected", [r for r in records if r["status"] in ("rejected", "infrastructure_error")])]:
             _write_jsonl_atomic(output / f"{name}.jsonl", rows)
         completions = []
         for record in records:

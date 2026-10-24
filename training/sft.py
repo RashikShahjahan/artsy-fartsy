@@ -1,6 +1,6 @@
 """Tinker LoRA SFT for the Qwen3.5 vision-language drawing policy.
 
-Run from the repository root: python -m training.sft --dataset DATA/train.jsonl --dry-run
+Run from the repository root: python -m training.sft --dataset DATA/accepted.jsonl --dry-run
 """
 
 import argparse

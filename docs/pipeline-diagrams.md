@@ -85,7 +85,7 @@ and safety judge roles; `--execution-only` skips both.
 
 ```mermaid
 flowchart TD
-    A[Dataset output train.jsonl] --> B[Load and validate records,<br/>hashes, split, review status]
+    A[Dataset output accepted.jsonl] --> B[Load and validate records,<br/>hashes, review status]
     B --> P{Authored refusal pair?}
     P -- Yes --> X[Write refusal.json and submit<br/>as supervised tool calls]
     X --> Q

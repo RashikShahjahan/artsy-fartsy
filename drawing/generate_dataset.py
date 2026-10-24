@@ -35,13 +35,13 @@ HELP = """Python dataset generation
   --safety-judge-model ID       Vision safety judge, or ARTSY_SAFETY_JUDGE_MODEL
   --safety-judge-url URL        Safety endpoint (defaults to teacher URL)
   --timeout-ms N        Per-request deadline (default: 60000)
-  --dry-run             LLM-generate prompt JSONL (no rendering, no split labels)
+  --dry-run             LLM-generate prompt JSONL (no rendering)
   --retry-errors        Retry checkpointed infrastructure failures on resume
   --help, -h            Show this help
 
 Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_CORRECTNESS_JUDGE_API_KEY, ARTSY_SAFETY_JUDGE_API_KEY.
-Both vision judges are required for automatic acceptance. No judges: executable examples go to review.jsonl; accepted/train/validation/test
-remain empty. Repeating the same command resumes checkpointed prompts and candidate records.
+Both vision judges are required for automatic acceptance. No judges: executable examples go to review.jsonl;
+authored refusal pairs can still enter accepted.jsonl. Repeating the same command resumes checkpointed prompts and candidate records.
 Generated Python runs locally with your current permissions, as with the drawing CLI.
 The prompt plan is saved before rendering and reused on resume."""
 
@@ -222,8 +222,7 @@ async def main(argv: list[str] | None = None) -> int:
         prompt_generation = {**prompt_config, "specsHash": sha256(compact_json(specs))}
     if args.dry_run:
         for spec in specs:
-            row = {key: value for key, value in spec.items() if key != "split"}
-            print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+            print(json.dumps(spec, ensure_ascii=False, separators=(",", ":")))
         return 0
     if not model and any(spec.get("kind") != "refusal" for spec in specs):
         raise ValueError("Set --teacher-model or ARTSY_TEACHER_MODEL for drawing solutions")

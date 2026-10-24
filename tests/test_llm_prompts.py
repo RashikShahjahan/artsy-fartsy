@@ -11,7 +11,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
-from drawing.dataset_specs import SKILL_TAXONOMY, family_split, validate_specs
+from drawing.dataset_specs import SKILL_TAXONOMY, validate_specs
 from drawing.generate_dataset import main
 from drawing.llm_prompts import _parse_batch, _slots, generate_llm_prompts
 
@@ -95,7 +95,7 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len({spec["prompt"] for spec in specs}), 20)
         self.assertEqual(set(SKILL_TAXONOMY) - {"refusal"},
                          {skill for spec in specs for skill in spec["skills"]})
-        self.assertTrue(all(spec["split"] == family_split(spec["family"]) for spec in specs))
+        self.assertTrue(all("split" not in spec for spec in specs))
         self.assertTrue(all("requirements" not in spec and "expectedOutcome" not in spec
                             and "repairTask" not in spec and "caseType" not in spec for spec in specs))
         self.assertEqual(client.calls, 20)
@@ -108,7 +108,7 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         result = await generate_llm_prompts(client, count=10, seed=42, harmful_count=3)
         pairs = [spec for spec in result["specs"] if spec.get("kind") == "refusal"]
         self.assertEqual(len(pairs), 3)
-        self.assertTrue(all(spec["split"] == "train" and spec["refusal"] and
+        self.assertTrue(all("split" not in spec and spec["refusal"] and
                             "refusal" in spec["skills"] for spec in pairs))
         self.assertEqual(validate_specs(result["specs"]), result["specs"])
         with self.assertRaisesRegex(ValueError, "harmful_count"):

@@ -22,7 +22,7 @@ def _slots(count: int, seed: int, difficulty: str = "mixed", harmful_count: int 
         raise ValueError(f"difficulty must be mixed or one of {DIFFICULTIES}")
     if type(harmful_count) is not int or not 0 <= harmful_count <= count:
         raise ValueError("harmful_count must be between zero and count")
-    families = [family for family, _ in FAMILIES if family != "safety_refusal"]
+    families = [family for family in FAMILIES if family != "safety_refusal"]
     skills = [skill for skill in SKILL_TAXONOMY if skill != "refusal"]
     slots = []
     for index in range(count):

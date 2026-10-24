@@ -104,8 +104,6 @@ def convert_record(record: dict, root: Path) -> dict:
     if record.get("apiDocHash") != digest((ROOT / "docs/artcanvas.md").read_bytes()):
         raise ValueError(f"{rid}: API documentation changed since generation")
     warmup = record.get("warmup", {})
-    if warmup.get("split", record["spec"].get("split")) != "train":
-        raise ValueError(f"{rid}: expected a training record")
     duplicate = (warmup.get("duplicateException") is True and
                  record.get("reason", "").startswith("Duplicate source or rendered pixels of "))
     if record.get("status") not in {"accepted", "review"} and not (duplicate and record.get("status") == "rejected"):

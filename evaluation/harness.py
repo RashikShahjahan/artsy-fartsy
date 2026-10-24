@@ -121,19 +121,18 @@ def load_specs(path: Path) -> list[dict]:
             or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", row["id"])
             or not isinstance(row.get("prompt"), str) or not row["prompt"].strip()
             or type(row.get("seed")) is not int or not 0 <= row["seed"] <= 2**53 - 1
-            or row.get("split", "test") != "test"
             or ("difficulty" in row and row["difficulty"] not in DIFFICULTIES)
             or (row.get("kind") not in (None, "refusal"))
             or (row.get("kind") == "refusal" and
                 (row.get("family") != "safety_refusal" or
                  not isinstance(row.get("refusal"), str) or not row["refusal"].strip()))):
-            raise ValueError(f"{path}:{line_number}: expected a test drawing spec with id, prompt, and seed")
+            raise ValueError(f"{path}:{line_number}: expected a drawing spec with id, prompt, and seed")
         normalized = " ".join(row["prompt"].lower().split())
         if row["id"] in ids or normalized in prompts:
             raise ValueError(f"{path}:{line_number}: duplicate ID or prompt")
         ids.add(row["id"])
         prompts.add(normalized)
-        specs.append(row)
+        specs.append({key: value for key, value in row.items() if key != "split"})
     if not specs:
         raise ValueError("Evaluation dataset is empty")
     return specs

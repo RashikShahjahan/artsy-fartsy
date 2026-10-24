@@ -269,7 +269,7 @@ difficulty. Visual repair of intermediate previews is not independently judged.
 Logs also record hashes of the dataset, runtime, documentation, and harness
 configuration. Open them with `.eval-venv/bin/inspect view --log-dir eval-results/base/logs`.
 Use `--dataset path/to/prompts.jsonl` for custom drawing test specs with `id`,
-`prompt` and `seed`. Explicit splits must be `test`.
+`prompt` and `seed`. Legacy split labels are ignored.
 
 ## Generate a dataset
 
@@ -321,13 +321,13 @@ of prompts. Harmful slots ask the prompt writer for a clearly disallowed
 drawing request plus a concise refusal target. They are marked
 `kind="refusal"`, `family="safety_refusal"`, and include a `refusal` field.
 The full run stores exactly **one** authored refusal record per harmful prompt
-in `train.jsonl`, without asking the teacher to render unsafe content. These
+in `accepted.jsonl`, without asking the teacher to render unsafe content. These
 pairs are accepted as synthetic supervised targets; they are **not independently
 safety-validated**, so review them before fine-tuning. Ordinary drawing prompts
 retain the usual candidate/render/judge process.
 
-Dry-run emits the same `prompt` and `refusal` pair as JSONL without split
-labels or execution. The Inspect evaluator recognizes `kind="refusal"`: a
+Dry-run emits the same `prompt` and `refusal` pair as JSONL without execution.
+The Inspect evaluator recognizes `kind="refusal"`: a
 properly formatted refusal counts as adherence for a refusal-labeled task,
 while rendering the harmful request does not. Such samples have
 `render_valid=0` when correctly refused, so consult the separate
@@ -355,9 +355,9 @@ completion and attempt count. `prompt-progress.json` pins the configuration.
 Repeating the same command resumes only missing prompts; once all are ready,
 `prompt-plan.json` freezes the complete ordered plan **before rendering**.
 Changing the prompt configuration requires a new output directory. Neither API
-keys nor credentials are persisted. `--dry-run` prints JSONL without split
-labels and does not checkpoint. For complete dataset runs, existing family-based
-training splits remain internal.
+keys nor credentials are persisted. `--dry-run` prints JSONL and does not
+checkpoint. Dataset generation does not assign train, validation, or test splits;
+all accepted records go into `accepted.jsonl`.
 
 For higher-difficulty training data, use `--difficulty hard` or
 `--difficulty very-hard` with a fresh output directory. Full generation saves the teacher's
@@ -397,7 +397,7 @@ The teacher endpoint must support non-streaming OpenAI-compatible
 (maximum two retries), source/pixel deduplication, and checkpoint semantics
 are otherwise unchanged. Without both judges, ordinary executable drawings
 remain in `review.jsonl`; authored refusal pairs can still be accepted into
-`train.jsonl`. Judge results are recorded
+`accepted.jsonl`. Judge results are recorded
 separately for correctness and safety, subject to separate human audit.
 
 Custom prompt files still bypass the planner:
@@ -408,18 +408,34 @@ Custom prompt files still bypass the planner:
 
 Pass `--input prompts.jsonl`. Extra fields for `requirements` and
 `expectedOutcome` are ignored by dataset validation, not sent to the judge.
-The `family` label is used for group-level splits; `skills` and `difficulty`
-are optional metadata. Shared schema validation and taxonomy definitions live
+The `family` label describes the scene category; it does not restrict which
+records can be used for training or evaluation. The built-in families are
+`circles`, `rectangles`, `triangles`, `lines`, `rows`, `columns`, `landscapes`,
+`flowers`, `grids`, `houses`, `rings`, `orbits`, and `safety_refusal` (authored
+refusal pairs). `skills` and `difficulty` are optional metadata. Shared schema
+validation and taxonomy definitions live
 in `drawing/dataset_specs.py`; the old fixed-template generator has been removed.
 
 Each dataset directory also includes `manifest.json`, `prompts.jsonl`,
 `records/*.json` for candidate checkpoints, `artifacts/episode-*/` for
 executed code and PNGs, `candidates.jsonl`, `accepted.jsonl`,
-`review.jsonl`, `rejected.jsonl`, `train.jsonl`, `validation.jsonl`,
-`test.jsonl`, and `summary.json`. Resume with the original command;
+`review.jsonl`, `rejected.jsonl`, and `summary.json`. Use `accepted.jsonl` as
+the combined dataset for training. Resume with the original command;
 `--retry-errors` retries infrastructure failures. Outputs are Git-ignored.
 Generated Python runs locally with the permissions of the drawing CLI;
 review synthetic prompts and code before using them in sensitive contexts.
+
+Existing datasets with split metadata can be migrated without regenerating
+prompts, code, or images:
+
+```sh
+.venv/bin/python -m drawing.remove_splits datasets/my-run
+```
+
+This removes legacy split labels from checkpoints, updates frozen-plan hashes,
+and deletes `train.jsonl`, `validation.jsonl`, and `test.jsonl` after verifying
+that their records are all retained in `accepted.jsonl`. Record IDs and artifact
+hashes stay unchanged. Migrate an old run before resuming its original command.
 
 ### Training data
 
@@ -449,20 +465,20 @@ uv venv --python 3.12 .sft-venv
 uv pip install --python .sft-venv/bin/python -r training/requirements.txt
 
 # Validate recorded artifacts and inspect a converted example without API calls:
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl --dry-run
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl \
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl --dry-run
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
   --dry-run --export /tmp/artsy-sft.jsonl
 
 # Download just tokenizer metadata and check every training example locally:
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl --check-batch
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl --check-batch
 
 # Configure Tinker authentication in your shell, then start hosted training:
 export TINKER_API_KEY=your-tinker-api-key
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl \
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
   --output-dir checkpoints/sft-run
 
 # Resume weights, optimizer state and deterministic data order from local metadata:
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/train.jsonl \
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
   --output-dir checkpoints/sft-run \
   --resume-from-checkpoint checkpoints/sft-run/checkpoint-000050.json
 ```
@@ -475,7 +491,7 @@ submission. Recorded PNGs and image observations are validated as artifacts
 but excluded from model inputs, along with prompts to inspect those images.
 The adapter synthesizes bash wrappers around the teacher's recorded Python;
 these are converted demonstrations, not collected Mini SWE transcripts.
-Source/image hashes, API documentation version, training split, and explicit
+Source/image hashes, API documentation version, and explicit
 legacy duplicate exceptions are checked during conversion. Review pending records
 before training, or explicitly include them with `--allow-unreviewed`.
 

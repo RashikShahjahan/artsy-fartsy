@@ -63,7 +63,7 @@ class EvaluationTest(unittest.TestCase):
                           for level in ("easy", "medium", "hard", "very-hard")},
                          {"easy": 5, "medium": 5, "hard": 5, "very-hard": 5})
         self.assertTrue(all("requirements" not in row for row in specs))
-        training = ROOT / "datasets/sft-warmup-100/train.jsonl"
+        training = ROOT / "datasets/sft-warmup-100/accepted.jsonl"
         if training.exists():
             prompts = {json.loads(line)["spec"]["prompt"] for line in training.read_text().splitlines()}
             self.assertFalse(prompts.intersection(row["prompt"] for row in specs))
@@ -72,11 +72,13 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(task.token_limit, 32768)
         self.assertEqual(task.config.max_tokens, 2048)
 
-    def test_dataset_rejects_training_rows_duplicate_prompts_and_invalid_inputs(self):
+    def test_dataset_rejects_duplicate_prompts_and_invalid_inputs(self):
         original = load_specs(ROOT / "evaluation/prompts.jsonl")[0]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "data.jsonl"
-            for rows in ([{**original, "split": "train"}], [{**original, "seed": True}],
+            path.write_text(json.dumps({**original, "split": "train"}))
+            self.assertEqual(load_specs(path), [original])
+            for rows in ([{**original, "seed": True}],
                          [{**original, "prompt": ""}],
                          [{**original, "difficulty": "impossible"}],
                          [original, {**original, "id": "different"}]):

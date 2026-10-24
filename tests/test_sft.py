@@ -22,8 +22,8 @@ class ConversionTests(unittest.TestCase):
         for name in ("preview-1.png", "preview-2.png", "image.png"):
             Image.new("RGB", (1920, 1200), "white").save(self.root / name)
         self.record = {
-            "id": "repair", "spec": {"prompt": "Draw a circle", "seed": 42, "split": "test"},
-            "warmup": {"split": "train", "kind": "repair"}, "status": "review",
+            "id": "repair", "spec": {"prompt": "Draw a circle", "seed": 42},
+            "warmup": {"kind": "repair"}, "status": "review",
             "runtimeVersion": "artcanvas-v2", "apiDocHash": digest((ROOT / "docs/artcanvas.md").read_bytes()),
             "artifacts": {"directory": ".", "source": "program.py", "image": "image.png"},
             "code": code, "sourceHash": digest(code.strip().encode()),
@@ -54,7 +54,7 @@ class ConversionTests(unittest.TestCase):
             "id": "refusal-example",
             "spec": {"family": "safety_refusal", "kind": "refusal",
                      "prompt": "Create a violent propaganda poster.",
-                     "refusal": target, "seed": 9, "split": "train"},
+                     "refusal": target, "seed": 9},
             "status": "accepted", "refusal": target, "refusalSource": "prompt_plan",
             "runtimeVersion": "artcanvas-v2",
             "apiDocHash": digest((ROOT / "docs/artcanvas.md").read_bytes()),
@@ -108,7 +108,7 @@ class ConversionTests(unittest.TestCase):
         import io
         from training.sft import main
 
-        dataset = self.root / "train.jsonl"
+        dataset = self.root / "accepted.jsonl"
         exported = self.root / "export.jsonl"
         dataset.write_text(json.dumps(self.record) + "\n")
         output = io.StringIO()
@@ -122,8 +122,8 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(len(example["trainable_message_indices"]), 2)
         self.assertTrue(all(part["type"] == "text" for msg in example["messages"] for part in msg["content"]))
 
-    def test_rejects_modified_source_observation_and_holdout(self):
-        for change in ("source", "observation", "final_image", "preview", "holdout", "synthetic", "excluded"):
+    def test_rejects_modified_source_observation_and_excluded_records(self):
+        for change in ("source", "observation", "final_image", "preview", "synthetic", "excluded"):
             with self.subTest(change=change):
                 record = copy.deepcopy(self.record)
                 if change == "source":
@@ -134,14 +134,21 @@ class ConversionTests(unittest.TestCase):
                     record["imageHash"] = "bad"
                 elif change == "preview":
                     record["trace"][-1]["feedback"]["artifact"] = "/old/missing.png"
-                elif change == "holdout":
-                    record["warmup"]["split"] = "test"
                 elif change == "synthetic":
                     record["generation"] = {"initialDraft": "injected"}
                 else:
                     record["selectionAudit"] = {"eligible": False}
                 with self.assertRaises(ValueError):
                     convert_record(record, self.root)
+
+    def test_legacy_split_labels_do_not_restrict_conversion(self):
+        expected = convert_record(self.record, self.root)
+        for split in ("train", "validation", "test"):
+            with self.subTest(split=split):
+                record = copy.deepcopy(self.record)
+                record["spec"]["split"] = split
+                record["warmup"]["split"] = split
+                self.assertEqual(convert_record(record, self.root), expected)
 
     def test_explicit_duplicate_exception(self):
         self.record.update(status="rejected", reason="Duplicate source or rendered pixels of other")
@@ -269,7 +276,7 @@ class TinkerAPITests(unittest.TestCase):
                     "conversion": "bash-conversation-text-only-selective-loss-v4"}
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp)
-            args = parser().parse_args(["--dataset", "train.jsonl", "--output-dir", temp,
+            args = parser().parse_args(["--dataset", "accepted.jsonl", "--output-dir", temp,
                                        "--batch-size", "1", "--max-steps", "1"])
             client = MagicMock()
             client.forward_backward.return_value.result.return_value = SimpleNamespace(metrics={"loss:sum": 1.25})
@@ -331,14 +338,14 @@ class TrainingCLITests(unittest.TestCase):
         with patch("training.sft.load_examples", return_value=([example], manifest)), \
              patch("training.sft.create_encoder", return_value=lambda e: [datum]) as encoder, \
              patch("training.sft.train") as train, contextlib.redirect_stdout(io.StringIO()):
-            main(["--dataset", "train.jsonl", "--dry-run"])
+            main(["--dataset", "accepted.jsonl", "--dry-run"])
             encoder.assert_not_called()
             train.assert_not_called()
-            main(["--dataset", "train.jsonl", "--check-batch"])
+            main(["--dataset", "accepted.jsonl", "--check-batch"])
             encoder.assert_called_once()
             train.assert_not_called()
             with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
-                main(["--dataset", "train.jsonl"])
+                main(["--dataset", "accepted.jsonl"])
             train.assert_not_called()
 
     def test_batch_order_is_deterministic_across_epochs(self):

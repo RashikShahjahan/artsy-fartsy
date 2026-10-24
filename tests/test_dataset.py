@@ -16,7 +16,8 @@ from PIL import Image
 from drawing.dataset import generate_dataset
 from drawing.judges import parse_correctness_judgment, parse_safety_judgment, correctness_judge_prompt, safety_judge_prompt
 from drawing.dataset_client import chat_client, parse_json_reply
-from drawing.dataset_specs import compact_json, family_split, sha256, validate_specs
+from drawing.dataset_specs import compact_json, sha256, validate_specs
+from drawing.remove_splits import remove_splits
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -46,17 +47,16 @@ class ScriptedClient:
 
 
 class DatasetSpecTests(unittest.TestCase):
-    def test_spec_identity_and_family_split_are_stable(self) -> None:
+    def test_spec_identity_is_stable_without_split_assignment(self) -> None:
         spec = example_spec()
         self.assertEqual(validate_specs([spec]), [spec])
         self.assertEqual(spec["id"], sha256(compact_json([spec["family"], spec["prompt"], spec["seed"]]))[:24])
-        self.assertEqual(spec["split"], family_split(spec["family"]))
+        self.assertNotIn("split", spec)
         self.assertNotEqual(spec["id"], validate_specs([{**spec, "seed": 43, "id": None}])[0]["id"])
 
     def test_validation_and_fenced_json_are_strict(self) -> None:
         spec = example_spec()
-        with self.assertRaisesRegex(ValueError, "Split"):
-            validate_specs([{**spec, "split": "test"}])
+        self.assertEqual(validate_specs([{**spec, "split": "test"}]), [spec])
         with self.assertRaisesRegex(ValueError, "Duplicate prompt"):
             validate_specs([spec, {**spec, "id": "other"}])
         with self.assertRaisesRegex(ValueError, "safe filenames"):
@@ -113,6 +113,71 @@ class DatasetClientTests(unittest.IsolatedAsyncioTestCase):
         for base in ("http://secret:password@localhost/v1", "https://localhost/v1?secret=x", "file:///tmp/api"):
             with self.assertRaisesRegex(ValueError, "without credentials"):
                 chat_client({"model": "x", "baseUrl": base})
+
+
+class SplitMigrationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.spec = {"id": "house", "family": "houses", "prompt": "Draw a house",
+                     "seed": 1, "split": "test"}
+        self.record = {"id": "house-c0", "spec": self.spec, "status": "accepted",
+                       "sourceHash": "unchanged", "trace": [{"completion": {"text": "raw reply"}}]}
+        specs_hash = sha256(compact_json([self.spec]))
+        self.write("manifest.json", {"specs": [self.spec], "promptGenerator": {"specsHash": specs_hash}})
+        self.write("prompt-plan.json", {"specs": [self.spec], "specsHash": specs_hash})
+        self.write("records/house-c0.json", self.record)
+        self.write("prompt-records/000000.json", {"index": 0, "spec": self.spec})
+        for name in ("accepted", "candidates", "test"):
+            self.write(f"{name}.jsonl", [self.record])
+        self.write("prompts.jsonl", [self.spec])
+        self.write("train.jsonl", [])
+        self.write("validation.jsonl", [])
+
+    def write(self, name: str, value: Any) -> None:
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("".join(compact_json(row) + "\n" for row in value)
+                        if path.suffix == ".jsonl" else json.dumps(value))
+
+    def test_migration_preserves_records_updates_hashes_and_is_idempotent(self) -> None:
+        summary = remove_splits(self.root)
+        self.assertEqual(summary["removedExports"], 3)
+        self.assertEqual(summary["acceptedRecords"], 1)
+        record = json.loads((self.root / "accepted.jsonl").read_text())
+        self.assertEqual(record, {**self.record, "spec": {k: v for k, v in self.spec.items() if k != "split"}})
+        self.assertEqual(json.loads((self.root / "records/house-c0.json").read_text()), record)
+        plan = json.loads((self.root / "prompt-plan.json").read_text())
+        manifest = json.loads((self.root / "manifest.json").read_text())
+        self.assertEqual(plan["specsHash"], sha256(compact_json(plan["specs"])))
+        self.assertEqual(manifest["promptGenerator"]["specsHash"], plan["specsHash"])
+        self.assertEqual(manifest["specs"], plan["specs"])
+        self.assertNotIn("split", json.loads((self.root / "prompt-records/000000.json").read_text())["spec"])
+        for name in ("train", "validation", "test"):
+            self.assertFalse((self.root / f"{name}.jsonl").exists())
+        self.assertEqual(remove_splits(self.root), {"updatedFiles": 0, "removedExports": 0, "acceptedRecords": 1})
+
+    def test_mismatched_exports_or_corrupt_plan_are_rejected_without_edits(self) -> None:
+        for corrupt in ("exports", "plan"):
+            with self.subTest(corrupt=corrupt):
+                if corrupt == "exports":
+                    self.write("test.jsonl", [])
+                else:
+                    self.write("test.jsonl", [self.record])
+                    self.write("prompt-plan.json", {"specs": [self.spec], "specsHash": "bad"})
+                before = {path: path.read_bytes() for path in self.root.rglob("*") if path.is_file()}
+                with self.assertRaises(ValueError):
+                    remove_splits(self.root)
+                self.assertEqual({path: path.read_bytes() for path in self.root.rglob("*") if path.is_file()}, before)
+
+    def test_active_generation_lock_is_preserved(self) -> None:
+        lock = self.root / ".prompt-generation.lock"
+        lock.write_text("active")
+        with self.assertRaisesRegex(RuntimeError, "locked"):
+            remove_splits(self.root)
+        self.assertEqual(lock.read_text(), "active")
+        self.assertFalse((self.root / ".generation.lock").exists())
 
 
 class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
@@ -183,7 +248,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         teacher = ScriptedClient([json.dumps({"code": "broken python"}), json.dumps({"code": code})])
         correctness = ScriptedClient([self.correctness(), self.correctness()], model="correctness", base_url="http://reviewer/v1")
         safety = ScriptedClient([self.safety(), self.safety()], model="safety", base_url="http://reviewer/v1")
-        spec = {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 42}
+        spec = {"id": "circle", "family": "circles", "prompt": "Draw a blue circle", "seed": 42}
         options = {"output": str(self.output), "specs": [spec], "teacher": teacher,
                    "correctnessJudge": correctness, "safetyJudge": safety,
                    "candidates": 1, "config": self.config(), "renderer": self.renderer()}
@@ -203,6 +268,16 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(record["evaluations"][0]), {"artifact", "correctness", "safety"})
         self.assertNotIn("requirements", record["spec"])
         self.assertNotIn("expectedOutcome", record["spec"])
+        # A legacy family-split checkpoint can resume after metadata migration,
+        # with no new teacher or judge calls and unchanged recorded trajectory.
+        record["spec"]["split"] = "train"
+        (self.output / "records/circle-c0.json").write_text(json.dumps(record))
+        manifest_path = self.output / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["specs"][0]["split"] = "train"
+        manifest_path.write_text(json.dumps(manifest))
+        (self.output / "train.jsonl").write_text(compact_json(record) + "\n")
+        remove_splits(self.output)
         rerun = await generate_dataset(options)
         self.assertEqual(rerun, summary); self.assertEqual(len(teacher.messages), 2)
         with self.assertRaisesRegex(ValueError, "configuration changed"):
@@ -229,15 +304,15 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["refusalPairs"], 1)
         self.assertEqual(summary["requests"], 0)
         self.assertEqual(len(list((self.output / "records").glob("*.json"))), 1)
-        row = json.loads((self.output / "train.jsonl").read_text())
+        row = json.loads((self.output / "accepted.jsonl").read_text())
         self.assertEqual(row["refusal"], spec["refusal"])
         self.assertEqual(row["artifacts"], {})
         self.assertEqual(row["generation"]["initialDraft"], "authored_refusal")
 
-    async def test_duplicate_rendered_pixels_are_rejected_across_splits(self) -> None:
+    async def test_duplicate_rendered_pixels_are_rejected_across_families(self) -> None:
         specs = [
-            {"id": "circle", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 1},
-            {"id": "house", "family": "houses", "split": "test", "prompt": "Draw a blue house", "seed": 2},
+            {"id": "circle", "family": "circles", "prompt": "Draw a blue circle", "seed": 1},
+            {"id": "house", "family": "houses", "prompt": "Draw a blue house", "seed": 2},
         ]
         correctness = ScriptedClient([self.correctness()] * 4, model="correctness")
         safety = ScriptedClient([self.safety()] * 4, model="safety")
@@ -248,7 +323,11 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["accepted"], 1); self.assertEqual(summary["rejected"], 1)
         rejected = (self.output / "rejected.jsonl").read_text()
         self.assertIn("Duplicate source or rendered pixels", rejected)
-        self.assertEqual((self.output / "test.jsonl").read_text(), "")
+        accepted = [json.loads(line) for line in (self.output / "accepted.jsonl").read_text().splitlines()]
+        self.assertEqual(len(accepted), 1)
+        self.assertNotIn("split", accepted[0]["spec"])
+        for name in ("train", "validation", "test"):
+            self.assertFalse((self.output / f"{name}.jsonl").exists())
 
     async def test_malformed_teacher_reply_uses_bounded_repairs_and_lock_is_enforced(self) -> None:
         one = example_spec()
@@ -311,7 +390,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         import io as image_io
         from PIL import Image
 
-        spec = {"id": "visual-repair", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 13}
+        spec = {"id": "visual-repair", "family": "circles", "prompt": "Draw a blue circle", "seed": 13}
 
         def color_png(color: tuple[int, int, int]) -> bytes:
             buff = image_io.BytesIO(); Image.new("RGB", (32, 32), color).save(buff, format="PNG"); return buff.getvalue()
@@ -399,7 +478,7 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(row["previousAttempts"][0]["status"], "infrastructure_error")
 
     async def test_one_shot_success_is_valid_training_data(self) -> None:
-        spec = {"id": "one-shot", "family": "circles", "split": "train", "prompt": "Draw a blue circle", "seed": 20}
+        spec = {"id": "one-shot", "family": "circles", "prompt": "Draw a blue circle", "seed": 20}
         summary = await generate_dataset({"output": str(self.output), "specs": [spec], "candidates": 1,
                                           "teacher": ScriptedClient(['{"code":"draw()"}']),
                                           "correctnessJudge": ScriptedClient([self.correctness()] * 2, model="correctness"),

@@ -70,21 +70,24 @@ class DrawingCliTests(unittest.TestCase):
     def clean_env(self) -> dict[str, str]:
         env = os.environ.copy()
         for key in list(env):
-            if (key == "TEACHER_API_KEY" or key.startswith("ARTSY_TEACHER_")
-                    or key.startswith("ARTSY_JUDGE_")):
+            if key == "TEACHER_API_KEY" or key.startswith("ARTSY_"):
                 env.pop(key)
         return env
 
     def run_cli(self, *args: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [sys.executable, "-m", "drawing.generate_dataset", *args],
-            cwd=ROOT,
-            env=self.clean_env(),
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-            check=False,
-        )
+        env = self.clean_env()
+        env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(ROOT), env.get("PYTHONPATH")]))
+        # Keep local .env judge endpoints/credentials out of fake-teacher tests.
+        with tempfile.TemporaryDirectory(prefix="artsy-cli-cwd-") as cwd:
+            return subprocess.run(
+                [sys.executable, "-m", "drawing.generate_dataset", *args],
+                cwd=cwd,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=timeout,
+                check=False,
+            )
 
     def test_generation_and_resume_use_local_teacher_and_render_submission(self):
         with tempfile.TemporaryDirectory(prefix="artsy-drawing-cli-") as directory, FakeTeacher() as teacher:

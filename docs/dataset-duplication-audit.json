@@ -1,0 +1,729 @@
+{
+  "dataset": "datasets/sft-v1",
+  "date": "2026-10-24",
+  "method": {
+    "normalization": "Unicode NFKC, casefold, whitespace collapse",
+    "tokens": "unique ASCII [a-z0-9]+ tokens, including short words",
+    "flag": "token Jaccard >= 0.55 AND difflib.SequenceMatcher ratio >= 0.70",
+    "sequenceMatcherAutojunk": true,
+    "interpretation": "Review candidates, not confirmed semantic duplicates; connected components need not be cliques."
+  },
+  "counts": {
+    "prompts": 1000,
+    "accepted": 853,
+    "pairs": 59,
+    "promptsInPairs": 35,
+    "acceptedPairs": 58,
+    "acceptedPromptsInPairs": 34,
+    "crossSplitPairs": 0
+  },
+  "familyDifficultyCounts": {
+    "circles": {
+      "hard": 83
+    },
+    "columns": {
+      "very-hard": 67
+    },
+    "flowers": {
+      "medium": 68
+    },
+    "grids": {
+      "hard": 84
+    },
+    "houses": {
+      "very-hard": 67
+    },
+    "landscapes": {
+      "easy": 84
+    },
+    "lines": {
+      "medium": 66
+    },
+    "orbits": {
+      "medium": 66
+    },
+    "rectangles": {
+      "very-hard": 66
+    },
+    "rings": {
+      "easy": 83
+    },
+    "rows": {
+      "hard": 83
+    },
+    "safety_refusal": {
+      "medium": 50,
+      "very-hard": 50
+    },
+    "triangles": {
+      "easy": 83
+    }
+  },
+  "acceptedSplitDifficultyCounts": {
+    "train": {
+      "easy": 165,
+      "medium": 164,
+      "hard": 137,
+      "very-hard": 146
+    },
+    "validation": {
+      "hard": 70,
+      "easy": 80
+    },
+    "test": {
+      "very-hard": 28,
+      "medium": 63
+    }
+  },
+  "pairs": [
+    {
+      "left": "093481c875dd446210059ba7",
+      "right": "cb0936c8e19093fc84489821",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.625,
+      "sequenceRatio": 0.77027
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "f0f7071fd783a53ce660d7de",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.666667,
+      "sequenceRatio": 0.791946
+    },
+    {
+      "left": "093481c875dd446210059ba7",
+      "right": "03bf1cbff6f121eeee41c0fb",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.64,
+      "sequenceRatio": 0.77707
+    },
+    {
+      "left": "d82b241999b7c74df02be72a",
+      "right": "03bf1cbff6f121eeee41c0fb",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.6,
+      "sequenceRatio": 0.781457
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "460d39ccfecefa08ec5d20cf",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.6,
+      "sequenceRatio": 0.777385
+    },
+    {
+      "left": "093481c875dd446210059ba7",
+      "right": "064641a84e28cb9cff6eaecb",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.695652,
+      "sequenceRatio": 0.814815
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "064641a84e28cb9cff6eaecb",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.714286,
+      "sequenceRatio": 0.833977
+    },
+    {
+      "left": "03bf1cbff6f121eeee41c0fb",
+      "right": "064641a84e28cb9cff6eaecb",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.652174,
+      "sequenceRatio": 0.830325
+    },
+    {
+      "left": "03bf1cbff6f121eeee41c0fb",
+      "right": "b458bbb8d142259f708833f7",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.551724,
+      "sequenceRatio": 0.712991
+    },
+    {
+      "left": "093481c875dd446210059ba7",
+      "right": "9c681cce761c6eb30c352068",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.625,
+      "sequenceRatio": 0.75
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "9c681cce761c6eb30c352068",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.565217,
+      "sequenceRatio": 0.714286
+    },
+    {
+      "left": "064641a84e28cb9cff6eaecb",
+      "right": "9c681cce761c6eb30c352068",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.636364,
+      "sequenceRatio": 0.82397
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "7b9ddd878a96d33b1101a718",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.636364,
+      "sequenceRatio": 0.802974
+    },
+    {
+      "left": "064641a84e28cb9cff6eaecb",
+      "right": "7b9ddd878a96d33b1101a718",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.565217,
+      "sequenceRatio": 0.777778
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "1afc7ebc31fafe82539cc046",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.64,
+      "sequenceRatio": 0.755853
+    },
+    {
+      "left": "064641a84e28cb9cff6eaecb",
+      "right": "1afc7ebc31fafe82539cc046",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.64,
+      "sequenceRatio": 0.706667
+    },
+    {
+      "left": "093481c875dd446210059ba7",
+      "right": "d4c7120840b78a52fbd57aa2",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.708333,
+      "sequenceRatio": 0.85625
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "d4c7120840b78a52fbd57aa2",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.809524,
+      "sequenceRatio": 0.836879
+    },
+    {
+      "left": "03bf1cbff6f121eeee41c0fb",
+      "right": "d4c7120840b78a52fbd57aa2",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.6,
+      "sequenceRatio": 0.806667
+    },
+    {
+      "left": "064641a84e28cb9cff6eaecb",
+      "right": "d4c7120840b78a52fbd57aa2",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.727273,
+      "sequenceRatio": 0.869258
+    },
+    {
+      "left": "9c681cce761c6eb30c352068",
+      "right": "d4c7120840b78a52fbd57aa2",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.727273,
+      "sequenceRatio": 0.841379
+    },
+    {
+      "left": "1afc7ebc31fafe82539cc046",
+      "right": "d4c7120840b78a52fbd57aa2",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.653846,
+      "sequenceRatio": 0.767802
+    },
+    {
+      "left": "cb135d84de52b01b8f515b99",
+      "right": "b2c4039809bb199598d6e249",
+      "leftFamily": "rings",
+      "rightFamily": "rings",
+      "leftSplit": "validation",
+      "rightSplit": "validation",
+      "bothAccepted": true,
+      "tokenJaccard": 0.585366,
+      "sequenceRatio": 0.700219
+    },
+    {
+      "left": "4f25d37273210ca9b63c0b66",
+      "right": "65a324b0e89f71a9257c57f8",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.625,
+      "sequenceRatio": 0.758621
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "564671dc52bc78f75385453b",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.583333,
+      "sequenceRatio": 0.755245
+    },
+    {
+      "left": "f0f7071fd783a53ce660d7de",
+      "right": "564671dc52bc78f75385453b",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.615385,
+      "sequenceRatio": 0.803681
+    },
+    {
+      "left": "8424d1b4d1fae9c830ac8f29",
+      "right": "28974249ce35925f95b3d9b9",
+      "leftFamily": "triangles",
+      "rightFamily": "triangles",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.692308,
+      "sequenceRatio": 0.787736
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "826aa5ab19e1e537a38f86fd",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.619048,
+      "sequenceRatio": 0.750988
+    },
+    {
+      "left": "03bf1cbff6f121eeee41c0fb",
+      "right": "826aa5ab19e1e537a38f86fd",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.565217,
+      "sequenceRatio": 0.789668
+    },
+    {
+      "left": "7b9ddd878a96d33b1101a718",
+      "right": "826aa5ab19e1e537a38f86fd",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.7,
+      "sequenceRatio": 0.848485
+    },
+    {
+      "left": "d4c7120840b78a52fbd57aa2",
+      "right": "826aa5ab19e1e537a38f86fd",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.636364,
+      "sequenceRatio": 0.772563
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "e846c0085cfa2e136904ceb5",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.65,
+      "sequenceRatio": 0.867769
+    },
+    {
+      "left": "f0f7071fd783a53ce660d7de",
+      "right": "e846c0085cfa2e136904ceb5",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.608696,
+      "sequenceRatio": 0.744681
+    },
+    {
+      "left": "7b9ddd878a96d33b1101a718",
+      "right": "e846c0085cfa2e136904ceb5",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.571429,
+      "sequenceRatio": 0.750988
+    },
+    {
+      "left": "826aa5ab19e1e537a38f86fd",
+      "right": "e846c0085cfa2e136904ceb5",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.55,
+      "sequenceRatio": 0.751055
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "435d1ee5780ca23033dbea8a",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.625,
+      "sequenceRatio": 0.768683
+    },
+    {
+      "left": "af77ffeaaf139f38aed56255",
+      "right": "435d1ee5780ca23033dbea8a",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.592593,
+      "sequenceRatio": 0.796407
+    },
+    {
+      "left": "1afc7ebc31fafe82539cc046",
+      "right": "435d1ee5780ca23033dbea8a",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.571429,
+      "sequenceRatio": 0.751553
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "5dd9f51e3ccae24b115bcaf7",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.636364,
+      "sequenceRatio": 0.816794
+    },
+    {
+      "left": "064641a84e28cb9cff6eaecb",
+      "right": "5dd9f51e3ccae24b115bcaf7",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.636364,
+      "sequenceRatio": 0.798479
+    },
+    {
+      "left": "9c681cce761c6eb30c352068",
+      "right": "5dd9f51e3ccae24b115bcaf7",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.565217,
+      "sequenceRatio": 0.725926
+    },
+    {
+      "left": "1afc7ebc31fafe82539cc046",
+      "right": "5dd9f51e3ccae24b115bcaf7",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.64,
+      "sequenceRatio": 0.825083
+    },
+    {
+      "left": "d4c7120840b78a52fbd57aa2",
+      "right": "5dd9f51e3ccae24b115bcaf7",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.652174,
+      "sequenceRatio": 0.825175
+    },
+    {
+      "left": "095e609a2ce3b7326a839c01",
+      "right": "b3e0bca96cfc4c19b712e794",
+      "leftFamily": "triangles",
+      "rightFamily": "triangles",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.809524,
+      "sequenceRatio": 0.882012
+    },
+    {
+      "left": "cb135d84de52b01b8f515b99",
+      "right": "a4d130eb3a2b19578e531a74",
+      "leftFamily": "rings",
+      "rightFamily": "rings",
+      "leftSplit": "validation",
+      "rightSplit": "validation",
+      "bothAccepted": false,
+      "tokenJaccard": 0.605263,
+      "sequenceRatio": 0.776903
+    },
+    {
+      "left": "49fbf6d7ac8c91ae47e347c0",
+      "right": "454e761b354bd3b75b66b76f",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.689655,
+      "sequenceRatio": 0.734584
+    },
+    {
+      "left": "30113bd3d911f47800d0d1d4",
+      "right": "71d8d5df1ec76687e1398f0f",
+      "leftFamily": "triangles",
+      "rightFamily": "triangles",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.75,
+      "sequenceRatio": 0.781316
+    },
+    {
+      "left": "093481c875dd446210059ba7",
+      "right": "c5acd6bea3862e91c5eeeb66",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.555556,
+      "sequenceRatio": 0.769231
+    },
+    {
+      "left": "064641a84e28cb9cff6eaecb",
+      "right": "c5acd6bea3862e91c5eeeb66",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.56,
+      "sequenceRatio": 0.8125
+    },
+    {
+      "left": "9c681cce761c6eb30c352068",
+      "right": "c5acd6bea3862e91c5eeeb66",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.56,
+      "sequenceRatio": 0.759322
+    },
+    {
+      "left": "d4c7120840b78a52fbd57aa2",
+      "right": "c5acd6bea3862e91c5eeeb66",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.576923,
+      "sequenceRatio": 0.765273
+    },
+    {
+      "left": "5dd9f51e3ccae24b115bcaf7",
+      "right": "c5acd6bea3862e91c5eeeb66",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.56,
+      "sequenceRatio": 0.721649
+    },
+    {
+      "left": "cb135d84de52b01b8f515b99",
+      "right": "f5ba207408b019a3ed9923ce",
+      "leftFamily": "rings",
+      "rightFamily": "rings",
+      "leftSplit": "validation",
+      "rightSplit": "validation",
+      "bothAccepted": true,
+      "tokenJaccard": 0.6,
+      "sequenceRatio": 0.771499
+    },
+    {
+      "left": "460d39ccfecefa08ec5d20cf",
+      "right": "950b2c20ddefb45254c50baa",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.607143,
+      "sequenceRatio": 0.733945
+    },
+    {
+      "left": "826aa5ab19e1e537a38f86fd",
+      "right": "950b2c20ddefb45254c50baa",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.56,
+      "sequenceRatio": 0.734007
+    },
+    {
+      "left": "cb0936c8e19093fc84489821",
+      "right": "6cce506a5b08b19880e6f277",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.565217,
+      "sequenceRatio": 0.757353
+    },
+    {
+      "left": "f0f7071fd783a53ce660d7de",
+      "right": "6cce506a5b08b19880e6f277",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.6,
+      "sequenceRatio": 0.717949
+    },
+    {
+      "left": "7b9ddd878a96d33b1101a718",
+      "right": "6cce506a5b08b19880e6f277",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.565217,
+      "sequenceRatio": 0.798587
+    },
+    {
+      "left": "826aa5ab19e1e537a38f86fd",
+      "right": "6cce506a5b08b19880e6f277",
+      "leftFamily": "safety_refusal",
+      "rightFamily": "safety_refusal",
+      "leftSplit": "train",
+      "rightSplit": "train",
+      "bothAccepted": true,
+      "tokenJaccard": 0.7,
+      "sequenceRatio": 0.853933
+    }
+  ]
+}

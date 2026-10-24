@@ -49,8 +49,8 @@ Inspect logs retain its transcript, without Pi SQLite session resume.
 - [x] Execute candidates in the local environment (sandbox deferred per current scope); use bounded repair attempts for syntax, API, and rendering failures. Keep successful edit–run–repair trajectories for tool-use SFT.
 - [ ] Check the rendered image against the prompt with deterministic checks where reliable and a vision evaluator for semantic requirements. Do not accept a pair merely because its code runs.
 - [ ] Apply the content policy to prompts and every rendered candidate. Exclude harmful outputs from positive SFT targets; include correct refusal examples and benign lookalikes to reduce over-refusal.
-- [x] Save a dataset record containing `id`, `prompt`, code or refusal, trajectory, artifact references, seed, API/runtime versions, teacher provenance, evaluator versions/holistic scores, safety labels, and split.
-- [ ] Deduplicate prompts, related templates, code, and near-identical renders. Split by task/template family before generation so repairs and paraphrases cannot leak into validation or test sets.
+- [x] Save a dataset record containing `id`, `prompt`, code or refusal, trajectory, artifact references, seed, API/runtime versions, teacher provenance, evaluator versions/holistic scores, and safety labels.
+- [ ] Deduplicate prompts, related templates, code, and near-identical renders. Keep related task variants grouped for diversity audits; export one combined accepted dataset.
 - [ ] Audit a stratified human-reviewed sample for correctness, diversity, safety, and evaluator agreement. Version accepted data and rejection reasons.
 - [ ] Produce a pilot of roughly 1,000 accepted examples, measure acceptance rate and cost per example, then choose the scale-up target from learning curves and budget.
 
@@ -59,8 +59,8 @@ Inspect logs retain its transcript, without Pi SQLite session resume.
 **Current implementation:** `.venv/bin/python -m drawing.generate_dataset` generates seeded prompt plans, runs a
 configurable teacher through bounded repairs, and checkpoints candidates for resume.
 An optional independent vision evaluator gates acceptance; without it, valid renders
-remain pending review. Task families are split before generation and exact source/pixel
-duplicates are rejected. Near-duplicate detection, calibrated semantic/safety checks,
+remain pending review. Accepted records form one combined dataset, and exact
+source/pixel duplicates are rejected. Near-duplicate detection, calibrated semantic/safety checks,
 human audits, and a live teacher pilot remain outstanding. See README for usage.
 
 ## 4. Implement and calibrate rewards
