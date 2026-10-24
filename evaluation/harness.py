@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+from contextlib import contextmanager
 import hashlib
 import io
 import json
@@ -29,13 +30,36 @@ RUNTIME_VERSION = "artcanvas-v2"
 sha256 = lambda data: hashlib.sha256(data).hexdigest()
 
 
+def _model_api_key() -> str:
+    return os.getenv("ARTSY_MODEL_API_KEY") or "local-no-auth"
+
+
 def model_from_env(model: str = BASE_MODEL):
-    """Use Chat Completions without changing global OpenAI/judge credentials."""
+    """Use the drawing endpoint without changing global OpenAI/judge credentials."""
     return get_model(
         f"openai/{model}", base_url=os.getenv("ARTSY_MODEL_URL", "http://127.0.0.1:8080/v1"),
-        api_key=os.getenv("ARTSY_MODEL_API_KEY", "local-no-auth"),
+        api_key=_model_api_key(),
         responses_api=False,
     )
+
+
+@contextmanager
+def inspect_swe_model_auth():
+    """Supply credentials to Inspect SWE's reconstructed OpenAI-compatible client.
+
+    Inspect SWE copies the drawing model to force Chat Completions, but drops
+    the original model's explicit api_key. Its replacement reads OPENAI_API_KEY.
+    Scope that value to the agent run, then restore any independent judge key.
+    """
+    previous = os.environ.get("OPENAI_API_KEY")
+    os.environ["OPENAI_API_KEY"] = _model_api_key()
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("OPENAI_API_KEY", None)
+        else:
+            os.environ["OPENAI_API_KEY"] = previous
 
 
 def load_specs(path: Path) -> list[dict]:
