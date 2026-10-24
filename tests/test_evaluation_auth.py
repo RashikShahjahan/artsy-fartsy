@@ -6,7 +6,8 @@ from unittest.mock import patch
 
 from inspect_swe._mini_swe_agent.mini_swe_agent import _model_without_responses_api
 
-from evaluation.harness import inspect_swe_model_auth, model_from_env
+from evaluation.harness import (TINKER_MODEL_URL, drawing_task,
+                                inspect_swe_model_auth, model_from_env)
 
 
 class InspectSWEModelAuthTests(unittest.TestCase):
@@ -33,6 +34,35 @@ class InspectSWEModelAuthTests(unittest.TestCase):
                     self.assertEqual(os.environ["OPENAI_API_KEY"], "drawing-endpoint-key")
                     raise RuntimeError("test failure")
             self.assertEqual(os.environ["OPENAI_API_KEY"], "independent-judge-key")
+
+    def test_direct_tinker_uses_tinker_key_and_disables_thinking(self):
+        with patch.dict(os.environ, {
+            "ARTSY_MODEL_URL": TINKER_MODEL_URL,
+            "TINKER_API_KEY": "test-tinker-key",
+            "OPENAI_API_KEY": "independent-judge-key",
+        }, clear=True):
+            model = model_from_env()
+            self.assertEqual(model.api.api_key, "test-tinker-key")
+            self.assertEqual(model.api.base_url, TINKER_MODEL_URL)
+            self.assertFalse(model.model_args["responses_api"])
+            with inspect_swe_model_auth():
+                bridged = _model_without_responses_api(model)
+                self.assertEqual(bridged.api.api_key, "test-tinker-key")
+            self.assertEqual(os.environ["OPENAI_API_KEY"], "independent-judge-key")
+            task = drawing_task([{"id": "smoke", "prompt": "Draw a circle", "seed": 0}],
+                                "/tmp/artsy-test-artifacts")
+            self.assertEqual(task.config.reasoning_effort, "none")
+
+    def test_direct_tinker_requires_credentials_and_supports_explicit_override(self):
+        with patch.dict(os.environ, {"ARTSY_MODEL_URL": TINKER_MODEL_URL}, clear=True):
+            with self.assertRaisesRegex(ValueError, "TINKER_API_KEY"):
+                model_from_env()
+        with patch.dict(os.environ, {
+            "ARTSY_MODEL_URL": TINKER_MODEL_URL + "/",
+            "TINKER_API_KEY": "test-tinker-key",
+            "ARTSY_MODEL_API_KEY": "override-key",
+        }, clear=True):
+            self.assertEqual(model_from_env().api.api_key, "override-key")
 
 
 if __name__ == "__main__":

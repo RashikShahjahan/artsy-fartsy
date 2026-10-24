@@ -10,7 +10,7 @@ from uuid import uuid4
 from dotenv import load_dotenv
 from inspect_ai import eval
 
-from .harness import BASE_MODEL, ROOT, drawing_task, inspect_swe_model_auth, model_from_env, sha256
+from .harness import BASE_MODEL, ROOT, drawing_task, inspect_swe_model_auth, model_from_env, model_url, sha256
 
 
 def main() -> int:
@@ -27,7 +27,7 @@ def main() -> int:
     if not prompt:
         parser.error("prompt must not be empty")
     request = {"prompt": prompt, "seed": args.seed, "model": args.model,
-               "base_url": os.getenv("ARTSY_MODEL_URL", "http://127.0.0.1:8080/v1")}
+               "base_url": model_url()}
     directory = args.episode.resolve()
     if directory.exists() and any(directory.iterdir()):
         manifest = directory / "episode.json"

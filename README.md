@@ -26,7 +26,8 @@ uv pip install --python .venv/bin/python -r inference/requirements-mlx.txt
 uv venv --python 3.12 .eval-venv
 uv pip install --python .eval-venv/bin/python -r evaluation/requirements.txt -r runtime/requirements.txt
 
-# Starts a loopback-only bridge to hosted Qwen3.5-4B sampling.
+# Optional: start the legacy local HTTP bridge to hosted Tinker sampling.
+# Direct Tinker API access (below) does not require this server.
 HF_HOME="$PWD/.cache/huggingface" make serve
 ```
 
@@ -46,37 +47,19 @@ seed, model, endpoint, and artifact hashes are reused. Interrupted or failed
 requests require a new episode directory. There is no Pi SQLite session or automatic
 interrupted-session resume. Only one process should own an episode directory.
 
-`ARTSY_MODEL_URL` can point to another OpenAI-compatible serving endpoint, using
-<<<<<<< HEAD
-the same model identifier and tool-call support. The bundled server uses MLX on
-Apple Silicon Macs and PyTorch elsewhere, and translates
-Qwen's function/parameter tool-call tags into the OpenAI tool protocol. Tool
-arguments are decoded as data; the bridge never evaluates generated expressions.
-It loads the full vision-language model at a pinned revision, with thinking
-disabled. Image inputs use OpenAI `image_url` blocks containing inline base64
-image data URLs. Images are decoded with Pillow and resized to at most 1,024
-visual tokens (about one megapixel); original preview files retain their resolution.
-Requests are serialized and capped at 2,048 generated tokens and a
-32,768-token context to bound inference, below Qwen's native context capacity.
-Set `ARTSY_BACKEND=torch` to select the CPU backend explicitly.
-=======
-the same model identifier and tool-call support. The bundled server uses Tinker
-for hosted inference and translates Qwen's function/parameter tool-call tags into
-the OpenAI tool protocol. Tool arguments are decoded as data; the bridge never
-evaluates generated expressions. Only tokenizer and image processor metadata are
-loaded locally at the pinned revision; Tinker manages the model weights.
-The `qwen3_5_disable_thinking` renderer matches the Tinker training pipeline.
-Image inputs use OpenAI `image_url` blocks containing inline base64 data URLs.
-Previews are decoded with Pillow and resized to at most 1,024 visual tokens
-(about one megapixel); original preview files retain their resolution.
-Requests are capped at 2,048 generated tokens and a 32,768-token context.
-The bridge accepts concurrent Tinker requests. Set `ARTSY_TINKER_MODEL_PATH` to a
-`tinker://` sampler checkpoint to evaluate trained weights instead of the base model.
-The bridge loads `.env` automatically and also supports credentials saved by
-`tinker auth login`. For local CPU inference, install `inference/requirements.lock`
-and set `ARTSY_BACKEND=torch`.
->>>>>>> main
-This is a small development server, not a public API service.
+`ARTSY_MODEL_URL` selects an OpenAI-compatible serving endpoint. For the
+**direct Tinker endpoint**, Tinker handles tokenization, image preprocessing and
+model inference; neither the local HTTP server nor Hugging Face authentication
+is needed by evaluation. Use the compatibility test below before a real run.
+
+The optional bundled server uses Tinker for hosted inference but performs
+tokenization and image processing locally, requiring public Hugging Face model
+metadata. It translates Qwen's tool-call tags into OpenAI tool calls and uses
+the `qwen3_5_disable_thinking` renderer. It accepts inline base64 PNG previews
+and limits their visual-token resolution; the original preview is kept intact.
+Set `ARTSY_TINKER_MODEL_PATH` there to serve a `tinker://` sampler checkpoint,
+or set `ARTSY_BACKEND=torch` to use local CPU inference. The local bridge is a
+development server, not a public API service.
 
 ## Drawing API
 
@@ -100,7 +83,7 @@ or stale preview cannot count as a submission. A structured refusal is represent
 by `refusal.json` containing a concise `reason`, with no `program.py`.
 
 The container has no outbound network or host mounts. Inspect proxies model calls
-through the host, so `ARTSY_MODEL_URL` can keep using its loopback address.
+through the host, which can reach either the direct Tinker API or a local bridge.
 Inspect and its OpenAI SDK run in the host environment; Mini SWE and LiteLLM run
 in the container, keeping their SDK dependency requirements separate.
 `evaluation/mini.yaml` sets sixteen model turns, ten-second command timeouts,
@@ -189,7 +172,7 @@ calibrated benchmark or a claim of template-family separation from training.
 # Validate the test set and show the plan without model requests or Docker:
 .eval-venv/bin/python -m evaluation.evaluate --dry-run
 
-# Start the base-model server with make serve, then check execution on one sample:
+# After configuring direct Tinker (below), check execution on one sample:
 .eval-venv/bin/python -m evaluation.evaluate --execution-only --limit 1 --output eval-results/base-smoke
 
 # Full evaluations use two independent Inspect grader roles:
@@ -211,6 +194,32 @@ precedence. The Inspect SWE bridge temporarily supplies this model
 key (or `local-no-auth` for the bundled server) when recreating the OpenAI-compatible
 client, then restores `OPENAI_API_KEY`. A real OpenAI key is not needed to evaluate
 local Qwen. `--model` overrides the default `Qwen/Qwen3.5-4B`.
+
+### Direct hosted inference on Tinker (no local server)
+
+Set these values in `.env`:
+
+```dotenv
+TINKER_API_KEY=your-tinker-api-key
+ARTSY_MODEL=Qwen/Qwen3.5-4B
+ARTSY_MODEL_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
+```
+
+`ARTSY_MODEL_API_KEY` takes priority over `TINKER_API_KEY` if explicitly set.
+Remove any old `ARTSY_MODEL_API_KEY` referring to another provider. The direct
+API is a beta feature: before evaluating, verify both mandatory Mini SWE features
+(OpenAI function tool calls and inline PNG inputs) with two small paid requests:
+
+```sh
+.eval-venv/bin/python -m evaluation.check_tinker
+.eval-venv/bin/python -m evaluation.evaluate --execution-only --limit 1
+```
+
+The direct endpoint performs model-side prompt rendering and applies Qwen's
+default chat template, so results may not be identical to the bundled server's
+custom renderer. The evaluation requests `reasoning_effort=none` for direct
+Tinker to retain the non-thinking baseline. To use the old local bridge instead,
+unset `ARTSY_MODEL_URL`, start `make serve`, and keep using the same eval command.
 Runs use one sample at a time to match the bundled serialized model server.
 Use a fresh output directory for every run. The first run builds the Docker image.
 
