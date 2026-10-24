@@ -400,6 +400,7 @@ class EvaluationTest(unittest.TestCase):
                 return [SimpleNamespace(status="success", samples=[SimpleNamespace(error=None)])]
             with patch("evaluation.draw.eval", side_effect=completed) as run, \
                  patch("evaluation.draw.model_from_env", return_value="mockllm/model"), \
+                 patch("evaluation.draw.check_native_bridge"), \
                  patch.object(sys, "argv", ["draw", "Draw a circle", "--episode", str(root)]), \
                  redirect_stdout(io.StringIO()):
                 self.assertEqual(main(), 0)
