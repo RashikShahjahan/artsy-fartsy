@@ -25,9 +25,9 @@ HELP = """Python dataset generation
   --threshold N         Minimum score for EVERY requirement (default: 0.85)
   --prompt-model ID     Prompt-writing LLM (defaults to teacher model)
   --prompt-url URL      Prompt-writing endpoint (defaults to teacher URL)
-  --prompt-batch-size N Prompts per LLM request, 1–8 (default: 5)
+  --prompt-batch-size N Concurrent single-prompt LLM requests, 1–8 (default: 8)
   --prompt-max-tokens N Prompt-writer output tokens per request (default: 4096)
-  --prompt-retries N    Validation attempts per batch, 1–5 (default: 3)
+  --prompt-retries N    Attempts per individual prompt, 1–5 (default: 5)
   --teacher-model ID    Required for rendering, or set ARTSY_TEACHER_MODEL
   --teacher-url URL     Chat base URL (default: http://127.0.0.1:8080/v1)
   --correctness-judge-model ID  Vision correctness judge, or ARTSY_CORRECTNESS_JUDGE_MODEL
@@ -41,7 +41,7 @@ HELP = """Python dataset generation
 
 Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_CORRECTNESS_JUDGE_API_KEY, ARTSY_SAFETY_JUDGE_API_KEY.
 Both vision judges are required for automatic acceptance. No judges: executable examples go to review.jsonl; accepted/train/validation/test
-remain empty. Repeating the same command resumes completed candidate records.
+remain empty. Repeating the same command resumes checkpointed prompts and candidate records.
 Generated Python runs locally with your current permissions, as with the drawing CLI.
 The prompt plan is saved before rendering and reused on resume."""
 
@@ -87,9 +87,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--threshold", default="0.85")
     parser.add_argument("--prompt-model")
     parser.add_argument("--prompt-url")
-    parser.add_argument("--prompt-batch-size", default="5")
+    parser.add_argument("--prompt-batch-size", default="8")
     parser.add_argument("--prompt-max-tokens", default="4096")
-    parser.add_argument("--prompt-retries", default="3")
+    parser.add_argument("--prompt-retries", default="5")
     parser.add_argument("--teacher-model")
     parser.add_argument("--teacher-url")
     parser.add_argument("--correctness-judge-model")
@@ -168,16 +168,57 @@ async def main(argv: list[str] | None = None) -> int:
                 prompt_key = os.getenv("ARTSY_TEACHER_API_KEY") or os.getenv("TEACHER_API_KEY")
             prompt_client = chat_client({"model": prompt_model, "baseUrl": prompt_url,
                 "apiKey": prompt_key, "timeoutMs": int(args.timeout_ms)})
-            generated = await generate_llm_prompts(prompt_client, count, seed,
-                difficulty=args.difficulty, harmful_count=harmful_count,
-                batch_size=prompt_config["batchSize"],
-                max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"])
-            specs = generated["specs"]
-            if not args.dry_run:
-                Path(output).mkdir(parents=True, exist_ok=True)
-                from .dataset import _write_json
-                _write_json(plan_path, {"config": prompt_config, "specs": specs,
-                    "specsHash": sha256(compact_json(specs)), "batches": generated["batches"]})
+            completed = {}
+            on_record = None
+            lock_path = None
+            lock_fd = None
+            try:
+                if not args.dry_run:
+                    from .dataset import _write_json
+                    dataset_path = Path(output)
+                    dataset_path.mkdir(parents=True, exist_ok=True)
+                    lock_path = dataset_path / ".prompt-generation.lock"
+                    try:
+                        lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                    except FileExistsError:
+                        raise RuntimeError(f"Prompt generation is already locked: {lock_path}") from None
+                    progress_path = dataset_path / "prompt-progress.json"
+                    records_dir = dataset_path / "prompt-records"
+                    if progress_path.exists():
+                        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+                        if progress.get("config") != prompt_config:
+                            raise ValueError("Prompt generator configuration changed; use a new output directory")
+                    else:
+                        if records_dir.exists() and any(records_dir.iterdir()):
+                            raise ValueError("Prompt records exist without a progress manifest")
+                        _write_json(progress_path, {"config": prompt_config})
+                    records_dir.mkdir(parents=True, exist_ok=True)
+                    for path in sorted(records_dir.iterdir()):
+                        if path.suffix != ".json" or not path.stem.isdecimal() or len(path.stem) != 6:
+                            raise ValueError(f"Unexpected prompt checkpoint file: {path.name}")
+                        record = json.loads(path.read_text(encoding="utf-8"))
+                        index = int(path.stem)
+                        if record.get("index") != index or index in completed:
+                            raise ValueError(f"Invalid prompt checkpoint: {path.name}")
+                        completed[index] = record
+
+                    def save_prompt_record(record: dict[str, Any]) -> None:
+                        _write_json(records_dir / f"{record['index']:06d}.json", record)
+                    on_record = save_prompt_record
+
+                generated = await generate_llm_prompts(prompt_client, count, seed,
+                    difficulty=args.difficulty, harmful_count=harmful_count,
+                    batch_size=prompt_config["batchSize"],
+                    max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"],
+                    completed=completed, on_record=on_record)
+                specs = generated["specs"]
+                if not args.dry_run:
+                    _write_json(plan_path, {"config": prompt_config, "specs": specs,
+                        "specsHash": sha256(compact_json(specs)), "batches": generated["batches"]})
+            finally:
+                if lock_fd is not None:
+                    os.close(lock_fd)
+                    lock_path.unlink(missing_ok=True)
         prompt_generation = {**prompt_config, "specsHash": sha256(compact_json(specs))}
     if args.dry_run:
         for spec in specs:
