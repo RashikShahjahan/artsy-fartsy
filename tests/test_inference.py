@@ -29,6 +29,14 @@ def inline_image():
 
 
 class ToolProtocolTest(unittest.TestCase):
+    def test_developer_instructions_are_compatible_with_qwen_system_role(self):
+        messages = [{"role": "developer", "content": "Use the bash tool to draw."},
+                    {"role": "user", "content": "Draw a circle."}]
+        native = template_messages(messages)
+        self.assertEqual(native, [
+            {"role": "system", "content": "Use the bash tool to draw."}, messages[1]])
+        self.assertEqual(messages[0]["role"], "developer")
+
     def test_multiline_source_and_transcript_replay(self):
         source = 'from artcanvas import ArtCanvas\nif 1 < 2:\n    print("hi & bye")\n'
         text, calls = parse_tools(tool_call("write_code", parameter("source", source)) + "<|im_end|>", TOOLS)
@@ -137,13 +145,29 @@ class CompletionTest(unittest.TestCase):
         self.assertEqual(choice["finish_reason"], "tool_calls")
         self.assertEqual(choice["message"]["tool_calls"][0]["function"], {"name": "submit", "arguments": "{}"})
         self.assertEqual(response["usage"], {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5})
-        self.assertEqual(models()["data"][0]["id"], "Qwen/Qwen3.5-0.8B")
+        self.assertEqual(models()["data"][0]["id"], "Qwen/Qwen3.5-4B")
 
     def test_malformed_call_is_returned_as_text(self):
         self.raw = tool_call("run_code") + '<tool_call>\n<function=submit>'
         choice = complete(self.body)["choices"][0]
         self.assertEqual(choice["message"]["content"], self.raw)
         self.assertNotIn("tool_calls", choice["message"])
+
+    def test_mlx_preserves_images_tool_calls_and_usage(self):
+        app.state.backend = "mlx"
+        app.state.mlx.generate.return_value = (tool_call("submit"), 123, 12)
+        response = complete({**self.body, "messages": [
+            {"role": "developer", "content": "Draw with tools."},
+            {"role": "user", "content": [inline_image(), {"type": "text", "text": "Fix it"}]}]})
+        choice = response["choices"][0]
+        self.assertEqual(choice["finish_reason"], "tool_calls")
+        self.assertEqual(choice["message"]["tool_calls"][0]["function"]["name"], "submit")
+        self.assertEqual(response["usage"],
+                         {"prompt_tokens": 123, "completion_tokens": 12, "total_tokens": 135})
+        messages, tools, budget, context = app.state.mlx.generate.call_args.args
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertEqual(messages[1]["content"][0]["image"].size, (32, 32))
+        self.assertEqual((tools, budget, context), (TOOLS, MAX_TOKENS, CONTEXT_WINDOW))
 
     def test_streaming_tool_response_has_index_and_done(self):
         response = complete({**self.body, "stream": True})
@@ -176,6 +200,15 @@ class CompletionTest(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             complete({**self.body, "messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": "bad"}}]}]})
         self.assertEqual(error.exception.status_code, 400)
+
+    def test_invalid_chat_template_is_an_http_400(self):
+        from jinja2 import TemplateError
+        with patch.object(app.state.processor, "apply_chat_template",
+                          side_effect=TemplateError("Unexpected message role.")), \
+             self.assertRaises(HTTPException) as error:
+            complete(self.body)
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertEqual(error.exception.detail, "Unexpected message role.")
 
 
 if __name__ == "__main__":

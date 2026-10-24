@@ -1,5 +1,6 @@
 .venv/
 .eval-venv/
+.inference-venv/
 .sft-venv/
 checkpoints/
 __pycache__/
@@ -8,5 +9,6 @@ __pycache__/
 episodes/
 datasets/
 eval-results/
+logs/
 .env
 .DS_Store

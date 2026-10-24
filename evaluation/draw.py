@@ -7,12 +7,14 @@ from pathlib import Path
 import shutil
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from inspect_ai import eval
 
-from .harness import BASE_MODEL, drawing_task, inspect_swe_model_auth, model_from_env, sha256
+from .harness import BASE_MODEL, ROOT, drawing_task, inspect_swe_model_auth, model_from_env, sha256
 
 
 def main() -> int:
+    load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("prompt", nargs="+")
     parser.add_argument("--episode", type=Path, default=Path("episodes") / str(uuid4()))

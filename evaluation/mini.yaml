@@ -12,7 +12,7 @@ environment:
   timeout: 10
 model:
   cost_tracking: ignore_errors
-  multimodal_regex: '(?s)<MSWEA_MULTIMODAL_CONTENT><CONTENT_TYPE>(.+?)</CONTENT_TYPE>(.+?)</MSWEA_MULTIMODAL_CONTENT>'
+  multimodal_regex: '(?m)^<MSWEA_MULTIMODAL_CONTENT><CONTENT_TYPE>(image_url)</CONTENT_TYPE>(data:image/png;base64,[A-Za-z0-9+/]+={0,2})</MSWEA_MULTIMODAL_CONTENT>$'
   observation_template: |
     Return code: {{output.returncode}}
     {{output.output}}

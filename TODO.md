@@ -8,9 +8,9 @@ The choices and numerical targets below are proposed starting points to validate
 
 ## 1. Define the first experiment
 
-- [x] Select Qwen/Qwen3.5-0.8B (Apache 2.0) with its vision encoder and native tool-call format. Serve a bounded 32,768-token context; benchmark Python performance on held-out drawing tasks before training.
+- [x] Select Qwen/Qwen3.5-4B (Apache 2.0) with its vision encoder and native tool-call format. Serve a bounded 32,768-token context; benchmark Python performance on held-out drawing tasks before training.
 - [ ] Record available GPU memory, training budget, and teacher/judge API budget. Benchmark a small batch before choosing dataset size or training duration.
-- [x] Use Qwen/Qwen3.5-0.8B as a vision-language policy. It receives API documentation, the user prompt, its code, execution feedback, and rendered preview images. Keep independent evaluator scores outside policy observations.
+- [x] Use Qwen/Qwen3.5-4B as a vision-language policy. It receives API documentation, the user prompt, its code, execution feedback, and rendered preview images. Keep independent evaluator scores outside policy observations.
 - [ ] Fix the initial scope: static 2D drawings, one Python file, a versioned `ArtCanvas` API, a fixed canvas size, and PNG output. Include shapes, diagrams, scenes, and procedural patterns.
 - [ ] Define what counts as a successful response: submitted code reproduces a safe image that satisfies the user's visible requirements. Define a structured refusal response for disallowed requests.
 - [ ] Create versioned configuration for the model, API, renderer, sandbox, data generation, SFT, RL, reward rules, and evaluation.
@@ -91,12 +91,12 @@ human audits, and a live teacher pilot remain outstanding. See README for usage.
 ## 5. Run the SFT warm-up
 
 - [x] Implement the first-run dataset recipe: retain 80 pilot one-shot drawings and all four natural execution repairs, then generate sixteen harder natural execution/visual repair trajectories sampled from a bounded pool, with actual PNG observations with recorded errors and successful fresh submissions. Preserve original review/split provenance and the three explicit duplicate exceptions; export the 100-row selection only when the 80/20 target is complete. See `make dataset-warmup`.
-- [ ] Review the 100 selected final images and freeze this first SFT dataset revision. Use Qwen/Qwen3.5-0.8B multimodal observations. New repairs must arise naturally from harder tasks; execute model code verbatim, inspect the actual PNG during generation, and exclude the archived synthetic experiment; failed assistant actions are context-only loss-masked prefixes. Create a new held-out evaluation set because this selection consumes former pilot validation/test examples.
+- [ ] Review the 100 selected final images and freeze this first SFT dataset revision. Use the selected hosted Qwen3.5 vision model with multimodal observations. New repairs must arise naturally from harder tasks; execute model code verbatim, inspect the actual PNG during generation, and exclude the archived synthetic experiment; failed assistant actions are context-only loss-masked prefixes. Create a new held-out evaluation set because this selection consumes former pilot validation/test examples.
 - [ ] Evaluate the untouched base model on a frozen development benchmark before training.
-- [ ] Build a Qwen3.5-0.8B SFT data adapter using its multimodal processor, exact production API prompt/chat template/tool schemas, actual preview PNG observations, code submissions, and refusal format.
+- [ ] Validate the Tinker Qwen3.5 SFT adapter against production prompts, tool schemas, actual preview PNG observations, code submissions, and refusal format.
 - [ ] Train on both direct prompt–code examples and successful repair trajectories so the model learns how to operate the environment before RL.
 - [ ] Mask user prompts, image/input tokens, tool outputs, and failed assistant actions from the loss; train on successful assistant responses and tool calls. Verify that packing and truncation preserve complete examples and tool-call boundaries.
-- [ ] Start with a short, conservative full-parameter SFT pilot on Qwen/Qwen3.5-0.8B. Measure peak training memory on a representative batch before the run; use LoRA as a fallback if full training exceeds available memory. Save full model weights, tokenizer, configuration, dataset revision, and reproducible checkpoints.
+- [ ] Start with a short, conservative hosted LoRA SFT pilot on Qwen/Qwen3.5-4B using Tinker. Validate a representative batch before the run; save remote optimizer/sampler checkpoints, model and renderer configuration, and dataset revision with reproducible resume metadata.
 - [ ] Compare checkpoints by render success, adherence, repair success, harmful-output rate, and benign refusal rate. Select on development results rather than training loss alone.
 - [ ] Require a useful execution baseline before RL; a provisional gate is at least 90% valid renders on simple held-out development tasks, with separately specified adherence and safety criteria.
 
@@ -139,5 +139,5 @@ human audits, and a live teacher pilot remain outstanding. See README for usage.
 ## Implementation references
 
 - [Original Artsy post and `ArtCanvas` example](https://blog.rashik.sh/tech/can-ai-learn-to-draw/) — motivation and drawing API direction.
-- [TRL SFT trainer](https://github.com/huggingface/trl/blob/main/docs/source/sft_trainer.md) and [PEFT integration](https://github.com/huggingface/trl/blob/main/docs/source/peft_integration.md) — candidate warm-up implementation.
-- [TRL GRPO trainer](https://huggingface.co/docs/trl/grpo_trainer) and [environment integration](https://github.com/huggingface/trl/blob/main/docs/source/openenv.md) — candidate rollout/training integration. Confirm capabilities against the pinned version during implementation.
+- [Tinker SFT tutorial](https://tinker-docs.thinkingmachines.ai/tutorials/basics/first-sft/) and [rendering](https://tinker-docs.thinkingmachines.ai/tutorials/core-concepts/rendering/) — hosted LoRA training and multimodal loss masking.
+- [Tinker Cookbook](https://tinker-docs.thinkingmachines.ai/cookbook/) — candidate group-based RL and environment integration. Confirm capabilities against the pinned version during implementation.

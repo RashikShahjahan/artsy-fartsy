@@ -2,3 +2,4 @@ inspect-ai==0.3.283
 inspect-swe==0.2.72
 openai==3.37.0
 Pillow==12.0.0
+python-dotenv==1.2.4

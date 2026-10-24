@@ -21,10 +21,11 @@ from inspect_ai.util import sandbox
 from inspect_swe import mini_swe_agent
 from PIL import Image
 
+from drawing.config import MODEL_ID
 from drawing.dataset_specs import DIFFICULTIES
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE_MODEL = "Qwen/Qwen3.5-0.8B"
+BASE_MODEL = MODEL_ID
 AGENT_VERSION = "2.2.3"
 RUNTIME_VERSION = "artcanvas-v2"
 sha256 = lambda data: hashlib.sha256(data).hexdigest()

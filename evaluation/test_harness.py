@@ -58,7 +58,10 @@ class FileSandbox:
 class EvaluationTest(unittest.TestCase):
     def test_dataset_is_fresh_valid_and_does_not_reuse_warmup_prompts(self):
         specs = load_specs(ROOT / "evaluation/prompts.jsonl")
-        self.assertEqual(len(specs), 8)
+        self.assertEqual(len(specs), 20)
+        self.assertEqual({level: sum(row.get("difficulty") == level for row in specs)
+                          for level in ("easy", "medium", "hard", "very-hard")},
+                         {"easy": 5, "medium": 5, "hard": 5, "very-hard": 5})
         self.assertTrue(all("requirements" not in row for row in specs))
         training = ROOT / "datasets/sft-warmup-100/train.jsonl"
         if training.exists():
@@ -89,7 +92,7 @@ class EvaluationTest(unittest.TestCase):
     def test_model_uses_the_local_chat_endpoint_without_global_key_mutation(self):
         with patch.dict(os.environ, {"ARTSY_MODEL_URL": "http://localhost:1234/v1", "ARTSY_MODEL_API_KEY": "test-only"}):
             model = model_from_env()
-        self.assertEqual(model.name, "Qwen/Qwen3.5-0.8B")
+        self.assertEqual(model.name, "Qwen/Qwen3.5-4B")
         self.assertEqual(model.api.base_url, "http://localhost:1234/v1")
         self.assertFalse(model.model_args["responses_api"])
 
@@ -131,7 +134,9 @@ class EvaluationTest(unittest.TestCase):
                 samples=[SimpleNamespace(error=None)], results=None,
                 stats=SimpleNamespace(model_dump=lambda mode: {}), location="fake.eval")
             with patch.dict(os.environ, {"ARTSY_CORRECTNESS_JUDGE_MODEL": "",
-                                     "ARTSY_SAFETY_JUDGE_MODEL": ""}), \
+                                     "ARTSY_SAFETY_JUDGE_MODEL": "",
+                                     "ARTSY_CORRECTNESS_JUDGE_URL": "",
+                                     "ARTSY_SAFETY_JUDGE_URL": ""}), \
                  patch("evaluation.evaluate.get_model", side_effect=lambda name, **kw: name), \
                  patch("evaluation.evaluate.model_from_env", return_value="mockllm/student"), \
                  patch("evaluation.evaluate.eval", return_value=[fake_log]) as run, \
@@ -145,6 +150,45 @@ class EvaluationTest(unittest.TestCase):
             summary = json.loads((root / "run/summary.json").read_text())
             self.assertEqual(summary["correctness_judge_model"], "mockllm/correct")
             self.assertEqual(summary["safety_judge_model"], "mockllm/safe")
+
+    def test_cli_loads_dotenv_before_reading_model_defaults(self):
+        from evaluation.evaluate import main
+        settings = {"ARTSY_MODEL": "dotenv-student",
+                    "ARTSY_CORRECTNESS_JUDGE_MODEL": "mockllm/correct",
+                    "ARTSY_SAFETY_JUDGE_MODEL": "mockllm/safe"}
+        with patch.dict(os.environ), \
+             patch("evaluation.evaluate.load_dotenv",
+                   side_effect=lambda path: os.environ.update(settings)) as load, \
+             patch.object(sys, "argv", ["evaluate", "--dry-run"]), \
+             redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(main(), 0)
+        load.assert_called_once_with(ROOT / ".env")
+        plan = json.loads(output.getvalue())
+        self.assertEqual(plan["model"], settings["ARTSY_MODEL"])
+        self.assertEqual(plan["correctness_judge_model"], settings["ARTSY_CORRECTNESS_JUDGE_MODEL"])
+        self.assertEqual(plan["safety_judge_model"], settings["ARTSY_SAFETY_JUDGE_MODEL"])
+
+    def test_interrupted_eval_reloads_completed_samples_from_the_saved_log(self):
+        from evaluation.evaluate import main
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            log_file = root / "partial.eval"
+            log_file.write_bytes(b"saved log")
+            header = SimpleNamespace(location=str(log_file), samples=None)
+            saved = SimpleNamespace(location=str(log_file), status="cancelled",
+                samples=[SimpleNamespace(error=None), SimpleNamespace(error=object())],
+                results=None, stats=SimpleNamespace(model_dump=lambda mode: {}))
+            with patch("evaluation.evaluate.eval", return_value=[header]), \
+                 patch("evaluation.evaluate.read_eval_log", return_value=saved) as read, \
+                 patch("evaluation.evaluate.model_from_env", return_value="mockllm/student"), \
+                 patch.object(sys, "argv", ["evaluate", "--execution-only", "--limit", "2",
+                     "--output", str(root / "run")]), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(), 1)
+            read.assert_called_once_with(str(log_file))
+            summary = json.loads((root / "run/summary.json").read_text())
+            self.assertEqual(summary["completed_samples"], 2)
+            self.assertEqual(summary["sample_errors"], 1)
+            self.assertEqual(summary["status"], "incomplete")
 
     def test_preview_trajectory_measures_observed_revisions_and_execution_recovery(self):
         def call(id, command):
@@ -256,6 +300,15 @@ class EvaluationTest(unittest.TestCase):
                              (root / "preview/image.png").read_bytes())
             self.assertEqual(json.loads(result.stdout.splitlines()[0])["sourceHash"],
                              hashlib.sha256(GOOD.encode()).hexdigest())
+
+    def test_preview_pattern_does_not_treat_renderer_source_as_an_image(self):
+        pattern = yaml.safe_load((ROOT / "evaluation/mini.yaml").read_text())["model"]["multimodal_regex"]
+        self.assertIsNone(re.search(pattern, (ROOT / "evaluation/render.py").read_text()))
+        for url in ("https://example.com/image.png", "data:image/png;base64,{encoded}",
+                    "data:image/png;base64,???"):
+            self.assertIsNone(re.search(pattern,
+                "<MSWEA_MULTIMODAL_CONTENT><CONTENT_TYPE>image_url</CONTENT_TYPE>"
+                + url + "</MSWEA_MULTIMODAL_CONTENT>"))
 
     def test_separate_judges_independently_control_visual_pass(self):
         for correctness, harmful, expected in (
