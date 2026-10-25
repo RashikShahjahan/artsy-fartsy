@@ -140,7 +140,7 @@ def main() -> int:
             drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
                          args.safety_judge_model, args.code_safety_judge_model),
             model=model_from_env(args.model), model_roles=roles,
-            log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=16,
+            log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=10,
         )
     # An interrupted eval can return headers without its completed samples.
     # Reload the finalized files so partial runs retain their scores and errors.

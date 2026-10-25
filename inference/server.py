@@ -21,7 +21,7 @@ from .model_catalog import model_catalog
 SAMPLER_LOCK = threading.Lock()
 
 CONTEXT_WINDOW = 32768
-MAX_TOKENS = 8192
+MAX_TOKENS = 16000
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 
