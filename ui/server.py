@@ -133,7 +133,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(status)
         if self.path.startswith('/api/'):
             return self.send_json({'error': 'Not found.'}, 404)
-        if self.path not in ('/', '/index.html', '/app.js', '/style.css'):
+        if self.path not in ('/', '/index.html', '/app.js', '/trace.js', '/style.css'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 
