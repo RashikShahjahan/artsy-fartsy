@@ -10,6 +10,7 @@ class TinkerBackend:
         from transformers import AutoImageProcessor, AutoTokenizer
         from tinker_cookbook import renderers
 
+        self.model_id = model_id
         self.service = tinker.ServiceClient()
         self.client = self.service.create_sampling_client(
             **({"model_path": model_path} if model_path else {"base_model": model_id}))
@@ -18,6 +19,14 @@ class TinkerBackend:
         self.image_size = image_size
         self.renderer = renderers.get_renderer(
             RENDERER, self.tokenizer, image_processor=self.image_processor)
+
+    def with_model_path(self, model_path):
+        """Reuse local processors while selecting a different hosted sampler."""
+        from copy import copy
+        backend = copy(self)
+        backend.client = self.service.create_sampling_client(
+            **({"model_path": model_path} if model_path else {"base_model": self.model_id}))
+        return backend
 
     def render(self, messages, tools):
         from tinker_cookbook.renderers import ToolCall

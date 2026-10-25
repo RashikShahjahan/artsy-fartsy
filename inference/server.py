@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +16,9 @@ from fastapi.responses import StreamingResponse
 from jinja2 import TemplateError
 
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
+from .model_catalog import model_catalog
+
+SAMPLER_LOCK = threading.Lock()
 
 CONTEXT_WINDOW = 32768
 MAX_TOKENS = 2048
@@ -127,6 +131,7 @@ async def lifespan(app):
     app.state.backend = "tinker"
     app.state.tinker = TinkerBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE,
                                     os.getenv("ARTSY_TINKER_MODEL_PATH") or None)
+    app.state.samplers = {}
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -136,22 +141,37 @@ app = FastAPI(lifespan=lifespan)
 def health():
     return {"model": MODEL_ID, "tokenizer_revision": MODEL_REVISION, "ready": True,
             "model_path": os.getenv("ARTSY_TINKER_MODEL_PATH") or None,
-            "backend": app.state.backend, "input": ["text", "image"]}
+            "backend": app.state.backend, "input": ["text", "image"], "models": model_catalog()}
 
 
 @app.get("/v1/models")
 def models():
-    return {"object": "list", "data": [{"id": MODEL_ID, "object": "model", "owned_by": "Qwen"}]}
+    return {"object": "list", "data": [{**model, "object": "model", "owned_by": "Qwen"} for model in model_catalog()]}
 
 
 @app.post("/v1/chat/completions")
 def complete(body: dict):
-    if body.get("model") != MODEL_ID:
-        raise HTTPException(400, "This server only serves " + MODEL_ID)
+    model_id = body.get("model")
+    selected = next((model for model in model_catalog() if model['id'] == model_id), None)
+    if not selected:
+        raise HTTPException(400, "Unknown model. Choose a model from /v1/models.")
+    backend = app.state.tinker
+    if model_id != MODEL_ID:
+        # Keep a small cache; every request retains its own backend reference.
+        with SAMPLER_LOCK:
+            samplers = getattr(app.state, 'samplers', {})
+            app.state.samplers = samplers
+            path = selected['model_path']
+            if path not in samplers:
+                candidate = backend.with_model_path(path)
+                if len(samplers) >= 3:
+                    samplers.pop(next(iter(samplers)))
+                samplers[path] = candidate
+            backend = samplers[path]
     budget = max(1, min(int(body.get("max_tokens") or MAX_TOKENS), MAX_TOKENS))
     try:
         messages = template_messages(body["messages"])
-        raw, count, generated = app.state.tinker.generate(
+        raw, count, generated = backend.generate(
             messages, body.get("tools"), budget, CONTEXT_WINDOW)
     except (ValueError, TemplateError) as error:
         raise HTTPException(400, str(error)) from error
@@ -164,7 +184,7 @@ def complete(body: dict):
     if calls:
         message["tool_calls"] = calls
     finish = "tool_calls" if calls else "length" if generated >= budget else "stop"
-    common = {"id": "chatcmpl-" + uuid.uuid4().hex, "created": int(time.time()), "model": MODEL_ID}
+    common = {"id": "chatcmpl-" + uuid.uuid4().hex, "created": int(time.time()), "model": model_id}
     usage = {"prompt_tokens": count, "completion_tokens": generated, "total_tokens": count + generated}
     if not body.get("stream"):
         return {**common, "object": "chat.completion", "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage}

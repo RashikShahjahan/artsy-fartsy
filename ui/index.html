@@ -5,7 +5,7 @@
 <main><h1>Generate an image</h1><div class="studio">
 <section class="controls" aria-label="Generation settings"><form id="generation-form">
 <label for="prompt">Prompt</label><textarea id="prompt" maxlength="4000" placeholder="Describe what to draw…" required></textarea>
-<label for="model">Model</label><select id="model" required><option value="Qwen/Qwen3.5-4B">Qwen3.5 · 4B</option></select><p class="note">Uses the checkpoint configured on the running bridge.</p>
+<label for="model">Model</label><select id="model" required><option value="Qwen/Qwen3.5-4B">Qwen3.5 · 4B</option></select><p class="note" id="model-note">Choose base weights or a completed fine-tune.</p>
 <div class="settings"><div><span class="field-label">Canvas</span><div class="fixed-field">1920 × 1200</div></div></div>
 <button class="primary" id="generate" type="submit">Generate</button><p class="note">Runs the drawing agent. Uses model credits.</p><p id="form-status" role="status"></p>
 </form></section>

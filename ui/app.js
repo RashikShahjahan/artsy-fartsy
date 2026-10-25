@@ -152,7 +152,7 @@ async function poll(id) {
       $('#trace-note').textContent='Process output updates during generation. The complete recorded agent trace appears when the run ends.';
       setTimeout(()=>poll(id),1500);return;
     }
-    $('#generate').disabled=false;active=null;
+    active=null;updateModelAvailability();
     $('#trace-note').textContent='Commands, results, and previews in order. Expand any action for its full record.';
     if(run.trace) renderTrace(run.trace);
     else $('#trace').innerHTML='<p class="empty">No agent trace was produced. See process output below.</p>';
@@ -181,4 +181,25 @@ $('#generation-form').onsubmit=async e=>{
   } catch(error) {$('#form-status').textContent=error.message;$('#generate').disabled=false;}
 };
 $('#expand').onclick=()=>{expanded=!expanded;document.querySelectorAll('#trace details').forEach(d=>d.open=expanded);hydrateRecords();$('#expand').textContent=expanded?'Collapse all':'Expand all';};
+let bridgeModels = null;
+function updateModelAvailability() {
+  const unavailable = $('#model').value.startsWith('artsy/') && bridgeModels !== null && !bridgeModels.includes($('#model').value);
+  $('#model-note').textContent = unavailable ? 'Restart the inference bridge with make serve to use this fine-tune, then reload.' : 'Choose base weights or a completed fine-tune.';
+  $('#generate').disabled = Boolean(active) || unavailable;
+}
+$('#model').onchange = updateModelAvailability;
+async function loadModels() {
+  try {
+    const response = await fetch('/api/models', {cache:'no-store'});
+    if (!response.ok) throw new Error('Could not load models');
+    const {models, bridge_models} = await response.json();
+    bridgeModels = bridge_models ?? null;
+    const selected = $('#model').value;
+    $('#model').replaceChildren(...models.map(model => new Option(model.label, model.id)));
+    if (models.some(model => model.id === selected)) $('#model').value = selected;
+    else if (selected) { $('#model').add(new Option(selected + ' (saved run)', selected)); $('#model').value = selected; }
+    updateModelAvailability();
+  } catch { $('#model-note').textContent = 'Could not load fine-tunes. Restart the UI server and reload.'; }
+}
+loadModels();
 try{const id=location.hash.match(/^#run=([a-f0-9]{32})$/)?.[1] || sessionStorage.getItem('artsy-active-run');if(id&&/^[a-f0-9]{32}$/.test(id)){active=id;$('#generate').disabled=true;poll(id);}}catch{}

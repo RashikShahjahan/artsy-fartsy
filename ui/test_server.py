@@ -9,6 +9,18 @@ from ui import server
 
 
 class JobTests(unittest.TestCase):
+    def test_bridge_capabilities_distinguish_legacy_and_finetune_routing(self):
+        with patch.object(server, 'urlopen') as request:
+            response = request.return_value.__enter__.return_value
+            response.read.return_value = json.dumps({'model': 'Qwen/Qwen3.5-4B'}).encode()
+            self.assertEqual(server.bridge_model_catalog(), [{'id': 'Qwen/Qwen3.5-4B', 'model_path': None}])
+            response.read.return_value = json.dumps({'models': [{'id': 'artsy/trained'}]}).encode()
+            self.assertEqual(server.bridge_model_catalog(), [{'id': 'artsy/trained'}])
+            response.read.return_value = b'invalid json'
+            self.assertIsNone(server.bridge_model_catalog())
+        with patch.object(server, 'urlopen', side_effect=OSError('offline')):
+            self.assertIsNone(server.bridge_model_catalog())
+
     def test_command_and_completion(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)

@@ -30,6 +30,19 @@ class TinkerPreflightTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Start it with `make serve`"):
                 check_native_bridge(BASE_MODEL)
 
+    def test_finetune_requires_matching_sampler_advertised_by_bridge(self):
+        entry = {"id": "artsy/trained", "label": "trained", "model_path": "tinker://trained/final"}
+        status = {"backend": "tinker", "model": BASE_MODEL, "input": ["text", "image"], "models": [entry]}
+        with patch.dict(os.environ, {"ARTSY_MODEL_URL": ""}), \
+             patch("inference.model_catalog.model_catalog", return_value=[entry]), \
+             patch("evaluation.harness.httpx.get") as request:
+            request.return_value.json.return_value = status
+            check_native_bridge(entry['id'])
+            for advertised in ([], [{**entry, "model_path": "tinker://wrong/final"}]):
+                request.return_value.json.return_value = {**status, "models": advertised}
+                with self.assertRaisesRegex(RuntimeError, "Restart `make serve`"):
+                    check_native_bridge(entry['id'])
+
     def test_custom_endpoint_skips_native_bridge_check(self):
         with patch.dict(os.environ, {"ARTSY_MODEL_URL": "https://example.com/v1"}), \
              patch("evaluation.harness.httpx.get") as request:

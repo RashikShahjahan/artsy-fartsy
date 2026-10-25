@@ -7,12 +7,27 @@ import subprocess
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
+from urllib.request import urlopen
+from urllib.error import URLError
+
+from inference.model_catalog import model_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 JOBS = ROOT / 'episodes' / 'ui'
 LOCK = threading.Lock()
 ACTIVE = None
 PORT = int(os.getenv('ARTSY_UI_PORT', '4173'))
+
+
+def bridge_model_catalog():
+    try:
+        with urlopen('http://127.0.0.1:8080/health', timeout=1) as response:
+            status = json.loads(response.read(1024 * 1024))
+        if not isinstance(status, dict):
+            return None
+        return [item for item in status.get('models', []) if isinstance(item, dict) and isinstance(item.get('id'), str)] or [{'id': status.get('model'), 'model_path': status.get('model_path')}]
+    except (OSError, ValueError, URLError):
+        return None
 
 
 def interpreter():
@@ -105,6 +120,15 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if not self.trusted():
             return self.send_json({'error': 'Local requests only.'}, 403)
+        if self.path == '/api/models':
+            served = bridge_model_catalog()
+            catalog = {item['id']: item for item in model_catalog()}
+            for item in served or []:
+                if item['id'] in catalog:
+                    catalog[item['id']].update(item)
+                    if item.get('model_path') and 'label' not in item:
+                        catalog[item['id']]['label'] = 'Qwen3.5 · 4B · configured checkpoint'
+            return self.send_json({'models': list(catalog.values()), 'bridge_models': [item['id'] for item in served] if served is not None else None})
         match = re.fullmatch(r'/api/runs/([a-f0-9]{32})(?:/(image.png|program.py|trace.json|result.json))?', self.path)
         if match:
             directory = JOBS / match[1]

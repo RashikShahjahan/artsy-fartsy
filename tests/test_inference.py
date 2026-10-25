@@ -158,6 +158,20 @@ class CompletionTest(unittest.TestCase):
         self.assertEqual(response["usage"], {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5})
         self.assertEqual(models()["data"][0]["id"], "Qwen/Qwen3.5-4B")
 
+    def test_finetune_selection_routes_to_its_sampler_and_reuses_it(self):
+        entry = {"id": "artsy/trained", "label": "trained", "model_path": "tinker://trained/final"}
+        app.state.samplers = {}
+        sampler = app.state.tinker.with_model_path.return_value
+        sampler.generate.return_value = (self.raw, 10, 4)
+        with patch("inference.server.model_catalog", return_value=[entry]):
+            for _ in range(2):
+                response = complete({**self.body, "model": entry['id']})
+                self.assertEqual(response['model'], entry['id'])
+                self.assertEqual(models()['data'][0]['id'], entry['id'])
+        app.state.tinker.with_model_path.assert_called_once_with(entry['model_path'])
+        self.assertEqual(sampler.generate.call_count, 2)
+        app.state.tinker.generate.assert_not_called()
+
     def test_malformed_call_is_returned_as_text(self):
         self.raw = tool_call("run_code") + '<tool_call>\n<function=submit>'
         app.state.tinker.generate.return_value = (self.raw, 3, 2)
