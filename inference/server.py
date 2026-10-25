@@ -12,11 +12,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
 from jinja2 import TemplateError
 
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
-from .model_catalog import model_catalog
+from .model_catalog import ModelCatalogCache, model_catalog
 
 SAMPLER_LOCK = threading.Lock()
 
@@ -66,7 +65,7 @@ def parse_tools(text, tools=None):
     return "".join(prose).strip(), calls
 
 
-def image_content(part):
+def image_content(part, preprocess_image=None):
     """Decode an inline image locally before passing it to the processor."""
     from PIL import Image, UnidentifiedImageError
     source = part.get("image_url", {})
@@ -83,12 +82,13 @@ def image_content(part):
         with Image.open(io.BytesIO(data)) as image:
             if not (1 <= image.width <= 4096 and 1 <= image.height <= 4096):
                 raise ValueError("Image dimensions exceed 4096×4096")
-            return {"type": "image", "image": image.convert("RGB")}
+            rgb = image.convert("RGB")
+            return {"type": "image", "image": preprocess_image(rgb) if preprocess_image else rgb}
     except (binascii.Error, UnidentifiedImageError, OSError) as error:
         raise ValueError("Invalid inline image") from error
 
 
-def template_messages(messages):
+def template_messages(messages, preprocess_image=None):
     """Qwen's template expects tool argument objects, not OpenAI JSON strings."""
     result = []
     for original in messages:
@@ -102,7 +102,7 @@ def template_messages(messages):
             parts = []
             for part in content:
                 if part.get("type") == "image_url":
-                    parts.append(image_content(part))
+                    parts.append(image_content(part, preprocess_image))
                 elif part.get("type") == "text":
                     parts.append({"type": "text", "text": part["text"]})
                 else:
@@ -135,24 +135,31 @@ async def lifespan(app):
     yield
 
 app = FastAPI(lifespan=lifespan)
+app.state.model_catalog_cache = ModelCatalogCache()
+
+
+def cached_model_catalog():
+    return app.state.model_catalog_cache.get(model_catalog)
 
 
 @app.get("/health")
 def health():
     return {"model": MODEL_ID, "tokenizer_revision": MODEL_REVISION, "ready": True,
             "model_path": os.getenv("ARTSY_TINKER_MODEL_PATH") or None,
-            "backend": app.state.backend, "input": ["text", "image"], "models": model_catalog()}
+            "backend": app.state.backend, "input": ["text", "image"], "streaming": False, "models": cached_model_catalog()}
 
 
 @app.get("/v1/models")
 def models():
-    return {"object": "list", "data": [{**model, "object": "model", "owned_by": "Qwen"} for model in model_catalog()]}
+    return {"object": "list", "data": [{**model, "object": "model", "owned_by": "Qwen"} for model in cached_model_catalog()]}
 
 
 @app.post("/v1/chat/completions")
 def complete(body: dict):
+    if body.get("stream"):
+        raise HTTPException(400, "Streaming unsupported by the hosted sampling SDK; use stream=false.")
     model_id = body.get("model")
-    selected = next((model for model in model_catalog() if model['id'] == model_id), None)
+    selected = next((model for model in cached_model_catalog() if model['id'] == model_id), None)
     if not selected:
         raise HTTPException(400, "Unknown model. Choose a model from /v1/models.")
     backend = app.state.tinker
@@ -170,7 +177,7 @@ def complete(body: dict):
             backend = samplers[path]
     budget = max(1, min(int(body.get("max_tokens") or MAX_TOKENS), MAX_TOKENS))
     try:
-        messages = template_messages(body["messages"])
+        messages = template_messages(body["messages"], backend.prepare_image)
         raw, count, generated = backend.generate(
             messages, body.get("tools"), budget, CONTEXT_WINDOW)
     except (ValueError, TemplateError) as error:
@@ -186,14 +193,4 @@ def complete(body: dict):
     finish = "tool_calls" if calls else "length" if generated >= budget else "stop"
     common = {"id": "chatcmpl-" + uuid.uuid4().hex, "created": int(time.time()), "model": model_id}
     usage = {"prompt_tokens": count, "completion_tokens": generated, "total_tokens": count + generated}
-    if not body.get("stream"):
-        return {**common, "object": "chat.completion", "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage}
-
-    def chunks():
-        delta = dict(message)
-        if calls:
-            delta["tool_calls"] = [{"index": i, **call} for i, call in enumerate(calls)]
-        for part, reason in [(delta, None), ({}, finish)]:
-            yield "data: " + json.dumps({**common, "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": part, "finish_reason": reason}], "usage": usage if reason else None}) + "\n\n"
-        yield "data: [DONE]\n\n"
-    return StreamingResponse(chunks(), media_type="text/event-stream")
+    return {**common, "object": "chat.completion", "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage}

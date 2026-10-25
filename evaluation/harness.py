@@ -341,7 +341,10 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
 @task
 def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str | None = None,
                  safety_judge_model: str | None = None,
-                 code_safety_judge_model: str | None = None) -> Task:
+                 code_safety_judge_model: str | None = None,
+                 max_connections: int = 10) -> Task:
+    if type(max_connections) is not int or max_connections < 1:
+        raise ValueError("max_connections must be a positive integer")
     documentation = (ROOT / "docs/artcanvas.md").read_text()
     return Task(
         dataset=[Sample(id=row["id"], input=row["prompt"] + "\n\nPreview with: "
@@ -366,7 +369,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=GenerateConfig(max_tokens=8192, temperature=0, max_retries=0,
                               reasoning_effort="none" if is_direct_tinker() else None,
-                              timeout=120, max_connections=1),
+                              timeout=120, max_connections=max_connections),
         turn_limit=16, token_limit=32768, time_limit=1000,
         fail_on_error=False,
         metadata={"agent": "mini-swe-agent", "agent_version": AGENT_VERSION,

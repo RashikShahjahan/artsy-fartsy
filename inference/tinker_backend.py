@@ -28,6 +28,18 @@ class TinkerBackend:
             **({"model_path": model_path} if model_path else {"base_model": self.model_id}))
         return backend
 
+    def prepare_image(self, image):
+        """Apply the training-compatible Qwen resize before retaining request pixels."""
+        from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
+        height, width = smart_resize(
+            image.height, image.width,
+            factor=self.image_processor.patch_size * self.image_processor.merge_size,
+            min_pixels=self.image_size["shortest_edge"],
+            max_pixels=self.image_size["longest_edge"])
+        if image.mode != "RGB":
+            image = image.convert("RGB")
+        return image if image.size == (width, height) else image.resize((width, height))
+
     def render(self, messages, tools):
         from tinker_cookbook.renderers import ToolCall
 
@@ -38,17 +50,7 @@ class TinkerBackend:
                 parts = []
                 for part in message["content"]:
                     if part["type"] == "image":
-                        # Qwen3-VL reuses the Qwen2-VL image resize utility;
-                        # transformers 5.x does not ship image_processing_qwen3_vl.
-                        # Import only for images so text/tool requests stay independent.
-                        from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
-                        image = part["image"]
-                        height, width = smart_resize(
-                            image.height, image.width,
-                            factor=self.image_processor.patch_size * self.image_processor.merge_size,
-                            min_pixels=self.image_size["shortest_edge"],
-                            max_pixels=self.image_size["longest_edge"])
-                        part = {"type": "image", "image": image.resize((width, height))}
+                        part = {"type": "image", "image": self.prepare_image(part["image"])}
                     parts.append(part)
                 message["content"] = parts
             if message.get("tool_calls"):

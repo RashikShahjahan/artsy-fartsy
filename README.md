@@ -56,6 +56,8 @@ the `qwen3_5_disable_thinking` renderer. It accepts inline base64 PNG previews
 and limits their visual-token resolution; the original preview is kept intact.
 Set `ARTSY_TINKER_MODEL_PATH` in `.env` to serve a `tinker://` sampler checkpoint.
 The local bridge is a development server, not a public API service.
+The native sampling API returns complete responses, so the bridge requires
+`stream=false` (the default) and rejects streaming requests before sampling.
 Tinker is the only bundled inference backend; the retired MLX and local PyTorch paths
 are no longer installed or supported.
 
@@ -227,7 +229,10 @@ with the requested model/checkpoint, then checks both capabilities. It avoids th
 beta OpenAI endpoint's model-specific vision limitation by routing messages
 through the native sampling renderer. No `reasoning_effort` request parameter is
 needed: the bridge explicitly uses Qwen's non-thinking renderer.
-Runs use one sample at a time to match the bundled serialized model server.
+Evaluation defaults to ten concurrent samples and ten model connections. Use
+`--max-samples` and `--max-connections` to tune these independently; for example,
+`--max-samples 2 --max-connections 2` limits both to two. Each active sample has
+its own Docker container, so choose sample concurrency to fit available memory.
 Use a fresh output directory for every run. The first run builds the Docker image.
 
 `render_valid` checks code execution and a valid PNG of the expected dimensions.

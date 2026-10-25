@@ -26,3 +26,30 @@ def model_catalog(root=ROOT):
         except (OSError, ValueError, AttributeError, TypeError):
             continue
     return entries
+
+
+class ModelCatalogCache:
+    """Refresh checkpoint discovery periodically, returning isolated snapshots."""
+
+    def __init__(self, ttl=5.0):
+        import threading
+        self.ttl = ttl
+        self._lock = threading.Lock()
+        self._entries = None
+        self._expires = 0.0
+        self._configured = None
+
+    def get(self, loader=model_catalog):
+        import copy
+        import time
+        # Serialize discovery as well as publication so concurrent requests do not
+        # all scan the checkpoint directory when the snapshot expires.
+        with self._lock:
+            configured = os.getenv('ARTSY_TINKER_MODEL_PATH') or None
+            now = time.monotonic()
+            if self._entries is None or now >= self._expires or configured != self._configured:
+                entries = loader()
+                self._entries = copy.deepcopy(entries)
+                self._configured = configured
+                self._expires = time.monotonic() + self.ttl
+            return copy.deepcopy(self._entries)

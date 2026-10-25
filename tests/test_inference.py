@@ -1,4 +1,3 @@
-import asyncio
 import base64
 import io
 import json
@@ -7,7 +6,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
-from inference.server import CONTEXT_WINDOW, MAX_TOKENS, MODEL_ID, app, complete, image_content, models, parse_tools, template_messages
+from inference.server import CONTEXT_WINDOW, MAX_TOKENS, MODEL_ID, app, complete, health, image_content, models, parse_tools, template_messages
 
 
 TOOLS = [{"type": "function", "function": {"name": "write_code", "parameters": {
@@ -22,10 +21,14 @@ def parameter(name, value):
     return f"<parameter={name}>\n{value}\n</parameter>\n"
 
 
-def inline_image():
+def inline_image(size=(32, 32), mode="RGB", patterned=False):
     from PIL import Image
     data = io.BytesIO()
-    Image.new("RGB", (32, 32), "blue").save(data, format="PNG")
+    image = Image.new(mode, size, "blue")
+    if patterned:
+        from PIL import ImageDraw
+        ImageDraw.Draw(image).rectangle((size[0] // 3, size[1] // 3, size[0] - 1, size[1] - 1), fill="red")
+    image.save(data, format="PNG")
     return {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(data.getvalue()).decode()}}
 
 
@@ -143,7 +146,14 @@ class CompletionTest(unittest.TestCase):
         self.state_patch = patch.object(app, "state")
         state = self.state_patch.start()
         self.addCleanup(self.state_patch.stop)
+        from inference.model_catalog import ModelCatalogCache
+        from inference.tinker_backend import TinkerBackend
+        state.model_catalog_cache = ModelCatalogCache()
         state.backend = "tinker"
+        preprocessor = TinkerBackend.__new__(TinkerBackend)
+        preprocessor.image_processor = SimpleNamespace(patch_size=14, merge_size=2)
+        preprocessor.image_size = {"shortest_edge": 28 * 28, "longest_edge": 56 * 56}
+        state.tinker.prepare_image.side_effect = preprocessor.prepare_image
         state.tinker.generate.return_value = (self.raw, 3, 2)
         self.body = {"model": MODEL_ID, "messages": [{"role": "user", "content": "Draw a circle"}], "tools": TOOLS}
 
@@ -157,6 +167,16 @@ class CompletionTest(unittest.TestCase):
         self.assertEqual(choice["message"]["tool_calls"][0]["function"], {"name": "submit", "arguments": "{}"})
         self.assertEqual(response["usage"], {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5})
         self.assertEqual(models()["data"][0]["id"], "Qwen/Qwen3.5-4B")
+
+    def test_completion_health_and_models_reuse_catalog(self):
+        entries = [{"id": MODEL_ID, "label": "base", "model_path": None}]
+        with patch("inference.server.model_catalog", return_value=entries) as catalog:
+            complete(self.body)
+            listed = models()
+            listed["data"][0]["label"] = "mutated"
+            self.assertEqual(health()["models"][0]["label"], "base")
+            self.assertEqual(models()["data"][0]["label"], "base")
+        catalog.assert_called_once()
 
     def test_finetune_selection_routes_to_its_sampler_and_reuses_it(self):
         entry = {"id": "artsy/trained", "label": "trained", "model_path": "tinker://trained/final"}
@@ -191,20 +211,45 @@ class CompletionTest(unittest.TestCase):
                          {"prompt_tokens": 123, "completion_tokens": 12, "total_tokens": 135})
         messages, tools, budget, context = app.state.tinker.generate.call_args.args
         self.assertEqual(messages[0]["role"], "system")
-        self.assertEqual(messages[1]["content"][0]["image"].size, (32, 32))
+        self.assertEqual(messages[1]["content"][0]["image"].size, (28, 28))
         self.assertEqual((tools, budget, context), (TOOLS, MAX_TOKENS, CONTEXT_WINDOW))
 
-    def test_streaming_tool_response_has_index_and_done(self):
-        response = complete({**self.body, "stream": True})
+    def test_streaming_is_rejected_before_catalog_or_sampler_work(self):
+        with patch("inference.server.model_catalog") as catalog:
+            with self.assertRaises(HTTPException) as error:
+                complete({**self.body, "stream": True, "model": "artsy/new"})
+        self.assertEqual(error.exception.status_code, 400)
+        self.assertIn("stream=false", error.exception.detail)
+        catalog.assert_not_called()
+        app.state.model_catalog_cache.get = Mock(side_effect=AssertionError("catalog accessed"))
+        with self.assertRaises(HTTPException):
+            complete({**self.body, "stream": True})
+        app.state.tinker.generate.assert_not_called()
+        app.state.tinker.with_model_path.assert_not_called()
 
-        async def collect():
-            return [chunk async for chunk in response.body_iterator]
-
-        chunks = asyncio.run(collect())
-        first = json.loads(chunks[0].removeprefix("data: "))
-        self.assertEqual(first["choices"][0]["delta"]["tool_calls"][0]["index"], 0)
-        self.assertEqual(json.loads(chunks[1].removeprefix("data: "))["choices"][0]["finish_reason"], "tool_calls")
-        self.assertEqual(chunks[-1], "data: [DONE]\n\n")
+    def test_large_image_is_bounded_before_generation_with_matching_pixels(self):
+        from PIL import Image
+        from inference.tinker_backend import TinkerBackend
+        from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
+        for size, factor in [((4096, 2048), 28), ((33, 29), 16), ((8, 8), 28)]:
+            with self.subTest(size=size, factor=factor):
+                backend = TinkerBackend.__new__(TinkerBackend)
+                backend.image_processor = SimpleNamespace(patch_size=factor // 2, merge_size=2)
+                backend.image_size = {"shortest_edge": factor ** 2, "longest_edge": (factor * 2) ** 2}
+                app.state.tinker.prepare_image.side_effect = backend.prepare_image
+                part = inline_image(size, "RGBA", patterned=True)
+                messages = [{"role": "user", "content": [part]}]
+                complete({**self.body, "messages": messages})
+                actual = app.state.tinker.generate.call_args.args[0][0]["content"][0]["image"]
+                raw = image_content(part)["image"]
+                height, width = smart_resize(size[1], size[0], factor=factor,
+                    min_pixels=factor ** 2, max_pixels=(factor * 2) ** 2)
+                expected = raw.resize((width, height))
+                self.assertEqual(actual.mode, "RGB")
+                self.assertEqual(actual.size, expected.size)
+                self.assertEqual(actual.tobytes(), expected.tobytes())
+                self.assertIs(backend.prepare_image(actual), actual)
+                self.assertEqual(messages[0]["content"][0], part)
 
     def test_wrong_model_and_excess_context_are_rejected(self):
         with self.assertRaises(HTTPException) as error:

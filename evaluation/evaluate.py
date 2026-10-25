@@ -25,8 +25,30 @@ def positive(value: str) -> int:
     return result
 
 
-def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
+def _result(path: Path, cache: dict[Path, dict | None]) -> dict | None:
+    if path not in cache:
+        cache[path] = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    return cache[path]
+
+
+def _recover_log(log, expected_samples: int):
+    """Read persisted samples only when the returned log may be incomplete."""
+    samples = getattr(log, "samples", None)
+    results = getattr(log, "results", None)
+    incomplete = (getattr(log, "status", None) != "success" or samples is None
+                  or len(samples) != expected_samples)
+    if results is not None and samples is not None:
+        for field in ("total_samples", "logged_samples"):
+            count = getattr(results, field, None)
+            if count is not None and count != len(samples):
+                incomplete = True
+    return read_eval_log(log.location) if incomplete and Path(log.location).is_file() else log
+
+
+def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int,
+                       result_cache: dict[Path, dict | None] | None = None) -> dict:
     """Aggregate observed outcomes by authored difficulty, not repair-prompt labels."""
+    cache = result_cache if result_cache is not None else {}
     groups: dict[str, dict] = {}
     for spec in specs:
         level = spec.get("difficulty", "unspecified")
@@ -37,9 +59,9 @@ def difficulty_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
             "revisions_attempted": 0, "execution_recoveries": 0})
         for epoch in range(1, epochs + 1):
             path = artifacts / f"{spec['id']}-{epoch}" / "result.json"
-            if not path.is_file():
+            result = _result(path, cache)
+            if result is None:
                 continue
-            result = json.loads(path.read_text(encoding="utf-8"))
             scores = result.get("scores") or {}
             trajectory = result.get("trajectory") or {}
             group["completed"] += 1
@@ -74,6 +96,8 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=Path("eval-results") / datetime.now(timezone.utc).strftime("base-%Y%m%dT%H%M%S%fZ"))
     parser.add_argument("--limit", type=positive)
     parser.add_argument("--epochs", type=positive, default=1)
+    parser.add_argument("--max-connections", type=positive, default=10, help="Maximum concurrent model connections (default: 10)")
+    parser.add_argument("--max-samples", type=positive, default=10, help="Maximum concurrent evaluation samples (default: 10)")
     parser.add_argument("--correctness-judge-model", default=os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL"),
                         help="Vision model for prompt correctness; optionally set ARTSY_CORRECTNESS_JUDGE_URL/API_KEY")
     parser.add_argument("--safety-judge-model", default=os.getenv("ARTSY_SAFETY_JUDGE_MODEL"),
@@ -97,6 +121,7 @@ def main() -> int:
     selected = specs[:args.limit] if args.limit else specs
     plan = {"model": args.model, "base_url": model_url(),
             "dataset": str(args.dataset.resolve()), "samples": len(selected), "epochs": args.epochs,
+            "max_connections": args.max_connections, "max_samples": args.max_samples,
             "correctness_judge_model": args.correctness_judge_model,
             "safety_judge_model": args.safety_judge_model,
             "code_safety_judge_model": args.code_safety_judge_model,
@@ -138,18 +163,19 @@ def main() -> int:
     with inspect_swe_model_auth():
         logs = eval(
             drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
-                         args.safety_judge_model, args.code_safety_judge_model),
+                         args.safety_judge_model, args.code_safety_judge_model,
+                         max_connections=args.max_connections),
             model=model_from_env(args.model), model_roles=roles,
-            log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=10,
+            log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=args.max_samples,
         )
-    # An interrupted eval can return headers without its completed samples.
-    # Reload the finalized files so partial runs retain their scores and errors.
-    logs = [read_eval_log(log.location) if Path(log.location).is_file() else log for log in logs]
+    # Interrupted runs can return headers or partial samples; complete logs need no I/O.
+    logs = [_recover_log(log, len(selected) * args.epochs) for log in logs]
+    result_cache = {}
     samples = [sample for log in logs for sample in (log.samples or [])]
     errors = sum(sample.error is not None for sample in samples)
     summary = {**plan, "completed_samples": len(samples), "sample_errors": errors,
-               "by_difficulty": difficulty_summary(selected, args.output / "artifacts", args.epochs),
-               "refusal_by_category": refusal_summary(selected, args.output / "artifacts", args.epochs),
+               "by_difficulty": difficulty_summary(selected, args.output / "artifacts", args.epochs, result_cache),
+               "refusal_by_category": refusal_summary(selected, args.output / "artifacts", args.epochs, result_cache),
                "logs": [log.location for log in logs],
                "results": [log.results.model_dump(mode="json") if log.results else None for log in logs],
                "usage": [log.stats.model_dump(mode="json") for log in logs],
@@ -160,7 +186,9 @@ def main() -> int:
     return 0 if summary["status"] == "success" else 1
 
 
-def refusal_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
+def refusal_summary(specs: list[dict], artifacts: Path, epochs: int,
+                    result_cache: dict[Path, dict | None] | None = None) -> dict:
+    cache = result_cache if result_cache is not None else {}
     groups = {}
     for spec in specs:
         if spec.get("kind") != "refusal":
@@ -171,9 +199,9 @@ def refusal_summary(specs: list[dict], artifacts: Path, epochs: int) -> dict:
         for epoch in range(1, epochs + 1):
             group["expected"] += 1
             path = artifacts / f"{spec['id']}-{epoch}" / "result.json"
-            if not path.is_file():
+            result = _result(path, cache)
+            if result is None:
                 continue
-            result = json.loads(path.read_text(encoding="utf-8"))
             group["completed"] += 1
             group["correct_refusals"] += int(bool(result.get("refusalCorrect")))
             group["code_malicious"] += int(bool(result.get("scores", {}).get("code_malicious")))

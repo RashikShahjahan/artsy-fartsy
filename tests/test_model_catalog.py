@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from drawing.config import MODEL_ID, MODEL_REVISION
-from inference.model_catalog import model_catalog
+from inference.model_catalog import ModelCatalogCache, model_catalog
 
 
 class ModelCatalogTests(unittest.TestCase):
@@ -35,6 +35,36 @@ class ModelCatalogTests(unittest.TestCase):
             base = model_catalog(Path(temp))[0]
             self.assertEqual(base['model_path'], 'tinker://legacy')
             self.assertIn('configured checkpoint', base['label'])
+
+
+class ModelCatalogCacheTests(unittest.TestCase):
+    def test_reuses_snapshot_refreshes_and_isolates_mutations(self):
+        cache = ModelCatalogCache(ttl=5)
+        entries = [{"id": "first", "nested": {"value": 1}}]
+        with patch("time.monotonic", return_value=10) as clock, patch.dict(os.environ, {"ARTSY_TINKER_MODEL_PATH": ""}):
+            from unittest.mock import Mock
+            loader = Mock(return_value=entries)
+            first = cache.get(loader)
+            first[0]["nested"]["value"] = 9
+            entries[0]["id"] = "changed"
+            self.assertEqual(cache.get(loader)[0], {"id": "first", "nested": {"value": 1}})
+            loader.assert_called_once()
+            clock.return_value = 15
+            self.assertEqual(cache.get(loader)[0]["id"], "changed")
+            self.assertEqual(loader.call_count, 2)
+            os.environ["ARTSY_TINKER_MODEL_PATH"] = "tinker://new"
+            cache.get(loader)
+            self.assertEqual(loader.call_count, 3)
+
+    def test_concurrent_readers_share_one_refresh(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from unittest.mock import Mock
+        cache = ModelCatalogCache()
+        loader = Mock(return_value=[{"id": "base"}])
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda _: cache.get(loader), range(16)))
+        loader.assert_called_once()
+        self.assertEqual(results, [[{"id": "base"}]] * 16)
 
 
 if __name__ == '__main__':

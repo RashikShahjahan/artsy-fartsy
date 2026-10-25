@@ -210,9 +210,12 @@ class EvaluationTest(unittest.TestCase):
                  patch("evaluation.evaluate.eval", return_value=[fake_log]) as run, \
                  patch.object(sys, "argv", ["evaluate", "--limit", "1", "--output", str(root / "run"),
                      "--correctness-judge-model", "mockllm/correct",
-                     "--safety-judge-model", "mockllm/safe"]), \
+                     "--safety-judge-model", "mockllm/safe",
+                     "--max-connections", "3", "--max-samples", "4"]), \
                  redirect_stdout(io.StringIO()):
                 self.assertEqual(main(), 0)
+            self.assertEqual(run.call_args.args[0].config.max_connections, 3)
+            self.assertEqual(run.call_args.kwargs["max_samples"], 4)
             self.assertEqual(run.call_args.kwargs["model_roles"],
                 {"correctness_grader": "mockllm/correct", "safety_grader": "mockllm/safe",
                  "code_safety_grader": "mockllm/safe"})
@@ -236,6 +239,71 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(plan["model"], settings["ARTSY_MODEL"])
         self.assertEqual(plan["correctness_judge_model"], settings["ARTSY_CORRECTNESS_JUDGE_MODEL"])
         self.assertEqual(plan["safety_judge_model"], settings["ARTSY_SAFETY_JUDGE_MODEL"])
+
+    def test_concurrency_defaults_configuration_and_invalid_values(self):
+        from evaluation.evaluate import main
+        specs = [{"id": "x", "prompt": "circle", "seed": 1}]
+        self.assertEqual(drawing_task(specs, "/tmp/artsy-test").config.max_connections, 10)
+        self.assertEqual(drawing_task(specs, "/tmp/artsy-test", max_connections=3).config.max_connections, 3)
+        for value in (0, -1, True):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                drawing_task(specs, "/tmp/artsy-test", max_connections=value)
+        for flags, expected in (([], (10, 10)),
+                                (["--max-connections", "3", "--max-samples", "4"], (3, 4))):
+            with patch.object(sys, "argv", ["evaluate", "--dry-run", *flags]), redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(main(), 0)
+            plan = json.loads(output.getvalue())
+            self.assertEqual((plan["max_connections"], plan["max_samples"]), expected)
+        for flag in ("--max-connections", "--max-samples"):
+            for value in ("0", "-1", "invalid"):
+                with self.subTest(flag=flag, value=value), patch.object(sys, "argv", ["evaluate", "--dry-run", flag, value]), \
+                     patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit) as error:
+                    main()
+                self.assertEqual(error.exception.code, 2)
+
+    def test_complete_logs_are_not_reloaded_but_partial_logs_are(self):
+        from evaluation.evaluate import _recover_log
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "saved.eval"
+            path.touch()
+            log = SimpleNamespace(location=str(path), status="success", samples=[object()],
+                results=SimpleNamespace(total_samples=1, completed_samples=1, logged_samples=1))
+            with patch("evaluation.evaluate.read_eval_log") as read:
+                self.assertIs(_recover_log(log, 1), log)
+                read.assert_not_called()
+                _recover_log(log, 2)
+                read.assert_called_once_with(str(path))
+            # Inspect counts only error-free samples as completed, even for success logs.
+            log.samples = [SimpleNamespace(error=object())]
+            log.results.completed_samples = 0
+            with patch("evaluation.evaluate.read_eval_log") as read:
+                self.assertIs(_recover_log(log, 1), log)
+                read.assert_not_called()
+            log.results.logged_samples = 2
+            with patch("evaluation.evaluate.read_eval_log") as read:
+                _recover_log(log, 1)
+                read.assert_called_once_with(str(path))
+            log.status = "cancelled"
+            with patch("evaluation.evaluate.read_eval_log") as read:
+                _recover_log(log, 1)
+                read.assert_called_once_with(str(path))
+
+    def test_summaries_share_a_single_result_read(self):
+        from evaluation.evaluate import difficulty_summary, refusal_summary
+        specs = [{"id": "x", "difficulty": "hard", "kind": "refusal"}]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "x-1/result.json"
+            path.parent.mkdir()
+            path.write_text(json.dumps({"refusalCorrect": True, "scores": {}}))
+            cache = {}
+            with patch.object(Path, "read_text", autospec=True, side_effect=Path.read_text) as read:
+                difficulty = difficulty_summary(specs, root, 2, cache)
+                refusal = refusal_summary(specs, root, 2, cache)
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(difficulty["hard"]["completed"], 1)
+            self.assertEqual(refusal["harmful_image"]["expected"], 2)
+            self.assertEqual(refusal["harmful_image"]["completed"], 1)
 
     def test_interrupted_eval_reloads_completed_samples_from_the_saved_log(self):
         from evaluation.evaluate import main
