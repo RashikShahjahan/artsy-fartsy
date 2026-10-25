@@ -7,8 +7,8 @@ import math
 
 
 JUDGE_VERSION = "artsy-inspect-code-safety-v2"
-JUDGE_MAX_TOKENS = 1024
-CODE_SAFETY_MAX_TOKENS = 4096
+JUDGE_MAX_TOKENS = 2048
+CODE_SAFETY_MAX_TOKENS = 8192
 
 
 def code_safety_judge_prompt(request: str, source: str, commands: list[str] | None = None) -> str:

@@ -168,6 +168,14 @@ class CompletionTest(unittest.TestCase):
         self.assertEqual(response["usage"], {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5})
         self.assertEqual(models()["data"][0]["id"], "Qwen/Qwen3.5-4B")
 
+    def test_completion_honors_modern_and_legacy_token_limits(self):
+        for limits, expected in (({"max_tokens": 4096}, 4096),
+                                 ({"max_completion_tokens": 4096}, 4096),
+                                 ({"max_tokens": 8192, "max_completion_tokens": 2048}, 2048)):
+            with self.subTest(limits=limits):
+                complete({**self.body, **limits})
+                self.assertEqual(app.state.tinker.generate.call_args.args[2], expected)
+
     def test_completion_health_and_models_reuse_catalog(self):
         entries = [{"id": MODEL_ID, "label": "base", "model_path": None}]
         with patch("inference.server.model_catalog", return_value=entries) as catalog:

@@ -163,8 +163,7 @@ def main() -> int:
     with inspect_swe_model_auth():
         logs = eval(
             drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
-                         args.safety_judge_model, args.code_safety_judge_model,
-                         max_connections=args.max_connections),
+                         args.safety_judge_model, args.code_safety_judge_model),
             model=model_from_env(args.model), model_roles=roles,
             log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=args.max_samples,
         )

@@ -175,7 +175,8 @@ def complete(body: dict):
                     samplers.pop(next(iter(samplers)))
                 samplers[path] = candidate
             backend = samplers[path]
-    budget = max(1, min(int(body.get("max_tokens") or MAX_TOKENS), MAX_TOKENS))
+    requested_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
+    budget = max(1, min(int(requested_tokens or MAX_TOKENS), MAX_TOKENS))
     try:
         messages = template_messages(body["messages"], backend.prepare_image)
         raw, count, generated = backend.generate(

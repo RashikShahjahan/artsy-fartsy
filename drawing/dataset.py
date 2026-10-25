@@ -66,9 +66,9 @@ async def evaluate(correctness_judge: Any, safety_judge: Any, prompt: str,
 
     correctness, safety = await asyncio.gather(
         correctness_judge.complete(messages(correctness_judge_prompt(prompt)),
-                                   JUDGE_MAX_TOKENS, temperature=0),
+                                   JUDGE_MAX_TOKENS),
         safety_judge.complete(messages(safety_judge_prompt(prompt)),
-                              JUDGE_MAX_TOKENS, temperature=0),
+                              JUDGE_MAX_TOKENS),
     )
     return {"correctness": correctness, "safety": safety}
 
@@ -217,7 +217,7 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                 trace["codeSafety"] = review
                 code_completion = await code_safety_judge.complete([
                     {"role": "user", "content": code_safety_judge_prompt(spec["prompt"], target["code"])}
-                ], CODE_SAFETY_MAX_TOKENS, temperature=0)
+                ], CODE_SAFETY_MAX_TOKENS)
                 review["completion"] = code_completion
                 if code_completion.get("finishReason") == "length":
                     raise ValueError("Code safety judge reply was truncated")

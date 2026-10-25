@@ -135,7 +135,7 @@ class EvaluationTest(unittest.TestCase):
         task = drawing_task(specs, "/tmp/artsy-test-artifacts")
         self.assertEqual(task.turn_limit, 16)
         self.assertEqual(task.token_limit, 32768)
-        self.assertEqual(task.config.max_tokens, 8192)
+        self.assertEqual(task.config.max_tokens, 4096)
 
     def test_dataset_rejects_duplicate_prompts_and_invalid_inputs(self):
         original = load_specs(ROOT / "evaluation/prompts.jsonl")[0]
@@ -162,6 +162,40 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(model.name, "Qwen/Qwen3.5-4B")
         self.assertEqual(model.api.base_url, "http://localhost:1234/v1")
         self.assertFalse(model.model_args["responses_api"])
+
+    def test_mini_bridge_sends_the_agent_token_cap_to_the_provider(self):
+        from importlib import import_module
+        from inspect_ai.agent import AgentState
+        from inspect_ai.agent._bridge.completions import inspect_completions_api_request
+        from inspect_ai.agent._bridge.types import AgentBridge
+        from openai.types.chat import ChatCompletion
+
+        mini = import_module("inspect_swe._mini_swe_agent.mini_swe_agent")
+
+        async def request_through_bridge():
+            # Use Mini SWE's actual model clone and the bridge's default config policy.
+            model = mini._model_without_responses_api(model_from_env())
+            bridge = AgentBridge(AgentState(messages=[]), model_aliases={"inspect": model})
+            reply = ChatCompletion.model_validate({
+                "id": "test-completion", "created": 0, "object": "chat.completion",
+                "model": model.name,
+                "choices": [{"index": 0, "finish_reason": "stop",
+                             "message": {"role": "assistant", "content": "Done"}}],
+                "usage": {"prompt_tokens": 8, "completion_tokens": 1, "total_tokens": 9},
+            })
+            with patch.object(model.api.client.chat.completions, "create",
+                              new=AsyncMock(return_value=reply)) as request:
+                await inspect_completions_api_request({
+                    "model": "inspect", "max_tokens": 4096,
+                    "messages": [{"role": "user", "content": "Draw a circle"}],
+                }, None, bridge)
+                return request.call_args.kwargs
+
+        with patch.dict(os.environ, {"ARTSY_MODEL_URL": "http://localhost:1234/v1",
+                                    "ARTSY_MODEL_API_KEY": "test-only",
+                                    "OPENAI_API_KEY": "test-only"}):
+            request = asyncio.run(request_through_bridge())
+        self.assertEqual(request.get("max_completion_tokens", request.get("max_tokens")), 4096)
 
     def test_correctness_and_safety_judges_validate_independently(self):
         correct = {"score": 0.9, "reason": "Prompt matches"}
