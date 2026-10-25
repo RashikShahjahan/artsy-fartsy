@@ -640,9 +640,73 @@ for inference. No local full-model `final/` directory is produced.
 Use the fresh `evaluation/prompts.jsonl` for behavioral evaluation with sufficient
 generation limits in both the serving endpoint and harness.
 
+## GRPO training with Tinker
+
+`training/grpo.py` starts from a completed SFT checkpoint and trains on fresh
+groups of drawing episodes. It uses the existing Mini SWE Docker sandbox and
+fresh final renders, with the correctness-only judge from the GRPO sampling
+pilot. The inference bridge does not need to be running.
+
+Use `uv sync` for the project environment, or install
+`training/requirements-grpo.txt` into a separate environment. Docker must be
+running for collection. Set `TINKER_API_KEY` and
+`ARTSY_CORRECTNESS_JUDGE_MODEL`, `ARTSY_CORRECTNESS_JUDGE_URL`, and optionally
+`ARTSY_CORRECTNESS_JUDGE_API_KEY` in your shell or `.env`.
+
+```sh
+# Validate the dataset/checkpoint and inspect the plan without API calls or Docker:
+.venv/bin/python -m training.grpo --dry-run --max-steps 1
+
+# Collect two prompt groups with four independent episodes each, then update:
+.venv/bin/python -m training.grpo --max-steps 1 \
+  --output-dir checkpoints/grpo-pilot
+
+# Train through the prompt set, starting from the SFT state with a fresh optimizer:
+make grpo ARGS="--init-checkpoint checkpoints/sft-v1/final.json --output-dir checkpoints/grpo-v1"
+
+# Restore the GRPO optimizer and continue at the next deterministic prompt batch:
+.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v1 \
+  --resume-from-checkpoint checkpoints/grpo-v1/checkpoint-000010.json
+```
+
+Defaults are `datasets/grpo-v1/prompts.jsonl`, `checkpoints/sft-v1/final.json`,
+two prompts per batch, four episodes per prompt, temperature 0.8, learning rate
+1e-5, clipping epsilon 0.2, and KL coefficient 0.01 against the frozen initial
+SFT sampler. All group members use the prompt's rendering seed; independent
+sampling seeds vary by batch, member and turn. Rewards are centered within
+each prompt group. `--normalize-rewards` also divides by the group's population
+standard deviation. Refusal datasets are rejected for this correctness-only run.
+
+Every batch samples from the current training weights before one clipped policy
+update. The custom Tinker loss averages over each trajectory's sampled tokens,
+then over trajectories, and adds a k3 KL penalty against the initial SFT policy.
+The exact native input chunks, action token IDs, and sampling log probabilities
+are recorded before decoding. Each action is trained with its original input;
+previous actions, tool feedback, documentation, and preview images receive zero
+loss. This avoids reconstructing generated tokens from an Inspect transcript.
+Use `--kl-coef 0` to disable reference scoring.
+
+Invalid final drawings and refusals receive zero correctness reward. Episodes
+with a token-truncated action also receive zero reward. Judge errors, missing
+log probabilities, incomplete groups, context overflow, and collection errors
+abort the batch before an optimizer step. Groups with identical rewards have
+zero relative advantage; an entire batch without reward variation skips the
+update and still checkpoints its consumed prompt batch. `--max-steps` counts
+these batches too. `--max-samples` bounds concurrent sandbox episodes and
+reference requests; `--limit` restricts the prompt set for small experiments.
+
+Outputs include native sampling evidence, Inspect logs, final render artifacts,
+judge responses, group rewards, `metrics.jsonl`, `training-manifest.json`, and
+optimizer checkpoints. Checkpoints are saved every batch by default and at the
+end; `--save-every` changes the interval. Resume validates the dataset, initial
+checkpoint, judge configuration, source hashes, and training settings. Constant
+learning-rate runs can extend their total epochs or max steps. An interrupted
+batch is collected again into a separate artifact directory. `final.json` uses
+the same state/sampler format as SFT and is discoverable in the model catalog.
+
 All commands run directly as Python modules; no Node.js or compilation step is required.
 The Makefile provides `serve`, `draw`, `render`, `dataset`, and
-`eval` shortcuts. Pass CLI arguments with `ARGS`, for example
+`eval`, and `grpo` shortcuts. Pass CLI arguments with `ARGS`, for example
 `make dataset ARGS="--dry-run --count 20"`.
 
 See [pipeline diagrams](docs/pipeline-diagrams.md) for the current datagen,

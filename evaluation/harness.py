@@ -15,7 +15,7 @@ from uuid import uuid4
 import httpx
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
-from inspect_ai.model import ChatMessageUser, ContentImage, ContentText, GenerateConfig, GenerateInput, get_model
+from inspect_ai.model import ChatMessageUser, ContentImage, ContentText, GenerateConfig, GenerateFilter, GenerateInput, get_model
 from inspect_ai.scorer import Score, Scorer, Target, mean, scorer, stderr
 from inspect_ai.solver import TaskState
 from inspect_ai.util import sandbox
@@ -358,7 +358,8 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
 def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str | None = None,
                  safety_judge_model: str | None = None,
                  code_safety_judge_model: str | None = None, *,
-                 temperature: float = 0.0, max_connections: int = 10) -> Task:
+                 temperature: float = 0.0, max_connections: int = 10,
+                 generation_filter: GenerateFilter | None = None) -> Task:
     if (type(temperature) not in (int, float) or not math.isfinite(temperature)
             or not 0 <= temperature <= 2):
         raise ValueError("temperature must be a finite number from 0 to 2")
@@ -368,8 +369,10 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
     async def sampling_config(model, messages, tools, tool_choice, config):
         # Mini SWE supplies its own temperature=0 from mini.yaml. Override at
         # the bridge so stochastic pilot sampling actually reaches the policy.
-        return GenerateInput(messages, tools, tool_choice,
-                             config.model_copy(update={"temperature": temperature}))
+        config = config.model_copy(update={"temperature": temperature})
+        if generation_filter is not None:
+            return await generation_filter(model, messages, tools, tool_choice, config)
+        return GenerateInput(messages, tools, tool_choice, config)
 
     config = agent_generation_config()
     config.temperature = temperature
