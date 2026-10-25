@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Artsy</title><link rel="stylesheet" href="style.css"></head>
+<body>
+<header class="app-header"><a class="brand" href="./">Artsy</a><span>Generate</span><span class="prototype">Qwen / ArtCanvas</span></header>
+<main><h1>Generate an image</h1><div class="studio">
+<section class="controls" aria-label="Generation settings"><form id="generation-form">
+<label for="prompt">Prompt</label><textarea id="prompt" maxlength="4000" placeholder="Describe what to draw…" required></textarea>
+<label for="model">Model</label><input id="model" value="Qwen/Qwen3.5-4B" required maxlength="200"><p class="note">Uses the checkpoint configured on the running bridge.</p>
+<div class="settings"><div><label for="seed">Seed</label><input id="seed" type="number" min="0" max="9007199254740991" value="42" required></div><div><span class="field-label">Canvas</span><div class="fixed-field">1920 × 1200</div></div></div>
+<button class="primary" id="generate" type="submit">Generate</button><p class="note">Runs the drawing agent. Uses model credits.</p><p id="form-status" role="status"></p>
+</form></section>
+<section class="results" aria-label="Generation run"><div class="results-heading"><h2>Output</h2><span id="run-status" role="status">Not started</span></div>
+<div class="output" id="output"><p>Your image will appear here.</p></div><div id="downloads"></div>
+<section class="trace"><div class="results-heading"><h2>Execution trace</h2><button id="expand" type="button">Expand all</button></div><p class="note" id="trace-note">The run’s messages, code, tool calls, previews, and errors.</p><div id="trace"><p class="empty">No run yet.</p></div><details id="console-panel"><summary>Process output</summary><pre id="console">No process output.</pre></details></section>
+</section></div></main><script src="app.js"></script></body></html>
