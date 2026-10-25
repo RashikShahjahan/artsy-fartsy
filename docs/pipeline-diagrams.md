@@ -101,26 +101,30 @@ flowchart TD
     P -- Yes --> X[Write refusal.json and submit<br/>as supervised tool calls]
     X --> Q
     P -- No --> C[Convert teacher trajectory<br/>to conversation with bash tool calls]
-    C --> D[Use code and textual execution feedback<br/>as context; omit images and judge critiques]
+    C --> D[Use code, execution feedback and preview PNGs<br/>as context; omit judge critiques]
     D --> Q{dry-run?}
     Q -- Yes --> J[Print or export converted conversations;<br/>no Tinker training calls]
-    Q -- No --> E[Select successful program or refusal<br/>action and submission for loss]
-    E --> F[Build one prefix per selected action<br/>with Qwen3.5 renderer]
-    F --> G[Local text tokenization]
-    G --> H[Preflight sequence lengths,<br/>text-only inputs and loss masks]
+    Q -- No --> E[Supervise every converted assistant action<br/>including unsuccessful attempts]
+    E --> F[Encode one full trajectory per example<br/>with assistant-only loss]
+    F --> G[Local text tokenization and image preparation]
+    G --> H[Preflight text/image sequence lengths<br/>and assistant-only loss masks]
     H --> I{check-batch?}
     I -- Yes --> R[Print token and loss-mask summary;<br/>no Tinker training calls]
     I -- No --> K[Tinker hosted LoRA training<br/>base Qwen3.5 vision model]
-    K --> L[Cross-entropy on selected assistant<br/>action tokens only]
+    K --> L[Cross-entropy on all assistant<br/>action tokens]
     L --> M[metrics.jsonl and periodic checkpoints<br/>remote optimizer/model state paths]
     M --> N[final.json with sampler weights path]
     N --> O[Use adapter with base model<br/>for trained-checkpoint evaluation]
 ```
 
-Training uses text-only conversations: recorded PNGs are checked for artifact
-integrity but excluded from model inputs. Training is hosted: the local machine
-prepares tokenized examples, while Tinker holds model weights and performs
-optimizer steps. Sequences are preflighted rather
+Training includes hash-checked preview PNGs in tool observations, so visual repairs
+can condition on the image that preceded the correction. All converted assistant
+actions receive loss, including attempts that failed before recovery. Instructions,
+images and tool feedback are masked context. Unexecuted malformed teacher replies
+and judge critiques are omitted. Training is hosted: the local machine
+prepares tokenized examples and bounded-resolution images, while Tinker holds model weights and performs
+optimizer steps. Batches count complete trajectories, not individual actions.
+Sequences are preflighted rather
 than truncated or packed. Resume uses the local checkpoint metadata to restore the
 remote optimizer state and deterministic data order.
 

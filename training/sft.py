@@ -5,23 +5,49 @@ Run from the repository root: python -m training.sft --dataset DATA/accepted.jso
 
 import argparse
 import copy
+import io
 import json
 import math
 from pathlib import Path
 import random
 
-from training.data import ROOT, load_examples
-from drawing.config import MODEL_ID, MODEL_REVISION
+from training.data import LOSS_POLICY, ROOT, digest, load_examples
+from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
 
 RENDERER = "qwen3_5_disable_thinking"
 
 
 class DrawingEncoder:
-    """Keep recorded context and supervise each selected action in its own prefix."""
+    """Encode a complete trajectory once, with assistant-only loss."""
 
-    def __init__(self, renderer, max_length: int = 32768):
+    def __init__(self, renderer, max_length: int = 32768, image_processor=None):
         self.renderer = renderer
         self.max_length = max_length
+        self.image_processor = image_processor
+
+    def preview(self, part: dict):
+        from PIL import Image
+        from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
+
+        if self.image_processor is None:
+            raise ValueError("Preview images require an image processor")
+        path = Path(part["image"])
+        if not path.is_absolute():
+            raise ValueError("Preview images must use absolute local artifact paths")
+        data = path.read_bytes()
+        if digest(data) != part.get("imageHash"):
+            raise ValueError(f"Preview image hash mismatch: {path}")
+        with Image.open(io.BytesIO(data)) as image:
+            if image.format != "PNG" or len(data) > 8 * 1024 * 1024 or not (
+                1 <= image.width <= 4096 and 1 <= image.height <= 4096
+            ):
+                raise ValueError(f"Invalid preview PNG: {path}")
+            # Match inference's RGB conversion and bounded Qwen image resolution.
+            height, width = smart_resize(
+                image.height, image.width,
+                factor=self.image_processor.patch_size * self.image_processor.merge_size,
+                min_pixels=IMAGE_SIZE["shortest_edge"], max_pixels=IMAGE_SIZE["longest_edge"])
+            return {"type": "image", "image": image.convert("RGB").resize((width, height))}
 
     def messages(self, example: dict) -> tuple[list[dict], list[int]]:
         from tinker_cookbook.renderers import ToolCall
@@ -32,10 +58,18 @@ class DrawingEncoder:
             not 0 <= i < len(messages) or messages[i]["role"] != "assistant" for i in selected
         ):
             raise ValueError(f"{example['id']}: invalid trainable assistant message indices")
+        if set(selected) != {i for i, msg in enumerate(messages) if msg["role"] == "assistant"}:
+            raise ValueError(f"{example['id']}: assistant-only loss requires every assistant message to be trainable")
         for msg in messages:
+            parts = []
             for part in msg["content"]:
-                if part["type"] != "text":
-                    raise ValueError(f"{example['id']}: SFT inputs must contain only text content")
+                if part["type"] == "image" and msg["role"] == "tool":
+                    parts.append(self.preview(part))
+                elif part["type"] == "text":
+                    parts.append(part)
+                else:
+                    raise ValueError(f"{example['id']}: only text and tool preview images are supported")
+            msg["content"] = parts
             if "tool_calls" in msg:
                 for call in msg["tool_calls"]:
                     arguments = call["function"]["arguments"]
@@ -45,43 +79,44 @@ class DrawingEncoder:
         if messages[0]["role"] != "system":
             raise ValueError(f"{example['id']}: expected leading system instructions")
         system = "".join(part["text"] for part in messages[0]["content"] if part["type"] == "text")
-        # Preserve the OpenAI function wrappers passed by the inference server
-        # to Qwen's native template, including their serialized system text.
-        prefix = self.renderer.create_conversation_prefix_with_tools(example["tools"], system_prompt=system)
+        # Match inference: the Qwen renderer expects flat ToolSpec objects,
+        # while exported demonstrations use OpenAI function wrappers.
+        tools = [tool.get("function", tool) for tool in example["tools"]]
+        prefix = self.renderer.create_conversation_prefix_with_tools(tools, system_prompt=system)
         return prefix + messages[1:], [i + len(prefix) - 1 for i in selected]
 
     def __call__(self, example: dict) -> list:
         from tinker_cookbook.renderers import TrainOnWhat
         from tinker_cookbook.supervised.common import datum_from_model_input_weights
 
-        messages, selected = self.messages(example)
-        data = []
-        # Qwen changes earlier assistant formatting as a conversation grows.
-        # End each example at its selected action so the renderer uses the same
-        # prefix as generation. Failed actions and earlier successes are context.
-        for index in selected:
-            model_input, weights = self.renderer.build_supervised_example(
-                messages[:index + 1], train_on_what=TrainOnWhat.LAST_ASSISTANT_MESSAGE,
-            )
-            if model_input.length > self.max_length:
-                raise ValueError(f"{example['id']}: sequence exceeds {self.max_length} tokens "
-                                 f"({model_input.length}). Context/targets are never truncated.")
-            datum = datum_from_model_input_weights(model_input, weights)
-            if not any(datum.loss_fn_inputs["weights"].data):
-                raise ValueError(f"{example['id']}: action has no supervised tokens")
-            data.append(datum)
-        return data
+        messages, _ = self.messages(example)
+        for msg in messages:
+            msg["trainable"] = msg["role"] == "assistant"
+        # CUSTOMIZED expresses a role-only mask: every assistant action is a
+        # target, regardless of execution/judge outcome. Headers and observations
+        # are masked by the renderer. Render the full trajectory only once.
+        model_input, weights = self.renderer.build_supervised_example(
+            messages, train_on_what=TrainOnWhat.CUSTOMIZED,
+        )
+        if model_input.length > self.max_length:
+            raise ValueError(f"{example['id']}: sequence exceeds {self.max_length} tokens "
+                             f"({model_input.length}). Context/targets are never truncated.")
+        datum = datum_from_model_input_weights(model_input, weights)
+        if not any(datum.loss_fn_inputs["weights"].data):
+            raise ValueError(f"{example['id']}: trajectory has no supervised tokens")
+        return [datum]
 
 
 def create_encoder(model: str, max_length: int) -> DrawingEncoder:
-    from transformers import AutoTokenizer
+    from transformers import AutoImageProcessor, AutoTokenizer
     from tinker_cookbook import renderers
 
-    # Only tokenizer metadata is local; model weights stay on Tinker.
+    # Only tokenizer/processor metadata is local; model weights stay on Tinker.
     revision = MODEL_REVISION if model == MODEL_ID else None
     tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
-    renderer = renderers.get_renderer(RENDERER, tokenizer)
-    return DrawingEncoder(renderer, max_length)
+    image_processor = AutoImageProcessor.from_pretrained(model, revision=revision)
+    renderer = renderers.get_renderer(RENDERER, tokenizer, image_processor=image_processor)
+    return DrawingEncoder(renderer, max_length, image_processor=image_processor)
 
 
 def batches(data: list, batch_size: int, epochs: int, seed: int):
@@ -103,13 +138,23 @@ def save_checkpoint(client, output_dir: Path, step: int, config: dict) -> dict:
 
 def train(args, data: list, manifest: dict):
     import tinker
+    from tinker_cookbook.utils.lr_scheduling import compute_schedule_lr_multiplier
 
+    total_steps = math.ceil(len(data) / args.batch_size) * args.epochs
+    if args.max_steps != -1:
+        total_steps = min(total_steps, args.max_steps)
     config = {"dataset_sha256": manifest["dataset_sha256"], "api_doc_sha256": manifest["api_doc_sha256"],
-              "conversion": manifest["conversion"], "renderer": RENDERER, "input_mode": "text-only",
+              "conversion": manifest["conversion"], "renderer": RENDERER, "input_mode": manifest["input_mode"],
               "model": args.model, "tokenizer_revision": MODEL_REVISION if args.model.split(":", 1)[0] == MODEL_ID else None,
               "lora_rank": args.lora_rank, "batch_size": args.batch_size,
-              "learning_rate": args.learning_rate, "seed": args.seed, "max_length": args.max_length,
+              "batch_unit": "trajectory", "image_size": IMAGE_SIZE,
+              "loss_policy": LOSS_POLICY,
+              "learning_rate": args.learning_rate, "lr_schedule": args.lr_schedule,
+              "seed": args.seed, "max_length": args.max_length,
               "training_examples": len(data)}
+    if args.lr_schedule != "constant":
+        # Resuming must not change the decay curve for already-completed steps.
+        config["schedule_total_steps"] = total_steps
     start_step = 0
     checkpoint = None
     if args.resume_from_checkpoint:
@@ -117,9 +162,6 @@ def train(args, data: list, manifest: dict):
         if checkpoint["config"] != config:
             raise ValueError("Checkpoint dataset/model/training configuration does not match this run")
         start_step = checkpoint["step"]
-    total_steps = math.ceil(len(data) / args.batch_size) * args.epochs
-    if args.max_steps != -1:
-        total_steps = min(total_steps, args.max_steps)
     if not 0 <= start_step < total_steps:
         raise ValueError("No remaining optimizer steps; increase --epochs or --max-steps")
 
@@ -154,9 +196,12 @@ def train(args, data: list, manifest: dict):
                     shape=inputs["weights"].shape,
                 )
                 normalized.append(tinker.Datum(model_input=datum.model_input, loss_fn_inputs=inputs))
+            learning_rate = args.learning_rate * compute_schedule_lr_multiplier(
+                args.lr_schedule, step=step - 1, total_steps=total_steps)
             result = client.forward_backward(normalized, "cross_entropy").result()
-            client.optim_step(tinker.AdamParams(learning_rate=args.learning_rate)).result()
-            row = {"step": step, "supervised_tokens": token_count, **result.metrics}
+            client.optim_step(tinker.AdamParams(learning_rate=learning_rate)).result()
+            row = {**result.metrics, "step": step, "supervised_tokens": token_count,
+                   "learning_rate": learning_rate, "batch_size": len(batch)}
             metrics.write(json.dumps(row) + "\n")
             metrics.flush()
             print(json.dumps(row), flush=True)
@@ -177,11 +222,13 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--export", type=Path, help="Write converted conversation JSONL with trainable message indices")
     p.add_argument("--sample-id", help="Record ID to display in dry-run")
     p.add_argument("--allow-unreviewed", action="store_true", help="Include selected records whose visual review is pending")
-    p.add_argument("--check-batch", action="store_true", help="Check text tokens and loss masks locally; no API calls")
+    p.add_argument("--check-batch", action="store_true", help="Check text/image tokens and loss masks locally; no API calls")
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--max-steps", type=int, default=-1)
-    p.add_argument("--batch-size", type=int, default=8, help="Selected assistant actions per optimizer step")
+    p.add_argument("--batch-size", type=int, default=8, help="Complete trajectories per optimizer step")
     p.add_argument("--learning-rate", type=float, default=2e-4)
+    p.add_argument("--lr-schedule", choices=("constant", "cosine"), default="constant",
+                   help="Learning-rate schedule; --learning-rate is the initial/peak rate")
     p.add_argument("--lora-rank", type=int, default=32)
     p.add_argument("--max-length", type=int, default=32768)
     p.add_argument("--seed", type=int, default=42)
@@ -225,7 +272,10 @@ def main(argv=None):
     data = [datum for example in examples for datum in encoder(example)]
     manifest.update(training_examples=len(data), max_tokens=max(d.model_input.length + 1 for d in data),
                     supervised_tokens=sum(sum(d.loss_fn_inputs["weights"].data) for d in data),
-                    model=args.model, renderer=RENDERER, input_mode="text-only")
+                    model=args.model, renderer=RENDERER,
+                    batch_size=args.batch_size, steps_per_epoch=math.ceil(len(data) / args.batch_size),
+                    total_steps=min(math.ceil(len(data) / args.batch_size) * args.epochs,
+                                    args.max_steps if args.max_steps != -1 else math.inf))
     print(json.dumps(manifest, indent=2))
     if not args.check_batch:
         train(args, data, manifest)

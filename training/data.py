@@ -1,10 +1,10 @@
 """Convert recorded Python attempts into bash-tool demonstrations.
 
 The shell wrapper is synthesized; the Python source and execution feedback are
-recorded evidence. Each record produces one complete conversation. Only its final
-successful write/preview action and submission are selected for language-model
-loss; earlier attempts and textual tool feedback remain masked context. Images
-are validated as recorded artifacts but excluded from model inputs.
+recorded evidence. Each record produces one complete conversation. All converted
+assistant tool-call actions receive loss, including unsuccessful attempts in a
+successful episode. Instructions, tool feedback, and preview images are context.
+Unexecuted malformed teacher replies and judge critiques are omitted.
 """
 
 import hashlib
@@ -21,6 +21,9 @@ TOOLS = [{"type": "function", "function": {
                    "required": ["command"]},
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+INPUT_MODE = "multimodal-previews"
+CONVERSION = "bash-trajectory-preview-images-assistant-only-v7"
+LOSS_POLICY = "assistant-only"
 
 
 def digest(data: bytes) -> str:
@@ -83,7 +86,8 @@ def system_prompt() -> str:
         "Fulfill the drawing request by writing /workspace/program.py. "
         "Use the installed ArtCanvas module to save output.png at 1920×1200. "
         "Use bash commands to write, run, and fix your program. "
-        "Use the preview command to receive textual execution feedback. "
+        "Use the preview command to receive execution feedback and the actual PNG image. "
+        "Inspect each preview against the drawing request and fix visible mistakes before submitting. "
         "The final program is executed again in a fresh directory with no other files. "
         "A text answer or a pre-existing PNG does not count. "
         'If you cannot fulfill the request, write only refusal.json containing {"reason":"..."} '
@@ -160,15 +164,14 @@ def convert_record(record: dict, root: Path) -> dict:
                 raise ValueError(f"{rid}: code safety review does not match executed source")
         if step.get("observation"):
             observation = step["observation"]
-            # Preserve provenance checks without adding images or privileged
-            # judge feedback to the text-only student conversation.
+            # Validate recorded observations, but do not expose privileged
+            # judge feedback. Images are attached to their originating tool call.
             artifact(root, observation["image"], observation["imageHash"])
         feedback = step.get("feedback")
         if feedback is None:
-            # A malformed/truncated JSON reply was never executed. Preserve it
-            # as masked context without inventing a successful tool invocation.
-            messages.extend([message("assistant", step["completion"]["text"]), message(
-                "user", "The previous reply could not be executed. Return a complete program using the bash tool.")])
+            # Teacher JSON is a collection protocol, not an agent action. Omit
+            # unexecuted replies and their synthetic correction instruction;
+            # only actual attempted programs become bash demonstrations.
             continue
         code = parse_source(step["completion"]["text"])
         if "executedCode" in step and code != step["executedCode"]:
@@ -178,21 +181,25 @@ def convert_record(record: dict, root: Path) -> dict:
             raise ValueError(f"{rid}: final completion and artifact differ")
         call_id = f"call_{index}"
         target = action(write_command(code, seed), call_id)
-        if final:
-            trainable_message_indices.append(len(messages))
+        trainable_message_indices.append(len(messages))
         messages.append(target)
         visible = {key: feedback[key] for key in ("ok", "stdout", "stderr", "error", "exitCode", "width", "height")
                    if key in feedback}
+        observation_message = message("tool", "Return code: " + str(feedback.get("exitCode", 0))
+                                      + "\n" + json.dumps(visible), tool_call_id=call_id)
         if feedback.get("ok"):
             # Feedback paths reference the original machine/dataset. Resolve the
             # preview basename within the copied portable episode directory.
             name = Path(feedback["artifact"]).name
             if not name.startswith("preview-") or not name.endswith(".png"):
                 raise ValueError(f"{rid}: invalid preview reference")
-            artifact(root, str(Path(record["artifacts"]["directory"]) / name),
-                     record["imageHash"] if final else None)
-        messages.append(message("tool", "Return code: " + str(feedback.get("exitCode", 0))
-                                + "\n" + json.dumps(visible), tool_call_id=call_id))
+            preview = artifact(root, str(Path(record["artifacts"]["directory"]) / name),
+                               record["imageHash"] if final else None)
+            # Keep exports JSON-serializable; the encoder loads these exact pixels
+            # locally and checks the hash again before building image chunks.
+            observation_message["content"].append({"type": "image", "image": str(preview),
+                                                    "imageHash": digest(preview.read_bytes())})
+        messages.append(observation_message)
     trainable_message_indices.append(len(messages))
     messages.append(action(SUBMIT, "call_submit"))
     return {"id": rid, "messages": messages,
@@ -230,15 +237,20 @@ def load_examples(path: Path) -> tuple[list[dict], dict]:
     return examples, {
         "dataset": str(path), "dataset_sha256": digest(path.read_bytes()),
         "records": len(records), "examples": len(examples),
-        "one_shot": sum(len(r.get("trace", [])) == 1 and
-                        (r["trace"][0].get("feedback") or {}).get("ok") is True for r in records),
+        "batch_unit": "trajectory",
+        "loss_policy": LOSS_POLICY,
+        "supervised_actions": sum(len(e["trainable_message_indices"]) for e in examples),
+        "omitted_unexecuted_replies": sum(t.get("feedback") is None for r in records for t in r.get("trace", [])),
+        "trajectories_with_omitted_replies": sum(any(t.get("feedback") is None for t in r.get("trace", [])) for r in records),
+        "one_shot": sum(r["spec"].get("kind") != "refusal" and len(e["trainable_message_indices"]) == 2
+                        for r, e in zip(records, examples)),
         "repairs": sum(is_observed_repair(r) for r in records),
         "refusal_pairs": sum(r["spec"].get("kind") == "refusal" for r in records),
         "difficulty_counts": {level: sum(r["spec"].get("difficulty") == level for r in records)
                               for level in DIFFICULTIES},
         "unreviewed_records": sum(r.get("status") != "accepted" for r in records),
         "examples_with_images": sum(any(p["type"] == "image" for m in e["messages"] for p in m["content"]) for e in examples),
-        "input_mode": "text-only",
+        "input_mode": INPUT_MODE,
         "api_doc_sha256": digest((ROOT / "docs/artcanvas.md").read_bytes()),
-        "conversion": "bash-conversation-text-only-selective-loss-v4",
+        "conversion": CONVERSION,
     }

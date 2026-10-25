@@ -509,7 +509,7 @@ The default training model is `Qwen/Qwen3.5-4B`, which is in
 [Tinker's hosted vision lineup](https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/).
 Training, the bundled inference server, and evaluation share the same model ID
 from `drawing/config.py`. Local inference and training tokenization also share
-a pinned Hugging Face revision. SFT uses text-only inputs. Tinker training
+a pinned Hugging Face revision. SFT includes recorded preview images as context. Tinker training
 produces an adapter for this base model; use that adapter for trained-checkpoint
 evaluation, with thinking disabled.
 
@@ -524,7 +524,7 @@ uv pip install --python .sft-venv/bin/python -r training/requirements.txt
 .sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
   --dry-run --export /tmp/artsy-sft.jsonl
 
-# Download just tokenizer metadata and check every training example locally:
+# Load tokenizer/processor metadata and check every training trajectory locally:
 .sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl --check-batch
 
 # Configure Tinker authentication in your shell, then start hosted training:
@@ -532,40 +532,68 @@ export TINKER_API_KEY=your-tinker-api-key
 .sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
   --output-dir checkpoints/sft-run
 
+# One epoch with larger optimizer batches and cosine learning-rate decay:
+.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
+  --output-dir checkpoints/sft-cosine --epochs 1 --batch-size 32 --lr-schedule cosine
+
 # Resume weights, optimizer state and deterministic data order from local metadata:
 .sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
   --output-dir checkpoints/sft-run \
   --resume-from-checkpoint checkpoints/sft-run/checkpoint-000050.json
 ```
 
-Pass the path to your recorded training dataset with `--dataset`. Each drawing record becomes a text-only conversation containing the request,
-earlier attempts and textual execution feedback, the final successful
+Pass the path to your recorded training dataset with `--dataset`. Each drawing record becomes a conversation containing the request,
+earlier attempts, execution feedback and actual preview PNGs, the final successful
 write-and-preview bash call, and submission. Authored refusal pairs instead
 supervise a bash action writing `/workspace/refusal.json`, followed by
-submission. Recorded PNGs and image observations are validated as artifacts
-but excluded from model inputs, along with prompts to inspect those images.
+submission. Every successful preview is attached to its originating tool response,
+including previews in older records without `imageObservations` metadata. The
+student can inspect the failed image before generating a visual repair. Failed
+executions have textual feedback only; refusals have no images. JSONL exports
+store absolute local image paths and SHA-256 hashes, so keep the referenced
+dataset artifacts available when encoding them.
 The adapter synthesizes bash wrappers around the teacher's recorded Python;
 these are converted demonstrations, not collected Mini SWE transcripts.
 Source/image hashes, API documentation version, and explicit
 legacy duplicate exceptions are checked during conversion. Review pending records
 before training, or explicitly include them with `--allow-unreviewed`.
 
-Only the final successful program action (or authored refusal-writing action)
-and submission receive cross-entropy loss. Each selected action is encoded as its own conversation prefix, ending at
-that action. Earlier assistant turns, including successful actions in a later
-prefix, stay masked context. User/system messages, tool feedback,
+Training uses the agent SFT baseline: every converted assistant action receives
+cross-entropy loss, including unsuccessful program attempts, repairs, refusal-writing
+actions and submission. Each complete trajectory is encoded once as one training
+example. Malformed or truncated teacher JSON replies that were never attempted
+as programs are omitted, along with the old synthetic correction instructions;
+they are collection-protocol failures, not agent tool calls. Preflight reports
+how many replies were omitted. Causal
+attention prevents a correction from reading later feedback or the final image.
+User/system messages, tool feedback,
 and assistant headers also receive zero weight. Judge scores and critiques
-are excluded from model input. The Cookbook Qwen3.5 renderer supplies the bash
-tool schema, native tool-call format, and disabled-thinking prefix. No image
-processor is loaded, and the encoder rejects non-text content. The conversion
-version prevents resuming an older multimodal checkpoint with these text-only inputs.
+are excluded from model input. Image context also receives zero loss. The Cookbook
+Qwen3.5 renderer supplies the bash tool schema, native tool-call format, and
+disabled-thinking prefix. The encoder verifies image hashes, loads local PNGs,
+and uses the same RGB conversion and bounded image sizing as inference. Tokenizer
+and image-processor metadata are loaded locally; model weights remain hosted.
+The v7 conversion version and `assistant-only` loss policy prevent resuming earlier
+selective-action, text-only or per-action-prefix checkpoints with this changed
+training input. Start a fresh run for the agent SFT baseline.
 
-Sequences are never packed or truncated. Preflight checks every prefix against
+Sequences are never packed or truncated. Preflight checks every full trajectory against
 `--max-length` (default 32,768) before creating a hosted training client.
 `--dry-run` and `--check-batch` make no Tinker API calls. The latter may download
-Hugging Face tokenizer metadata. Training defaults to one epoch, eight
-selected assistant actions per optimizer step, LoRA rank 32, and learning rate
-2e-4. Loss weights are normalized across all supervised tokens in each batch.
+Hugging Face tokenizer and image-processor metadata. Training defaults to one epoch, eight
+complete trajectories per optimizer step, LoRA rank 32, and learning rate
+2e-4. The default learning rate is constant; `--lr-schedule cosine` decays from
+the configured initial rate toward zero across the planned optimizer steps,
+using Tinker Cookbook's schedule. Each update uses the rate at the start of its
+step, so the final update retains a small positive rate. Every metrics row records
+the applied learning rate and actual trajectory batch size. Cosine checkpoints pin
+the total schedule length: resume with the same epochs/max-steps so completed
+updates keep the same decay curve. Constant-rate runs may still extend their
+total epochs/max-steps. Loss weights are normalized across all supervised tokens in each batch.
+For the 903-record release, `--batch-size 32 --epochs 1` produces 29 optimizer
+steps (28 batches of 32 trajectories and one batch of 7); the 1,854 supervised
+actions remain inside those 903 examples. Preflight reports both counts and the
+planned step count.
 Use `--max-steps 1` for a hosted optimizer smoke run. `--model` selects another
 supported Qwen3.5 vision chat model; local checkpoints, device selection, and
 full-parameter training options are replaced by hosted LoRA training.
@@ -575,7 +603,7 @@ The output directory contains `training-manifest.json`, `metrics.jsonl`, and
 include optimizer state and are saved every `--save-every` steps (default 50)
 and at the end. Resume validates dataset/model/settings and continues at the
 next deterministic batch; `--epochs` and `--max-steps` describe the total run and
-can be increased. `final.json` records both the training state and the sampler
+can be increased for constant-rate runs. `final.json` records both the training state and the sampler
 weights path. Use Tinker's sampling client or
 [adapter export workflow](https://tinker-docs.thinkingmachines.ai/cookbook/deployment/lora-adapter/)
 for inference. No local full-model `final/` directory is produced.
