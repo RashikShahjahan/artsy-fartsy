@@ -3,6 +3,7 @@ import base64
 import binascii
 import io
 import json
+import math
 import os
 import re
 import time
@@ -158,6 +159,10 @@ def models():
 def complete(body: dict):
     if body.get("stream"):
         raise HTTPException(400, "Streaming unsupported by the hosted sampling SDK; use stream=false.")
+    temperature = body.get("temperature", 0.0)
+    if (type(temperature) not in (int, float) or not math.isfinite(temperature)
+            or not 0 <= temperature <= 2):
+        raise HTTPException(400, "temperature must be a finite number from 0 to 2")
     model_id = body.get("model")
     selected = next((model for model in cached_model_catalog() if model['id'] == model_id), None)
     if not selected:
@@ -180,7 +185,7 @@ def complete(body: dict):
     try:
         messages = template_messages(body["messages"], backend.prepare_image)
         raw, count, generated = backend.generate(
-            messages, body.get("tools"), budget, CONTEXT_WINDOW)
+            messages, body.get("tools"), budget, CONTEXT_WINDOW, temperature=temperature)
     except (ValueError, TemplateError) as error:
         raise HTTPException(400, str(error)) from error
     try:

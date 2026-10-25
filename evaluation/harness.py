@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import hashlib
 import io
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -14,7 +15,7 @@ from uuid import uuid4
 import httpx
 from inspect_ai import Task, task
 from inspect_ai.dataset import Sample
-from inspect_ai.model import ChatMessageUser, ContentImage, ContentText, GenerateConfig, get_model
+from inspect_ai.model import ChatMessageUser, ContentImage, ContentText, GenerateConfig, GenerateInput, get_model
 from inspect_ai.scorer import Score, Scorer, Target, mean, scorer, stderr
 from inspect_ai.solver import TaskState
 from inspect_ai.util import sandbox
@@ -105,6 +106,14 @@ def agent_generation_config() -> GenerateConfig:
 
 def model_from_env(model: str = BASE_MODEL):
     """Use the drawing endpoint without changing global OpenAI/judge credentials."""
+    if model_url().rstrip("/") == LOCAL_MODEL_URL:
+        # Inspect's OpenAI provider classifies unknown names (including Qwen
+        # and artsy/* aliases) as frontier OpenAI models and drops temperature.
+        # Its generic compatible provider preserves the actual wire model and
+        # sampling parameters, including when Mini SWE uses the model again.
+        return get_model(f"openai-api/artsy/{model}", config=agent_generation_config(),
+                         base_url=model_url(), api_key=_model_api_key(),
+                         responses_api=False, stream=False)
     # Mini SWE clones this model; task-only generation settings do not survive that clone.
     return get_model(f"openai/{model}", config=agent_generation_config(), base_url=model_url(),
                      api_key=_model_api_key(), responses_api=False)
@@ -348,7 +357,23 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
 @task
 def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str | None = None,
                  safety_judge_model: str | None = None,
-                 code_safety_judge_model: str | None = None) -> Task:
+                 code_safety_judge_model: str | None = None, *,
+                 temperature: float = 0.0, max_connections: int = 10) -> Task:
+    if (type(temperature) not in (int, float) or not math.isfinite(temperature)
+            or not 0 <= temperature <= 2):
+        raise ValueError("temperature must be a finite number from 0 to 2")
+    if type(max_connections) is not int or max_connections < 1:
+        raise ValueError("max_connections must be positive")
+
+    async def sampling_config(model, messages, tools, tool_choice, config):
+        # Mini SWE supplies its own temperature=0 from mini.yaml. Override at
+        # the bridge so stochastic pilot sampling actually reaches the policy.
+        return GenerateInput(messages, tools, tool_choice,
+                             config.model_copy(update={"temperature": temperature}))
+
+    config = agent_generation_config()
+    config.temperature = temperature
+    config.max_connections = max_connections
     documentation = (ROOT / "docs/artcanvas.md").read_text()
     return Task(
         dataset=[Sample(id=row["id"], input=row["prompt"] + "\n\nPreview with: "
@@ -357,7 +382,11 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                  for row in specs],
         solver=mini_swe_agent(
             version="sandbox", cwd="/workspace", attempts=1,
-            env={"MSWEA_MINI_CONFIG_PATH": "/opt/artsy/mini.yaml", "MSWEA_COST_TRACKING": "ignore_errors"},
+            filter=sampling_config,
+            env={"MSWEA_MINI_CONFIG_PATH": "/opt/artsy/mini.yaml", "MSWEA_COST_TRACKING": "ignore_errors",
+                 # LiteLLM inside Mini SWE calls Inspect's OpenAI-compatible
+                 # bridge even when Inspect uses its generic provider outside.
+                 "MSWEA_MODEL_NAME": "openai/inspect"},
             system_prompt="Fulfill the drawing request by writing /workspace/program.py. "
                 "Use the installed ArtCanvas module to save output.png at 1920×1200. "
                 "Use bash commands to write, run, and fix your program. "
@@ -371,10 +400,11 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
         ),
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
-        config=agent_generation_config(),
+        config=config,
         turn_limit=16, token_limit=32768, time_limit=1000,
         fail_on_error=False,
         metadata={"agent": "mini-swe-agent", "agent_version": AGENT_VERSION,
+                  "sampling_temperature": temperature,
                   "runtime_version": RUNTIME_VERSION,
                   "dataset_sha256": sha256(json.dumps(specs, sort_keys=True).encode()),
                   "runtime_sha256": {name: sha256((ROOT / "runtime" / name).read_bytes())

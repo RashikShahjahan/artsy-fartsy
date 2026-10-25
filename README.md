@@ -287,6 +287,27 @@ configuration. Open them with `.eval-venv/bin/inspect view --log-dir eval-result
 Use `--dataset path/to/prompts.jsonl` for custom drawing test specs with `id`,
 `prompt` and `seed`. Legacy split labels are ignored.
 
+## Sample a correctness-only GRPO pilot
+
+With Docker and `make serve` running, sample four attempts for one prompt from
+each difficulty level in the fresh GRPO prompt set:
+
+```sh
+.venv/bin/python -m evaluation.sample_grpo --output eval-results/grpo-v1-sft-pilot --dry-run
+.venv/bin/python -m evaluation.sample_grpo --output eval-results/grpo-v1-sft-pilot
+```
+
+The pilot selects `artsy/sft-v1`, uses temperature 0.8, and retains the complete
+Inspect transcripts and freshly rendered final PNGs. It sends each valid final
+image and its original prompt to the configured OpenAI-compatible
+`ARTSY_CORRECTNESS_JUDGE_MODEL` / `ARTSY_CORRECTNESS_JUDGE_URL` endpoint, with
+`ARTSY_CORRECTNESS_JUDGE_API_KEY` for authentication. Only correctness contributes
+to reward; invalid final drawings receive zero. Judge failures stop scoring and
+can be retried with the same command plus `--score-only`. `summary.json` records
+per-prompt rewards, population standard deviations, and mean-centered advantages.
+This is a small reward-variation check and performs no training updates. The
+sampling bridge honors request temperatures; ordinary evaluations default to zero.
+
 ## Generate a dataset
 
 The default prompt planner uses an LLM, rather than parameterized drawing templates.

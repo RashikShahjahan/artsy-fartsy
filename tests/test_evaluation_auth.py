@@ -24,6 +24,17 @@ class InspectSWEModelAuthTests(unittest.TestCase):
                 self.assertEqual(bridged.api.base_url, "http://127.0.0.1:8080/v1")
             self.assertNotIn("OPENAI_API_KEY", os.environ)
 
+    def test_local_alias_uses_generic_provider_and_preserves_wire_model(self):
+        with patch.dict(os.environ, {"ARTSY_MODEL_URL": "http://127.0.0.1:8080/v1"}, clear=True):
+            model = model_from_env("artsy/sft-v1")
+            self.assertEqual(str(model), "openai-api/artsy/artsy/sft-v1")
+            self.assertEqual(model.api.service_model_name(), "artsy/sft-v1")
+            self.assertIs(_model_without_responses_api(model), model)
+            from inspect_ai.model import GenerateConfig
+            params = model.api.completion_params(GenerateConfig(temperature=0.8), tools=True)
+            self.assertEqual(params["temperature"], 0.8)
+            self.assertEqual(params["model"], "artsy/sft-v1")
+
     def test_remote_key_is_scoped_and_existing_openai_key_is_restored(self):
         with patch.dict(os.environ, {
             "ARTSY_MODEL_API_KEY": "drawing-endpoint-key",

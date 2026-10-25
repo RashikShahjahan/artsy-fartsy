@@ -84,7 +84,7 @@ class TinkerBackend:
             tool_specs, system_prompt="\n\n".join(system))
         return self.renderer.build_generation_prompt(prefix + native)
 
-    def generate(self, messages, tools, budget, context_window):
+    def generate(self, messages, tools, budget, context_window, *, temperature=0.0):
         import tinker
 
         prompt = self.render(messages, tools)
@@ -92,7 +92,7 @@ class TinkerBackend:
             raise ValueError("Context exceeds model capacity")
         result = self.client.sample(prompt=prompt, num_samples=1,
             sampling_params=tinker.SamplingParams(
-                max_tokens=budget, temperature=0, stop=self.renderer.get_stop_sequences())).result()
+                max_tokens=budget, temperature=temperature, stop=self.renderer.get_stop_sequences())).result()
         tokens = result.sequences[0].tokens
         # Keep the bridge's schema-aware parser: code arguments must stay strings.
         return self.tokenizer.decode(tokens, skip_special_tokens=False), prompt.length, len(tokens)

@@ -176,6 +176,17 @@ class CompletionTest(unittest.TestCase):
                 complete({**self.body, **limits})
                 self.assertEqual(app.state.tinker.generate.call_args.args[2], expected)
 
+    def test_temperature_reaches_sampler_and_invalid_values_fail_before_sampling(self):
+        complete({**self.body, "temperature": 0.8})
+        self.assertEqual(app.state.tinker.generate.call_args.kwargs, {"temperature": 0.8})
+        complete(self.body)
+        self.assertEqual(app.state.tinker.generate.call_args.kwargs, {"temperature": 0.0})
+        for value in (-1, 3, True, "0.8", None, float("nan"), float("inf")):
+            app.state.tinker.generate.reset_mock()
+            with self.subTest(value=value), self.assertRaises(HTTPException):
+                complete({**self.body, "temperature": value})
+            app.state.tinker.generate.assert_not_called()
+
     def test_completion_health_and_models_reuse_catalog(self):
         entries = [{"id": MODEL_ID, "label": "base", "model_path": None}]
         with patch("inference.server.model_catalog", return_value=entries) as catalog:
