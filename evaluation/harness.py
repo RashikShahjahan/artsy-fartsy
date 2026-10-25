@@ -367,7 +367,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
         config=GenerateConfig(max_tokens=8192, temperature=0, max_retries=0,
                               reasoning_effort="none" if is_direct_tinker() else None,
                               timeout=120, max_connections=1),
-        turn_limit=16, token_limit=32768, time_limit=300,
+        turn_limit=16, token_limit=32768, time_limit=600,
         fail_on_error=False,
         metadata={"agent": "mini-swe-agent", "agent_version": AGENT_VERSION,
                   "runtime_version": RUNTIME_VERSION,
