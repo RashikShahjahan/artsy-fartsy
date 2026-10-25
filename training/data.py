@@ -22,7 +22,7 @@ TOOLS = [{"type": "function", "function": {
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 INPUT_MODE = "multimodal-previews"
-CONVERSION = "bash-trajectory-preview-images-assistant-only-v7"
+CONVERSION = "bash-trajectory-separate-write-preview-refusal-only-assistant-only-v9"
 LOSS_POLICY = "assistant-only"
 
 
@@ -50,15 +50,13 @@ def action(command: str, call_id: str) -> dict:
     }])
 
 
-def write_command(code: str, seed: int) -> str:
+def write_command(code: str) -> str:
     # A quoted heredoc preserves source bytes, including shell metacharacters.
     delimiter = "ARTSY_SOURCE"
     while delimiter in code.splitlines():
         delimiter += "_"
     separator = "" if code.endswith("\n") else "\n"
-    return (f"cat > /workspace/program.py <<'{delimiter}'\n{code}{separator}{delimiter}\n"
-            f"python /opt/artsy/render.py --seed {seed} "
-            "--output /workspace/preview --preview < /workspace/program.py")
+    return f"cat > /workspace/program.py <<'{delimiter}'\n{code}{separator}{delimiter}"
 
 
 def refusal_command(reason: str) -> str:
@@ -66,8 +64,7 @@ def refusal_command(reason: str) -> str:
     delimiter = "ARTSY_REFUSAL"
     while delimiter in payload.splitlines():
         delimiter += "_"
-    return ("rm -f /workspace/program.py\n"
-            f"cat > /workspace/refusal.json <<'{delimiter}'\n"
+    return (f"cat > /workspace/refusal.json <<'{delimiter}'\n"
             f"{payload}\n{delimiter}")
 
 
@@ -86,12 +83,13 @@ def system_prompt() -> str:
         "Fulfill the drawing request by writing /workspace/program.py. "
         "Use the installed ArtCanvas module to save output.png at 1920×1200. "
         "Use bash commands to write, run, and fix your program. "
+        "Write the program and run its preview in separate bash calls on separate turns. "
         "Use the preview command to receive execution feedback and the actual PNG image. "
         "Inspect each preview against the drawing request and fix visible mistakes before submitting. "
         "The final program is executed again in a fresh directory with no other files. "
         "A text answer or a pre-existing PNG does not count. "
         'If you cannot fulfill the request, write only refusal.json containing {"reason":"..."} '
-        "with a concise reason and remove program.py. "
+        "with a concise reason and do not create program.py. "
         "You have at most sixteen model turns and 32768 output tokens.\n\n"
         + (ROOT / "docs/artcanvas.md").read_text()
         + "\n\nEvery response must contain at least one bash tool call with "
@@ -179,10 +177,15 @@ def convert_record(record: dict, root: Path) -> dict:
         final = index == len(trace) - 1
         if final and normalized(code) != normalized(source):
             raise ValueError(f"{rid}: final completion and artifact differ")
-        call_id = f"call_{index}"
-        target = action(write_command(code, seed), call_id)
+        write_id = f"call_{index}_write"
+        call_id = f"call_{index}_preview"
         trainable_message_indices.append(len(messages))
-        messages.append(target)
+        messages.append(action(write_command(code), write_id))
+        messages.append(message(
+            "tool", "Synthesized protocol acknowledgment: program.py source supplied for writing; "
+            "no recorded write execution result.", tool_call_id=write_id))
+        trainable_message_indices.append(len(messages))
+        messages.append(action(preview_command, call_id))
         visible = {key: feedback[key] for key in ("ok", "stdout", "stderr", "error", "exitCode", "width", "height")
                    if key in feedback}
         observation_message = message("tool", "Return code: " + str(feedback.get("exitCode", 0))
@@ -242,8 +245,9 @@ def load_examples(path: Path) -> tuple[list[dict], dict]:
         "supervised_actions": sum(len(e["trainable_message_indices"]) for e in examples),
         "omitted_unexecuted_replies": sum(t.get("feedback") is None for r in records for t in r.get("trace", [])),
         "trajectories_with_omitted_replies": sum(any(t.get("feedback") is None for t in r.get("trace", [])) for r in records),
-        "one_shot": sum(r["spec"].get("kind") != "refusal" and len(e["trainable_message_indices"]) == 2
-                        for r, e in zip(records, examples)),
+        "one_shot": sum(r["spec"].get("kind") != "refusal"
+                        and sum(t.get("feedback") is not None for t in r.get("trace", [])) == 1
+                        for r in records),
         "repairs": sum(is_observed_repair(r) for r in records),
         "refusal_pairs": sum(r["spec"].get("kind") == "refusal" for r in records),
         "difficulty_counts": {level: sum(r["spec"].get("difficulty") == level for r in records)

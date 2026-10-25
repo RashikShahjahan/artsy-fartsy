@@ -92,7 +92,7 @@ through the host to the native Tinker bridge (or another configured endpoint).
 Inspect and its OpenAI SDK run in the host environment; Mini SWE and LiteLLM run
 in the container, keeping their SDK dependency requirements separate.
 `evaluation/mini.yaml` sets sixteen model turns, ten-second command timeouts,
-2,048 tokens per response, and disabled local-model cost lookup. Inspect also sets
+8,192 tokens per response, and disabled local-model cost lookup. Inspect also sets
 a 32,768-token output budget and a five-minute sample limit. The container has
 2 GiB memory and two CPUs. Fresh scoring renders bound logs, source and PNG sizes,
 kill the render process group on timeout, and clean their temporary directories.
@@ -544,9 +544,13 @@ export TINKER_API_KEY=your-tinker-api-key
 
 Pass the path to your recorded training dataset with `--dataset`. Each drawing record becomes a conversation containing the request,
 earlier attempts, execution feedback and actual preview PNGs, the final successful
-write-and-preview bash call, and submission. Authored refusal pairs instead
-supervise a bash action writing `/workspace/refusal.json`, followed by
-submission. Every successful preview is attached to its originating tool response,
+write-only bash call, a separate preview-only bash call, and submission. Each
+executed attempt has this write/preview sequence, including unsuccessful attempts.
+The write response is explicitly a synthesized protocol acknowledgment; execution
+feedback and PNGs come only from the recorded preview result. Authored refusal pairs instead
+supervise a bash action writing only `/workspace/refusal.json`, followed by
+submission. Refusal actions do not create or delete `program.py`; refusal
+submissions require `refusal.json` with a concise reason and no `program.py`. Every successful preview is attached to its originating tool response,
 including previews in older records without `imageObservations` metadata. The
 student can inspect the failed image before generating a visual repair. Failed
 executions have textual feedback only; refusals have no images. JSONL exports
@@ -573,8 +577,8 @@ Qwen3.5 renderer supplies the bash tool schema, native tool-call format, and
 disabled-thinking prefix. The encoder verifies image hashes, loads local PNGs,
 and uses the same RGB conversion and bounded image sizing as inference. Tokenizer
 and image-processor metadata are loaded locally; model weights remain hosted.
-The v7 conversion version and `assistant-only` loss policy prevent resuming earlier
-selective-action, text-only or per-action-prefix checkpoints with this changed
+The v9 separate-write-preview/refusal-only conversion version and `assistant-only` loss policy prevent resuming earlier
+combined-write-preview, selective-action, text-only or per-action-prefix checkpoints with this changed
 training input. Start a fresh run for the agent SFT baseline.
 
 Sequences are never packed or truncated. Preflight checks every full trajectory against

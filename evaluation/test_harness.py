@@ -135,7 +135,7 @@ class EvaluationTest(unittest.TestCase):
         task = drawing_task(specs, "/tmp/artsy-test-artifacts")
         self.assertEqual(task.turn_limit, 16)
         self.assertEqual(task.token_limit, 32768)
-        self.assertEqual(task.config.max_tokens, 2048)
+        self.assertEqual(task.config.max_tokens, 8192)
 
     def test_dataset_rejects_duplicate_prompts_and_invalid_inputs(self):
         original = load_specs(ROOT / "evaluation/prompts.jsonl")[0]

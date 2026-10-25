@@ -75,6 +75,8 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(len(targets), 2)
         command = targets[0]["tool_calls"][0]["function"]["arguments"]["command"]
         self.assertIn("/workspace/refusal.json", command)
+        self.assertNotIn("program.py", command)
+        self.assertNotIn("rm ", command)
         self.assertIn(target, command)
         self.assertEqual(targets[1]["tool_calls"][0]["function"]["arguments"]["command"], SUBMIT)
         self.assertNotIn(target, example["messages"][1]["content"][0]["text"])
@@ -84,21 +86,63 @@ class ConversionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid authored refusal"):
             convert_record(broken, self.root)
 
+    def test_refusal_command_writes_literal_json_without_touching_other_files(self):
+        import subprocess
+        reason = "Cannot fulfill $HOME `id` $(touch unwanted) 'quote'\nARTSY_REFUSAL"
+        program = self.root / "program.py"
+        before = program.read_bytes()
+        unrelated = self.root / "keep.txt"
+        unrelated.write_text("sentinel")
+        command = refusal_command(reason).replace("/workspace/refusal.json", str(self.root / "refusal.json"))
+        subprocess.run(["bash", "-c", command], cwd=self.root, check=True)
+        self.assertEqual(json.loads((self.root / "refusal.json").read_text()), {"reason": reason})
+        self.assertEqual(program.read_bytes(), before)
+        self.assertEqual(unrelated.read_text(), "sentinel")
+        self.assertFalse((self.root / "unwanted").exists())
+
     def test_one_conversation_supervises_every_attempt_and_submission(self):
         example = convert_record(self.record, self.root)
         self.assertEqual(example["id"], self.record["id"])
         self.assertIn("broken()", json.dumps(example["messages"]))
         self.assertIn("NameError", json.dumps(example["messages"]))
         targets = [example["messages"][i] for i in example["trainable_message_indices"]]
-        self.assertEqual(len(targets), 3)
+        self.assertEqual(len(targets), 5)
         self.assertIn("broken()", json.dumps(targets))
-        self.assertIn(self.record["code"], targets[1]["tool_calls"][0]["function"]["arguments"]["command"])
-        self.assertEqual(targets[2]["tool_calls"][0]["function"]["arguments"]["command"], SUBMIT)
-        self.assertEqual(example["trainable_message_indices"], [2, 4, 6])
+        self.assertIn(self.record["code"], targets[2]["tool_calls"][0]["function"]["arguments"]["command"])
+        self.assertEqual(targets[4]["tool_calls"][0]["function"]["arguments"]["command"], SUBMIT)
+        self.assertEqual(example["trainable_message_indices"], [2, 4, 6, 8, 10])
         self.assertEqual(sum(part["type"] == "image" for msg in example["messages"] for part in msg["content"]), 1)
         self.assertEqual([p["type"] for p in example["messages"][3]["content"]], ["text"])
         self.assertIn('"ok": true', example["messages"][-2]["content"][0]["text"])
         self.assertIn("actual PNG image", example["messages"][0]["content"][0]["text"])
+
+    def test_write_and_preview_have_distinct_turns_and_feedback(self):
+        example = convert_record(self.record, self.root)
+        messages = example["messages"]
+        for start, step in zip((2, 6), self.record["trace"]):
+            write, acknowledgment, preview, result = messages[start:start + 4]
+            command = write["tool_calls"][0]["function"]["arguments"]["command"]
+            self.assertEqual(command, write_command(json.loads(step["completion"]["text"])["code"]))
+            self.assertEqual(acknowledgment["tool_call_id"], write["tool_calls"][0]["id"])
+            self.assertIn("Synthesized protocol acknowledgment", acknowledgment["content"][0]["text"])
+            self.assertNotIn("Return code", acknowledgment["content"][0]["text"])
+            self.assertEqual([p["type"] for p in acknowledgment["content"]], ["text"])
+            self.assertEqual(preview["tool_calls"][0]["function"]["arguments"]["command"],
+                             "python /opt/artsy/render.py --seed 42 --output /workspace/preview --preview < /workspace/program.py")
+            self.assertEqual(result["tool_call_id"], preview["tool_calls"][0]["id"])
+            visible = json.loads(result["content"][0]["text"].split("\n", 1)[1])
+            self.assertEqual(visible, {k: v for k, v in step["feedback"].items() if k != "artifact"})
+        self.assertEqual([m["role"] for m in messages],
+                         ["system", "user"] + ["assistant", "tool"] * 4 + ["assistant"])
+
+    def test_one_shot_counts_executed_attempts_despite_separate_actions(self):
+        self.record["trace"] = [{"completion": {"text": "malformed"}}, self.record["trace"][-1]]
+        dataset = self.root / "accepted.jsonl"
+        dataset.write_text(json.dumps(self.record) + "\n")
+        examples, summary = load_examples(dataset)
+        self.assertEqual(summary["one_shot"], 1)
+        self.assertEqual(summary["supervised_actions"], 3)
+        self.assertEqual(examples[0]["trainable_message_indices"], [2, 4, 6])
 
     def test_visual_repair_includes_previews_without_grader_answers(self):
         self.record["trace"][0]["feedback"] = {"ok": True, "artifact": "/old/preview-1.png"}
@@ -109,18 +153,18 @@ class ConversionTests(unittest.TestCase):
         self.record["trace"][0]["evaluation"] = {"reason": "secret answer", "score": 0.2}
         example = convert_record(self.record, self.root)
         serialized = json.dumps(example["messages"])
-        for index, name in ((3, "preview-1.png"), (5, "preview-2.png")):
+        for index, name in ((5, "preview-1.png"), (9, "preview-2.png")):
             part = example["messages"][index]["content"][1]
             self.assertEqual(part, {"type": "image", "image": str(self.root / name),
                                     "imageHash": digest((self.root / name).read_bytes())})
         self.assertNotIn("secret answer", serialized)
         self.assertNotIn("privileged", serialized)
-        self.assertEqual(example["trainable_message_indices"], [2, 4, 6])
+        self.assertEqual(example["trainable_message_indices"], [2, 4, 6, 8, 10])
 
     def test_legacy_visual_repairs_include_images_without_observation_metadata(self):
         self.record["trace"][0]["feedback"] = {"ok": True, "artifact": "/old/preview-1.png"}
         example = convert_record(self.record, self.root)
-        self.assertEqual(example["messages"][3]["content"][1]["image"], str(self.root / "preview-1.png"))
+        self.assertEqual(example["messages"][5]["content"][1]["image"], str(self.root / "preview-1.png"))
 
     def test_dry_run_exports_image_references_with_new_conversion_version(self):
         import contextlib
@@ -138,9 +182,9 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(summary["examples_with_images"], 1)
         self.assertEqual(summary["conversion"], CONVERSION)
         self.assertEqual(summary["loss_policy"], LOSS_POLICY)
-        self.assertEqual(summary["supervised_actions"], 3)
+        self.assertEqual(summary["supervised_actions"], 5)
         example = json.loads(exported.read_text())
-        self.assertEqual(len(example["trainable_message_indices"]), 3)
+        self.assertEqual(len(example["trainable_message_indices"]), 5)
         self.assertTrue(Path(example["messages"][-2]["content"][1]["image"]).is_file())
 
     def test_rejects_modified_source_observation_and_excluded_records(self):
@@ -183,20 +227,21 @@ class ConversionTests(unittest.TestCase):
         example = convert_record(self.record, self.root)
         self.assertNotIn("truncated JSON", json.dumps(example["messages"]))
         self.assertNotIn("previous reply could not be executed", json.dumps(example["messages"]))
-        self.assertEqual(example["trainable_message_indices"], [2, 4, 6])
+        self.assertEqual(example["trainable_message_indices"], [2, 4, 6, 8, 10])
         self.assertTrue(all(example["messages"][i].get("tool_calls") for i in example["trainable_message_indices"]))
         dataset = self.root / "accepted.jsonl"
         dataset.write_text(json.dumps(self.record) + "\n")
         _, summary = load_examples(dataset)
         self.assertEqual(summary["omitted_unexecuted_replies"], 1)
         self.assertEqual(summary["trajectories_with_omitted_replies"], 1)
-        self.assertEqual(summary["supervised_actions"], 3)
+        self.assertEqual(summary["supervised_actions"], 5)
 
     def test_shell_payload_is_literal_and_heredoc_collision_is_handled(self):
         import subprocess
         code = 'ARTSY_SOURCE\nprint("$HOME `id`")\n'
-        command = write_command(code, 42)
-        write_only = command.split("\npython /opt/artsy/render.py", 1)[0].replace(
+        command = write_command(code)
+        self.assertNotIn("python /opt/artsy/render.py", command)
+        write_only = command.replace(
             "/workspace/program.py", str(self.root / "literal.py"))
         subprocess.run(["bash", "-c", write_only], check=True)
         self.assertEqual((self.root / "literal.py").read_text(), code)
@@ -437,12 +482,15 @@ class TinkerAPITests(unittest.TestCase):
                 args.resume_from_checkpoint = checkpoint
                 args.max_steps = 2
                 legacy = json.loads(checkpoint.read_text())
-                legacy["config"]["conversion"] = "bash-trajectory-preview-images-selective-loss-v6"
                 legacy_path = output / "legacy-checkpoint.json"
-                legacy_path.write_text(json.dumps(legacy))
-                args.resume_from_checkpoint = legacy_path
-                with self.assertRaisesRegex(ValueError, "configuration does not match"):
-                    train(args, data, dict(manifest))
+                for conversion in ("bash-trajectory-preview-images-selective-loss-v6",
+                                   "bash-trajectory-preview-images-assistant-only-v7",
+                                   "bash-trajectory-separate-write-preview-assistant-only-v8"):
+                    legacy["config"]["conversion"] = conversion
+                    legacy_path.write_text(json.dumps(legacy))
+                    args.resume_from_checkpoint = legacy_path
+                    with self.subTest(conversion=conversion), self.assertRaisesRegex(ValueError, "configuration does not match"):
+                        train(args, data, dict(manifest))
                 service.create_training_client_from_state_with_optimizer.assert_not_called()
                 args.resume_from_checkpoint = checkpoint
                 train(args, data, dict(manifest))

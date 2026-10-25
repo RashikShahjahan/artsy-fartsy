@@ -88,7 +88,7 @@ class TinkerBackend:
         prompt = self.render(messages, tools)
         if prompt.length + budget > context_window:
             raise ValueError("Context exceeds model capacity")
-        result = self.client.sample(prompt=prompt, num_samples=16,
+        result = self.client.sample(prompt=prompt, num_samples=1,
             sampling_params=tinker.SamplingParams(
                 max_tokens=budget, temperature=0, stop=self.renderer.get_stop_sequences())).result()
         tokens = result.sequences[0].tokens

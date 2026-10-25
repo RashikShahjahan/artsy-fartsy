@@ -101,7 +101,9 @@ flowchart TD
     P -- Yes --> X[Write refusal.json and submit<br/>as supervised tool calls]
     X --> Q
     P -- No --> C[Convert teacher trajectory<br/>to conversation with bash tool calls]
-    C --> D[Use code, execution feedback and preview PNGs<br/>as context; omit judge critiques]
+    C --> W[Assistant writes program.py only<br/>synthesized tool acknowledgment]
+    W --> V[Assistant runs preview only<br/>recorded feedback and PNG]
+    V --> D[Repeat write/preview for repairs, then submit<br/>omit judge critiques]
     D --> Q{dry-run?}
     Q -- Yes --> J[Print or export converted conversations;<br/>no Tinker training calls]
     Q -- No --> E[Supervise every converted assistant action<br/>including unsuccessful attempts]
@@ -117,6 +119,9 @@ flowchart TD
     N --> O[Use adapter with base model<br/>for trained-checkpoint evaluation]
 ```
 
+The v9 conversion separates each executed attempt into a write-only assistant turn,
+a clearly synthesized write acknowledgment, a preview-only assistant turn, and its
+recorded execution feedback. Both assistant actions receive loss.
 Training includes hash-checked preview PNGs in tool observations, so visual repairs
 can condition on the image that preceded the correction. All converted assistant
 actions receive loss, including attempts that failed before recovery. Instructions,
