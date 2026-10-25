@@ -21,7 +21,7 @@ SOURCE_BYTES = 64 * 1024
 PNG_BYTES = 8 * 1024 * 1024
 
 
-def render(source: str, seed: int, output: Path, runtime: Path, seconds: int = 10) -> dict:
+def render(source: str, seed: int, output: Path, runtime: Path, seconds: int = 60) -> dict:
     if not source.strip() or len(source.encode()) > SOURCE_BYTES:
         return {"ok": False, "error": "Expected 1–65536 bytes of Python source"}
     output.mkdir(parents=True, exist_ok=True)
