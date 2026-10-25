@@ -111,18 +111,18 @@ def convert_record(record: dict, root: Path) -> dict:
                  record.get("reason", "").startswith("Duplicate source or rendered pixels of "))
     if record.get("status") not in {"accepted", "review"} and not (duplicate and record.get("status") == "rejected"):
         raise ValueError(f"{rid}: record is not selected for training")
-    if record["spec"].get("kind") == "refusal":
-        spec = record["spec"]
+    spec = record["spec"]
+    seed = spec["seed"]
+    preview_command = (f"python /opt/artsy/render.py --seed {seed} "
+                       "--output /workspace/preview --preview < /workspace/program.py")
+    messages = [message("system", system_prompt()),
+                message("user", spec["prompt"] + "\n\nPreview with: " + preview_command)]
+    if spec.get("kind") == "refusal":
         if (record.get("status") != "accepted" or record.get("refusal") != spec["refusal"]
                 or record.get("refusalSource") != "prompt_plan"
                 or record.get("trace") or record.get("code")
                 or record.get("artifacts")):
             raise ValueError(f"{rid}: invalid authored refusal pair")
-        seed = spec["seed"]
-        preview_command = (f"python /opt/artsy/render.py --seed {seed} "
-                           "--output /workspace/preview --preview < /workspace/program.py")
-        messages = [message("system", system_prompt()),
-                    message("user", spec["prompt"] + "\n\nPreview with: " + preview_command)]
         first = len(messages)
         messages.append(action(refusal_command(spec["refusal"]), "call_refusal"))
         messages.append(message("tool", "Return code: 0\nRefusal recorded", tool_call_id="call_refusal"))
@@ -146,11 +146,6 @@ def convert_record(record: dict, root: Path) -> dict:
     if not trace or not trace[-1].get("feedback", {}).get("ok"):
         raise ValueError(f"{rid}: no final successful execution")
 
-    seed = record["spec"]["seed"]
-    preview_command = (f"python /opt/artsy/render.py --seed {seed} "
-                       "--output /workspace/preview --preview < /workspace/program.py")
-    messages = [message("system", system_prompt()), message(
-        "user", record["spec"]["prompt"] + "\n\nPreview with: " + preview_command)]
     trainable_message_indices = []
     for index, step in enumerate(trace):
         review = step.get("codeSafety")

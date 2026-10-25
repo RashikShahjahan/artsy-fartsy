@@ -29,8 +29,6 @@ ENVIRONMENT_CONFIG = {
     "feedbackBytes": 8192,
 }
 
-OUTCOMES = {"active", "submitted", "refused", "budget_exhausted", "timed_out"}
-
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))

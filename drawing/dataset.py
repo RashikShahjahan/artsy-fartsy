@@ -49,7 +49,10 @@ def _parse_target(text: str) -> dict[str, str]:
     target = parse_json_reply(text)
     if not isinstance(target, dict):
         raise ValueError("Return one JSON object with code or refusal")
-    if len(target) != 1 or next(iter(target), None) not in ("code", "refusal") or not isinstance(next(iter(target.values()), None), str) or not next(iter(target.values())).strip():
+    if len(target) != 1:
+        raise ValueError("Return exactly one nonempty string field: code or refusal")
+    field, value = next(iter(target.items()))
+    if field not in ("code", "refusal") or not isinstance(value, str) or not value.strip():
         raise ValueError("Return exactly one nonempty string field: code or refusal")
     return target
 
@@ -108,7 +111,7 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
     config = options.get("config") or _default_config()
     env = DrawingEnvironment(str(output / "artifacts"), renderer=options.get("renderer"), config=config)
     episode = await env.reset(spec["prompt"], spec["seed"])
-    episode_dir = Path(episode["directory"] if isinstance(episode, dict) else episode.directory)
+    episode_dir = Path(episode["directory"])
     rel = lambda p: os.path.relpath(str(p), str(output))
     record: dict[str, Any] = {
         "version": DATASET_VERSION, "id": f"{spec['id']}-c{index}", "spec": spec, "candidate": index,
@@ -232,7 +235,7 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
             if feedback.get("failureKind") == "infrastructure":
                 record.update(status="infrastructure_error", reason=feedback.get("error") or "Renderer infrastructure failure"); break
             if not feedback.get("ok"):
-                if record.get("generation") is not None and feedback.get("failureKind") == "invalid_code":
+                if feedback.get("failureKind") == "invalid_code":
                     record["generation"]["executionFailures"] += 1
                 record["reason"] = feedback.get("error") or feedback.get("stderr") or feedback.get("outcome")
                 messages.append({"role": "user", "content": f"Execution feedback: {compact_json(feedback)}. Return a complete corrected program as JSON."})

@@ -8,7 +8,6 @@ import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 from urllib.request import urlopen
-from urllib.error import URLError
 
 from inference.model_catalog import model_catalog
 
@@ -26,7 +25,7 @@ def bridge_model_catalog():
         if not isinstance(status, dict):
             return None
         return [item for item in status.get('models', []) if isinstance(item, dict) and isinstance(item.get('id'), str)] or [{'id': status.get('model'), 'model_path': status.get('model_path')}]
-    except (OSError, ValueError, URLError):
+    except (OSError, ValueError):
         return None
 
 

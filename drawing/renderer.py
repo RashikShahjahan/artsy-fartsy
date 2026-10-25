@@ -48,9 +48,7 @@ def validate_png(png: bytes, expected: dict[str, int] | None = None) -> dict[str
 
 
 def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
-    if process.poll() is not None:
-        # The leader can exit while children remain in its session.
-        pass
+    # The leader can exit while children remain in its session.
     try:
         if os.name == "posix":
             os.killpg(process.pid, signal.SIGKILL)
