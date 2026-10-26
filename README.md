@@ -640,77 +640,63 @@ for inference. No local full-model `final/` directory is produced.
 Use the fresh `evaluation/prompts.jsonl` for behavioral evaluation with sufficient
 generation limits in both the serving endpoint and harness.
 
-## GRPO training with Tinker
+## RL training with Tinker Cookbook
 
-`training/grpo.py` starts from a completed SFT checkpoint and trains on fresh
-groups of drawing episodes. It uses the existing Mini SWE Docker sandbox and
-fresh final renders, with the correctness-only judge from the GRPO sampling
-pilot. The inference bridge does not need to be running.
+`training/grpo.py` now uses [Tinker Cookbook](https://github.com/thinking-machines-lab/tinker-cookbook)'s `EnvFromMessageEnv`,
+`EnvGroupBuilder`, `RLDatasetBuilder` and `rl.train.main`. Cookbook
+handles sampling, grouped advantages, PPO updates, KL reward shaping,
+training logs, and optimizer checkpoints. Inspect is **not** in the RL
+training path; it remains the independent evaluation harness. The inference
+bridge (`make serve`) is not needed during training.
 
-Use `uv sync` for the project environment, or install
-`training/requirements-grpo.txt` into a separate environment. Docker must be
-running for collection. Set `TINKER_API_KEY` and
-`ARTSY_CORRECTNESS_JUDGE_MODEL`, `ARTSY_CORRECTNESS_JUDGE_URL`, and optionally
-`ARTSY_CORRECTNESS_JUDGE_API_KEY` in your shell or `.env`.
+Each trajectory has a fresh, network-isolated Docker workspace using the
+same Mini SWE system prompt, bash tool, ArtCanvas API, execution limits,
+and visual preview observations as Inspect. Final source is rendered again
+in a **separate, fresh Docker container** and independently judged for
+correctness. Refusal prompts are excluded: RL currently trains on final-image
+correctness only.
+
+Install dependencies with `uv sync` or `training/requirements-grpo.txt`.
+Start Docker, and configure `TINKER_API_KEY`,
+`ARTSY_CORRECTNESS_JUDGE_MODEL`, `ARTSY_CORRECTNESS_JUDGE_URL`,
+and optionally `ARTSY_CORRECTNESS_JUDGE_API_KEY` in the environment or
+`.env`.
 
 ```sh
-# Validate the dataset/checkpoint and inspect the plan without API calls or Docker:
+# Validate the dataset and initial SFT checkpoint without API/Docker calls:
 .venv/bin/python -m training.grpo --dry-run --max-steps 1
 
-# Collect two prompt groups with four independent episodes each, then update:
+# Run one PPO update: two prompt groups, four rollouts per group.
 .venv/bin/python -m training.grpo --max-steps 1 \
   --output-dir checkpoints/grpo-pilot
 
-# Train through the prompt set, starting from the SFT state with a fresh optimizer:
+# Full run:
 make grpo ARGS="--init-checkpoint checkpoints/sft-v1/final.json --output-dir checkpoints/grpo-v1"
 
-# Restore the GRPO optimizer and continue at the next deterministic prompt batch:
-.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v1 \
-  --resume-from-checkpoint checkpoints/grpo-v1/checkpoint-000010.json
+# Resume automatically from the last Cookbook optimizer checkpoint:
+.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v1
 ```
 
-Defaults are `datasets/grpo-v1/prompts.jsonl`, `checkpoints/sft-v1/final.json`,
-two prompts per batch, four episodes per prompt, temperature 0.8, learning rate
-1e-5, clipping epsilon 0.2, and KL coefficient 0.01 against the frozen initial
-SFT sampler. All group members use the prompt's rendering seed; independent
-sampling seeds vary by batch, member and turn. Rewards are centered within
-each prompt group. `--normalize-rewards` also divides by the group's population
-standard deviation. Refusal datasets are rejected for this correctness-only run.
+Defaults: two prompt groups per batch, four trajectories per group,
+temperature 1.0, PPO clipping ±0.2, and reference-KL coefficient 0.01
+against the initial SFT sampler. `--max-samples` limits concurrent Docker
+episodes. `--max-tokens` is the per-turn token cap; `--max-length`
+limits trajectory context. Rewards are centered per prompt group, and
+`--normalize-rewards` additionally scales by within-group standard
+deviation. Budget-limited episodes cannot earn positive final reward.
 
-Every batch samples from the current training weights before one clipped policy
-update. The custom Tinker loss averages over each trajectory's sampled tokens,
-then over trajectories, and adds a k3 KL penalty against the initial SFT policy.
-The exact native input chunks, action token IDs, and sampling log probabilities
-are recorded before decoding. Each action is trained with its original input;
-previous actions, tool feedback, documentation, and preview images receive zero
-loss. This avoids reconstructing generated tokens from an Inspect transcript.
-Frozen-reference log probabilities are requested as each action is sampled,
-overlapping with the remaining rollout episodes and correctness judging. Results
-are saved with the exact native action and all reference requests must succeed
-before an update. Reference requests are also made for batches that eventually
-have no relative reward signal. Use `--kl-coef 0` to disable reference scoring.
+**Loss change:** The previous custom trajectory-mean GRPO objective with
+k3 KL has been replaced by Cookbook's token-level PPO loss. Cookbook
+incorporates reference KL as a reward penalty. The length weighting and KL
+semantics therefore differ. Treat this as a new experiment rather than
+resuming an old custom-GRPO checkpoint.
 
-Invalid final drawings and refusals receive zero correctness reward. Episodes
-with a token-truncated action also receive zero reward. Judge errors, missing
-log probabilities, incomplete groups, context overflow, and collection errors
-abort the batch before an optimizer step. Groups with identical rewards have
-zero relative advantage; an entire batch without reward variation skips the
-update and still checkpoints its consumed prompt batch. `--max-steps` counts
-these batches too. `--max-samples` bounds concurrent sandbox episodes,
-correctness judgments, and reference requests within each phase. Judging preserves
-prompt/episode order even when requests finish out of order; a judge failure aborts
-the batch before any update. `--limit` restricts the prompt set for small experiments.
-
-Per-step metrics include rollout and judging durations, reference requests completed
-during rollouts, and the remaining reference wait after judging.
-Outputs include native sampling evidence, Inspect logs, final render artifacts,
-judge responses, group rewards, `metrics.jsonl`, `training-manifest.json`, and
-optimizer checkpoints. Checkpoints are saved every batch by default and at the
-end; `--save-every` changes the interval. Resume validates the dataset, initial
-checkpoint, judge configuration, source hashes, and training settings. Constant
-learning-rate runs can extend their total epochs or max steps. An interrupted
-batch is collected again into a separate artifact directory. `final.json` uses
-the same state/sampler format as SFT and is discoverable in the model catalog.
+Outputs include Cookbook `checkpoints.jsonl`, training metrics, grouped
+rollout summaries, and per-episode source, final PNG and correctness score.
+On completion, Artsy writes a compatible `final.json` containing remote
+state/sampler paths for the UI and model catalog. Cookbook resumes from its
+last committed optimizer checkpoint; the wrapper validates the dataset,
+source hashes, initial SFT state, and hyperparameters before resuming.
 
 All commands run directly as Python modules; no Node.js or compilation step is required.
 The Makefile provides `serve`, `draw`, `render`, `dataset`, and
