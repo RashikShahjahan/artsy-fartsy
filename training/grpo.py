@@ -4,7 +4,7 @@ python -m training.grpo --dry-run
 python -m training.grpo --max-steps 1 --output-dir checkpoints/grpo-pilot
 
 Requires Docker, Tinker authentication, and ARTSY_CORRECTNESS_JUDGE_{MODEL,URL}.
-Rollouts use the evaluation Mini SWE sandbox; no inference server is required.
+Rollouts use the host-side evaluation agent and Docker tools; no inference server is required.
 """
 
 import argparse
@@ -59,7 +59,7 @@ def load_run(args):
         raise ValueError("Initial checkpoint must contain compatible SFT state and sampler paths")
     files = ["docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
              "runtime/artcanvas.py", "runtime/cairo.py", "runtime/requirements.txt",
-             "evaluation/harness.py", "evaluation/render.py", "evaluation/mini.yaml",
+             "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/render.py", "evaluation/mini.yaml",
              "evaluation/Dockerfile", "evaluation/compose.yaml", "evaluation/requirements.txt",
              "evaluation/sample_grpo.py", "inference/tinker_backend.py", "inference/server.py",
              "training/grpo.py", "training/sft.py", "training/requirements.txt",
@@ -84,12 +84,49 @@ def load_run(args):
     return specs, config, total
 
 
-class NativeRollouts:
-    """Intercept Mini SWE requests and retain the exact native sampling evidence."""
+class ReferenceLogprobs:
+    """Fetch frozen-reference action scores while rollout episodes continue."""
 
-    def __init__(self, backend, args, step, directory):
+    def __init__(self, reference, concurrency):
+        self.reference = reference
+        self.semaphore = asyncio.Semaphore(concurrency)
+        self.tasks = []
+
+    def submit(self, prompt, record, path):
+        self.tasks.append(asyncio.create_task(self._annotate(prompt, record, path)))
+
+    async def _annotate(self, prompt, record, path):
+        import tinker
+        full = tinker.ModelInput(chunks=[*prompt.chunks, tinker.EncodedTextChunk(tokens=record["tokens"])])
+        async with self.semaphore:
+            values = await self.reference.compute_logprobs_async(full)
+        action = values[prompt.length:]
+        if (len(values) != full.length or len(action) != len(record["tokens"])
+                or any(value is None or not math.isfinite(value) for value in action)):
+            raise ValueError("Reference returned invalid action log probabilities")
+        record["reference_logprobs"] = action
+        write_json(path, record)
+
+    @property
+    def completed(self):
+        return sum(task.done() and not task.cancelled() and task.exception() is None for task in self.tasks)
+
+    async def finish(self):
+        await asyncio.gather(*self.tasks)
+
+    async def close(self):
+        for task in self.tasks:
+            task.cancel()
+        await asyncio.gather(*self.tasks, return_exceptions=True)
+
+
+class NativeRollouts:
+    """Sample host-agent requests and retain the exact native sampling evidence."""
+
+    def __init__(self, backend, args, step, directory, reference_prefetch=None):
         self.backend, self.args, self.step, self.directory = backend, args, step, directory
         self.turns = defaultdict(list)
+        self.reference_prefetch = reference_prefetch
 
     async def __call__(self, model, messages, tools, tool_choice, config):
         import tinker
@@ -128,7 +165,10 @@ class NativeRollouts:
         self.turns[key].append(record)
         directory = self.directory / "native" / f"{key[0]}-{key[1]}"
         directory.mkdir(parents=True, exist_ok=True)
-        write_json(directory / f"turn-{turn:03d}.json", record)
+        path = directory / f"turn-{turn:03d}.json"
+        write_json(path, record)
+        if self.reference_prefetch is not None:
+            self.reference_prefetch.submit(prompt, record, path)
         raw = self.backend.tokenizer.decode(tokens, skip_special_tokens=False)
         try:
             text, calls = parse_tools(raw, tool_specs)
@@ -143,10 +183,10 @@ class NativeRollouts:
                              total_tokens=prompt.length + len(tokens)))
 
 
-async def collect_rollouts(args, specs, sampler, encoder, step, directory, judge):
+async def collect_rollouts(args, specs, sampler, encoder, step, directory, judge, reference=None):
     from inspect_ai import eval_async
     from inspect_ai.model import GenerateConfig, get_model
-    from evaluation.harness import drawing_task, inspect_swe_model_auth
+    from evaluation.harness import drawing_task
     from evaluation.sample_grpo import score_outputs, summarize_rewards
     from inference.tinker_backend import TinkerBackend
 
@@ -156,7 +196,8 @@ async def collect_rollouts(args, specs, sampler, encoder, step, directory, judge
     backend.client, backend.renderer = sampler, encoder.renderer
     backend.tokenizer, backend.image_processor = encoder.renderer.tokenizer, encoder.image_processor
     backend.image_size = IMAGE_SIZE
-    recorder = NativeRollouts(backend, args, step, directory)
+    prefetch = ReferenceLogprobs(reference, args.max_samples) if reference is not None else None
+    recorder = NativeRollouts(backend, args, step, directory, prefetch)
     task = drawing_task(specs, str(directory / "artifacts"), temperature=args.temperature,
                         max_connections=args.max_samples, generation_filter=recorder)
     # Every request is handled by the filter. This local placeholder is never
@@ -164,18 +205,30 @@ async def collect_rollouts(args, specs, sampler, encoder, step, directory, judge
     placeholder = get_model("openai-api/artsy/grpo", base_url="http://127.0.0.1:8080/v1",
                             api_key="local-no-auth", responses_api=False, stream=False,
                             config=GenerateConfig(max_retries=0))
-    with inspect_swe_model_auth():
+    try:
+        began = monotonic()
         logs = await eval_async(task, model=placeholder, epochs=args.group_size,
                                 max_samples=args.max_samples, log_dir=str(directory / "logs"))
-    if (not logs or any(log.status != "success" for log in logs)
-            or any(sample.error is not None for log in logs for sample in (log.samples or []))):
-        raise RuntimeError("Rollout collection failed; no policy update was made")
-    for spec in specs:
-        for epoch in range(1, args.group_size + 1):
-            if (not recorder.turns[(spec["id"], epoch)] or not
-                    (directory / "artifacts" / f"{spec['id']}-{epoch}" / "result.json").is_file()):
-                raise RuntimeError("Incomplete rollout group; no policy update was made")
-    groups = await score_outputs(specs, directory, args.group_size, judge, args.max_samples)
+        rollout_seconds = monotonic() - began
+        completed_during_rollouts = prefetch.completed if prefetch is not None else 0
+        if (not logs or any(log.status != "success" for log in logs)
+                or any(sample.error is not None for log in logs for sample in (log.samples or []))):
+            raise RuntimeError("Rollout collection failed; no policy update was made")
+        for spec in specs:
+            for epoch in range(1, args.group_size + 1):
+                if (not recorder.turns[(spec["id"], epoch)] or not
+                        (directory / "artifacts" / f"{spec['id']}-{epoch}" / "result.json").is_file()):
+                    raise RuntimeError("Incomplete rollout group; no policy update was made")
+        began = monotonic()
+        groups = await score_outputs(specs, directory, args.group_size, judge, args.max_samples)
+        judge_seconds = monotonic() - began
+        began = monotonic()
+        if prefetch is not None:
+            await prefetch.finish()
+        reference_wait_seconds = monotonic() - began
+    finally:
+        if prefetch is not None:
+            await prefetch.close()
     for group in groups:
         for attempt in group["attempts"]:
             attempt["turns"] = recorder.turns[(group["id"], attempt["epoch"])]
@@ -186,6 +239,11 @@ async def collect_rollouts(args, specs, sampler, encoder, step, directory, judge
                 attempt["reward"] = 0.0
         group.update(summarize_rewards([attempt["reward"] for attempt in group["attempts"]]))
     write_json(directory / "groups.json", groups)
+    write_json(directory / "phase-metrics.json", {
+        "rollout_seconds": rollout_seconds, "judge_seconds": judge_seconds,
+        "reference_wait_seconds": reference_wait_seconds,
+        "reference_requests": len(prefetch.tasks) if prefetch is not None else 0,
+        "reference_completed_during_rollouts": completed_during_rollouts})
     return groups
 
 
@@ -215,29 +273,16 @@ def build_training_data(groups, normalize=False):
                           "logprobs": ([0.0] * prefix + logprobs, "float32"),
                           "advantages": ([0.0] * prefix + [advantage] * len(tokens), "float32"),
                           "weights": ([0.0] * prefix + [1 / (count * trajectories)] * len(tokens), "float32")}
+                if "reference_logprobs" in turn:
+                    reference = turn["reference_logprobs"]
+                    if (len(reference) != len(tokens)
+                            or any(value is None or not math.isfinite(value) for value in reference)):
+                        raise ValueError("Invalid recorded reference log probabilities")
+                    fields["reference_logprobs"] = ([0.0] * prefix + reference, "float32")
                 data.append(tinker.Datum(model_input=inputs, loss_fn_inputs={
                     name: tinker.TensorData(data=values, dtype=dtype, shape=[len(targets)])
                     for name, (values, dtype) in fields.items()}))
     return data
-
-
-async def reference_logprobs(data, reference, concurrency):
-    import tinker
-    semaphore = asyncio.Semaphore(concurrency)
-
-    async def annotate(datum):
-        full = datum.model_input.append_int(datum.loss_fn_inputs["target_tokens"].data[-1])
-        async with semaphore:
-            values = (await reference.compute_logprobs_async(full))[1:]
-        mask = datum.loss_fn_inputs["weights"].data
-        if len(values) != len(mask) or any(
-                value is None or not math.isfinite(value) for value, weight in zip(values, mask) if weight):
-            raise ValueError("Reference returned invalid action log probabilities")
-        datum.loss_fn_inputs["reference_logprobs"] = tinker.TensorData(
-            data=[value if weight else 0.0 for value, weight in zip(values, mask)],
-            dtype="float32", shape=[len(mask)])
-
-    await asyncio.gather(*(annotate(datum) for datum in data))
 
 
 def grpo_loss(clip_epsilon, kl_coef):
@@ -319,19 +364,19 @@ def train(args, specs, config, total_steps):
             sampler = client.save_weights_and_get_sampling_client()
             directory = args.output_dir / "rollouts" / f"step-{step:06d}" / uuid4().hex
             directory.mkdir(parents=True)
-            groups = asyncio.run(collect_rollouts(args, batch, sampler, encoder, step, directory, judge))
+            groups = asyncio.run(collect_rollouts(args, batch, sampler, encoder, step, directory, judge, reference))
             data = build_training_data(groups, args.normalize_rewards)
             signal = sum(len(set(a["reward"] for a in g["attempts"])) > 1 for g in groups)
             result_metrics = {}
             # No relative signal means no update, including no KL-only drift.
             if signal:
-                if reference is not None:
-                    asyncio.run(reference_logprobs(data, reference, args.max_samples))
                 result = client.forward_backward_custom(data, grpo_loss(args.clip_epsilon, args.kl_coef)).result()
                 client.optim_step(tinker.AdamParams(learning_rate=args.learning_rate)).result()
                 result_metrics = result.metrics
             rewards = [a["reward"] for g in groups for a in g["attempts"]]
-            row = {**result_metrics, "step": step, "optimizer_updated": bool(signal),
+            phase_path = directory / "phase-metrics.json"
+            phase_metrics = json.loads(phase_path.read_text()) if phase_path.exists() else {}
+            row = {**result_metrics, **phase_metrics, "step": step, "optimizer_updated": bool(signal),
                    "prompts": len(batch), "episodes": len(rewards), "reward_mean": statistics.mean(rewards),
                    "valid_renders": sum(a.get("render_valid", False) for g in groups for a in g["attempts"]),
                    "groups_with_learning_signal": signal,

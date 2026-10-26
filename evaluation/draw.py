@@ -1,4 +1,4 @@
-"""Draw with the same Mini SWE Agent used by the baseline evaluation."""
+"""Draw with the same host-side agent used by the baseline evaluation."""
 
 import argparse
 import json
@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from inspect_ai import eval
 
 from .harness import (BASE_MODEL, ROOT, check_native_bridge, drawing_task,
-                      inspect_swe_model_auth, model_from_env, model_url, sha256)
+                      model_from_env, model_url, sha256)
 
 
 def main() -> int:
@@ -51,9 +51,8 @@ def main() -> int:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "episode.json").write_text(json.dumps(request, indent=2) + "\n")
     spec = {"id": "drawing", "prompt": prompt, "seed": args.seed}
-    with inspect_swe_model_auth():
-        logs = eval(drawing_task([spec], str(directory / "artifacts")),
-                    model=model_from_env(args.model), log_dir=str(directory / "logs"), max_samples=1)
+    logs = eval(drawing_task([spec], str(directory / "artifacts")),
+                model=model_from_env(args.model), log_dir=str(directory / "logs"), max_samples=1)
     artifact = directory / "artifacts/drawing-1"
     for name in ("program.py", "image.png", "result.json"):
         if (artifact / name).is_file():

@@ -15,8 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import tinker
 import torch
 
-from training.grpo import (NativeRollouts, advantages, build_training_data, collect_rollouts,
-                           grpo_loss, main, parser, reference_logprobs, train)
+from training.grpo import (NativeRollouts, ReferenceLogprobs, advantages, build_training_data, collect_rollouts,
+                           grpo_loss, main, parser, train)
 
 
 def turn(tokens=(10, 11), prompt=None):
@@ -89,17 +89,144 @@ class ObjectiveTests(unittest.TestCase):
         self.assertTrue(torch.all(current.grad[2:] > 0))
 
     def test_reference_scores_exact_full_sequences_and_ignores_context_nans(self):
-        data = build_training_data(groups())
+        samples = groups()
         reference = SimpleNamespace(compute_logprobs_async=AsyncMock())
 
         async def compute(full):
             return [None, float("nan"), None] + [-2.0] * (full.length - 3)
 
         reference.compute_logprobs_async.side_effect = compute
-        asyncio.run(reference_logprobs(data, reference, 2))
+        async def annotate(directory):
+            prefetch = ReferenceLogprobs(reference, 2)
+            try:
+                for index, record in enumerate(t for a in samples[0]["attempts"] for t in a["turns"]):
+                    prefetch.submit(tinker.ModelInput.model_validate(record["prompt"]), record,
+                                    directory / f"turn-{index}.json")
+                await prefetch.finish()
+            finally:
+                await prefetch.close()
+        with tempfile.TemporaryDirectory() as temp:
+            asyncio.run(annotate(Path(temp)))
+            self.assertEqual(json.loads((Path(temp) / "turn-0.json").read_text())["reference_logprobs"], [-2, -2])
+        data = build_training_data(samples)
         first_full = reference.compute_logprobs_async.call_args_list[0].args[0]
         self.assertEqual(first_full.to_ints(), [1, 2, 3, 10, 11])
         self.assertEqual(data[0].loss_fn_inputs["reference_logprobs"].data, [0, 0, -2, -2])
+
+
+class ReferencePrefetchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bounded_requests_keep_out_of_order_results_with_their_actions(self):
+        active, peak = 0, 0
+        second_done = asyncio.Event()
+
+        async def compute(full):
+            nonlocal active, peak
+            token = full.to_ints()[-1]
+            active += 1
+            peak = max(peak, active)
+            try:
+                if token == 10:
+                    await second_done.wait()
+                else:
+                    await asyncio.sleep(0)
+                if token == 11:
+                    second_done.set()
+                return [None, float("nan"), None, -float(token)]
+            finally:
+                active -= 1
+
+        with tempfile.TemporaryDirectory() as temp:
+            prefetch = ReferenceLogprobs(SimpleNamespace(compute_logprobs_async=compute), 2)
+            records = [turn((token,)) for token in range(10, 16)]
+            try:
+                for index, record in enumerate(records):
+                    prefetch.submit(tinker.ModelInput.model_validate(record["prompt"]), record,
+                                    Path(temp) / f"turn-{index}.json")
+                await asyncio.wait_for(prefetch.finish(), timeout=5)
+                self.assertEqual(peak, 2)
+                self.assertEqual(prefetch.completed, 6)
+                self.assertEqual([r["reference_logprobs"] for r in records], [[-float(t)] for t in range(10, 16)])
+            finally:
+                await prefetch.close()
+
+    async def test_failed_reference_cancels_other_requests_and_rejects_invalid_action_scores(self):
+        for values in ([None, 0.0, 0.0, None], [None, 0.0, 0.0, float("nan")], [None]):
+            started = asyncio.Event()
+            active = 0
+
+            async def compute(full):
+                nonlocal active
+                active += 1
+                try:
+                    if full.to_ints()[-1] == 10:
+                        await started.wait()
+                        return values
+                    started.set()
+                    await asyncio.Event().wait()
+                finally:
+                    active -= 1
+
+            with self.subTest(values=values), tempfile.TemporaryDirectory() as temp:
+                prefetch = ReferenceLogprobs(SimpleNamespace(compute_logprobs_async=compute), 2)
+                try:
+                    for index, token in enumerate((10, 11, 12)):
+                        record = turn((token,))
+                        prefetch.submit(tinker.ModelInput.model_validate(record["prompt"]), record,
+                                        Path(temp) / f"turn-{index}.json")
+                    with self.assertRaisesRegex(ValueError, "invalid action log probabilities"):
+                        await asyncio.wait_for(prefetch.finish(), timeout=5)
+                finally:
+                    await prefetch.close()
+                self.assertEqual(active, 0)
+                self.assertEqual(list(Path(temp).glob("turn-*.json")), [])
+
+    async def test_reference_overlaps_collection_and_judging_and_is_awaited_before_return(self):
+        args = parser().parse_args(["--group-size", "2"])
+        reference_started = asyncio.Event()
+        release_reference = asyncio.Event()
+        records = {("a", 1): [turn()], ("a", 2): [turn((12,))]}
+
+        async def compute(full):
+            reference_started.set()
+            await release_reference.wait()
+            return [None] * 3 + [-2.0] * (full.length - 3)
+
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+
+            def recorder(backend, options, step, output, prefetch):
+                for (name, epoch), turns in records.items():
+                    artifact = output / "artifacts" / f"{name}-{epoch}"
+                    artifact.mkdir(parents=True)
+                    (artifact / "result.json").write_text("{}")
+                    for record in turns:
+                        prefetch.submit(tinker.ModelInput.model_validate(record["prompt"]), record,
+                                        artifact / "native.json")
+                return SimpleNamespace(turns=records)
+
+            async def evaluate(*args, **kwargs):
+                await asyncio.wait_for(reference_started.wait(), timeout=5)
+                return [SimpleNamespace(status="success", samples=[])]
+
+            async def score(*args, **kwargs):
+                self.assertTrue(reference_started.is_set())
+                self.assertTrue(all("reference_logprobs" not in t for turns in records.values() for t in turns))
+                release_reference.set()
+                return [{"id": "a", "attempts": [{"epoch": 1, "reward": 0}, {"epoch": 2, "reward": 1}]}]
+
+            with patch("training.grpo.NativeRollouts", side_effect=recorder), \
+                 patch("inspect_ai.eval_async", side_effect=evaluate), \
+                 patch("evaluation.harness.drawing_task"), \
+                 patch("evaluation.sample_grpo.score_outputs", side_effect=score):
+                result = await asyncio.wait_for(collect_rollouts(
+                    args, [{"id": "a"}], MagicMock(), MagicMock(), 1, directory, MagicMock(),
+                    SimpleNamespace(compute_logprobs_async=compute)), timeout=5)
+            data = build_training_data(result)
+            self.assertEqual(data[0].loss_fn_inputs["reference_logprobs"].data, [0, 0, -2, -2])
+            self.assertEqual(data[1].loss_fn_inputs["reference_logprobs"].data, [0, 0, -2])
+            metrics = json.loads((directory / "phase-metrics.json").read_text())
+            self.assertEqual(metrics["reference_requests"], 2)
+            self.assertEqual(metrics["reference_completed_during_rollouts"], 0)
 
 
 class NativeSamplingTests(unittest.IsolatedAsyncioTestCase):
@@ -116,7 +243,8 @@ class NativeSamplingTests(unittest.IsolatedAsyncioTestCase):
             backend.client.sample_async = AsyncMock(return_value=SimpleNamespace(sequences=[
                 SimpleNamespace(tokens=[10, 11], logprobs=[-0.3, -0.4], stop_reason="stop")]))
             args = parser().parse_args([])
-            recorder = NativeRollouts(backend, args, 1, Path(temp))
+            prefetch = MagicMock()
+            recorder = NativeRollouts(backend, args, 1, Path(temp), prefetch)
             state = SimpleNamespace(sample_id="sample", epoch=1)
             tools = [ToolInfo(name="bash", description="Run bash", parameters={
                 "type": "object", "properties": {"command": {"type": "string"}}})]
@@ -128,6 +256,9 @@ class NativeSamplingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.usage.output_tokens, 2)
             self.assertEqual(recorder.turns[("sample", 1)][0]["logprobs"], [-0.3, -0.4])
             self.assertTrue((Path(temp) / "native/sample-1/turn-000.json").is_file())
+            self.assertEqual(prefetch.submit.call_count, 2)
+            self.assertEqual(prefetch.submit.call_args_list[0].args[1], recorder.turns[("sample", 1)][0])
+            self.assertEqual(prefetch.submit.call_args_list[0].args[2], Path(temp) / "native/sample-1/turn-000.json")
             calls = backend.client.sample_async.call_args_list
             self.assertEqual(calls[0].kwargs["sampling_params"].temperature, 0.8)
             self.assertNotEqual(calls[0].kwargs["sampling_params"].seed, calls[1].kwargs["sampling_params"].seed)
@@ -218,7 +349,7 @@ class TrainerTests(unittest.TestCase):
             args = parser().parse_args(["--output-dir", temp])
             with patch("tinker.ServiceClient") as service, patch("training.grpo.create_encoder"), \
                  patch("training.grpo.collect_rollouts", new_callable=AsyncMock, return_value=flat), \
-                 patch("training.grpo.reference_logprobs", new_callable=AsyncMock) as reference, \
+                 patch("training.grpo.ReferenceLogprobs") as reference, \
                  contextlib.redirect_stdout(io.StringIO()):
                 service.return_value.create_training_client_from_state.return_value = client
                 train(args, [{"id": "a"}], config, 1)

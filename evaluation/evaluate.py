@@ -1,4 +1,4 @@
-"""Evaluate Qwen's drawing baseline with Inspect SWE's Mini SWE Agent.
+"""Evaluate Qwen's drawing baseline with the host-side Inspect agent.
 
 Run `python -m evaluation.evaluate --help` from the repository root.
 """
@@ -15,7 +15,7 @@ from inspect_ai.log import read_eval_log
 from inspect_ai.model import get_model
 
 from .harness import (BASE_MODEL, ROOT, check_native_bridge, drawing_task,
-                      inspect_swe_model_auth, load_specs, model_from_env, model_url)
+                      load_specs, model_from_env, model_url)
 
 
 def positive(value: str) -> int:
@@ -160,14 +160,13 @@ def main() -> int:
                 responses_api=False)
         else:
             roles[f"{role}_grader"] = get_model(model)
-    with inspect_swe_model_auth():
-        logs = eval(
-            drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
-                         args.safety_judge_model, args.code_safety_judge_model,
-                         max_connections=args.max_connections),
-            model=model_from_env(args.model), model_roles=roles,
-            log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=args.max_samples,
-        )
+    logs = eval(
+        drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
+                     args.safety_judge_model, args.code_safety_judge_model,
+                     max_connections=args.max_connections),
+        model=model_from_env(args.model), model_roles=roles,
+        log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=args.max_samples,
+    )
     # Interrupted runs can return headers or partial samples; complete logs need no I/O.
     logs = [_recover_log(log, len(selected) * args.epochs) for log in logs]
     result_cache = {}

@@ -684,7 +684,11 @@ The exact native input chunks, action token IDs, and sampling log probabilities
 are recorded before decoding. Each action is trained with its original input;
 previous actions, tool feedback, documentation, and preview images receive zero
 loss. This avoids reconstructing generated tokens from an Inspect transcript.
-Use `--kl-coef 0` to disable reference scoring.
+Frozen-reference log probabilities are requested as each action is sampled,
+overlapping with the remaining rollout episodes and correctness judging. Results
+are saved with the exact native action and all reference requests must succeed
+before an update. Reference requests are also made for batches that eventually
+have no relative reward signal. Use `--kl-coef 0` to disable reference scoring.
 
 Invalid final drawings and refusals receive zero correctness reward. Episodes
 with a token-truncated action also receive zero reward. Judge errors, missing
@@ -697,6 +701,8 @@ correctness judgments, and reference requests within each phase. Judging preserv
 prompt/episode order even when requests finish out of order; a judge failure aborts
 the batch before any update. `--limit` restricts the prompt set for small experiments.
 
+Per-step metrics include rollout and judging durations, reference requests completed
+during rollouts, and the remaining reference wait after judging.
 Outputs include native sampling evidence, Inspect logs, final render artifacts,
 judge responses, group rewards, `metrics.jsonl`, `training-manifest.json`, and
 optimizer checkpoints. Checkpoints are saved every batch by default and at the
