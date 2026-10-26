@@ -86,8 +86,19 @@ class ChatClient:
         }
 
 
-def chat_client(options: dict[str, Any]) -> ChatClient:
+def chat_client(options: dict[str, Any]):
     base_url, model = options.get("baseUrl"), options.get("model")
+    if base_url == "tinker://native":
+        from .tinker_client import TinkerChatClient, DEFAULT_RENDERER, DEFAULT_MAX_TOKENS
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("A model identifier is required")
+        timeout = options.get("timeoutMs", 300_000)
+        budget = options.get("maxTokens", DEFAULT_MAX_TOKENS)
+        if type(timeout) is not int or timeout < 1 or type(budget) is not int or not 1 <= budget < 65536:
+            raise ValueError("Invalid native judge timeout or token budget")
+        return TinkerChatClient(model=model,
+            renderer_name=options.get("renderer", DEFAULT_RENDERER),
+            revision=options.get("revision"), max_tokens=budget, timeout_ms=timeout)
     if not isinstance(base_url, str):
         raise ValueError("Endpoint must be an HTTP(S) base URL without credentials, query, or fragment")
     # Match URL validation while keeping endpoint credentials out of all errors/provenance.

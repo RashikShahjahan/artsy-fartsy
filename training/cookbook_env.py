@@ -217,7 +217,7 @@ class DockerSession:
                     {"type": "text", "text": correctness_judge_prompt(self.spec["prompt"])},
                     {"type": "image_url", "image_url": {
                         "url": "data:image/png;base64," + base64.b64encode(png).decode()}}]}],
-                    JUDGE_MAX_TOKENS, temperature=0)
+                    getattr(self.judge, "max_tokens", JUDGE_MAX_TOKENS), temperature=0)
                 if response.get("finishReason") == "length":
                     raise ValueError("Correctness judge reply truncated")
                 judgment = parse_correctness_judgment(response["text"])

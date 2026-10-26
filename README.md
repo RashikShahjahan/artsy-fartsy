@@ -662,6 +662,23 @@ Start Docker, and configure `TINKER_API_KEY`,
 and optionally `ARTSY_CORRECTNESS_JUDGE_API_KEY` in the environment or
 `.env`.
 
+For the native Tinker Qwen3.8 correctness judge, configure:
+
+```dotenv
+ARTSY_CORRECTNESS_JUDGE_MODEL=Qwen/Qwen3.8-27B
+ARTSY_CORRECTNESS_JUDGE_URL=tinker://native
+ARTSY_CORRECTNESS_JUDGE_RENDERER=qwen3_8_medium_reasoning
+ARTSY_CORRECTNESS_JUDGE_MAX_TOKENS=16384
+# Pin tokenizer/processor metadata to a Hugging Face commit for reproducibility:
+ARTSY_CORRECTNESS_JUDGE_REVISION=<model-repository-commit>
+```
+
+The native judge uses `TINKER_API_KEY` and a fixed base-model sampling client,
+independent of the policy being trained. Image preprocessing runs on the host;
+judge inference runs on Tinker. Its renderer, metadata revision, and token
+budget are recorded in the RL manifest. Truncated or malformed judge responses
+stop scoring rather than entering training rewards. HTTP judges remain supported.
+
 ```sh
 # Validate the dataset and initial SFT checkpoint without API/Docker calls:
 .venv/bin/python -m training.grpo --dry-run --max-steps 1

@@ -33,6 +33,7 @@ PROVENANCE_FILES = (
     "evaluation/requirements.txt", "training/cookbook_env.py",
     "training/cookbook_dataset.py", "training/score_rl.py", "training/grpo.py",
     "training/sft.py", "training/requirements.txt", "training/requirements-grpo.txt",
+    "drawing/dataset_client.py", "drawing/tinker_client.py",
 )
 
 
@@ -68,6 +69,9 @@ def load_run(args):
         "seed": args.seed, "epochs": args.epochs, "max_steps": args.max_steps,
         "correctness_judge_model": os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL"),
         "correctness_judge_url": os.getenv("ARTSY_CORRECTNESS_JUDGE_URL"),
+        "correctness_judge_renderer": os.getenv("ARTSY_CORRECTNESS_JUDGE_RENDERER", "qwen3_8_medium_reasoning"),
+        "correctness_judge_revision": os.getenv("ARTSY_CORRECTNESS_JUDGE_REVISION"),
+        "correctness_judge_max_tokens": int(os.getenv("ARTSY_CORRECTNESS_JUDGE_MAX_TOKENS", "16384")),
         "reward": "final-image correctness only",
         "loss": "Cookbook PPO; optional reference-KL reward penalty",
     }
@@ -98,6 +102,9 @@ def make_cookbook_config(args, specs, plan, total):
             normalize_rewards=args.normalize_rewards,
             judge_model=plan["correctness_judge_model"],
             judge_url=plan["correctness_judge_url"],
+            judge_renderer=plan.get("correctness_judge_renderer", "qwen3_8_medium_reasoning"),
+            judge_revision=plan.get("correctness_judge_revision"),
+            judge_max_tokens=plan.get("correctness_judge_max_tokens", 16384),
         ),
         learning_rate=args.learning_rate,
         # The Cookbook rollout cap is cumulative; RolloutLimits separately
