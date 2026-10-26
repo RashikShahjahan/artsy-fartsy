@@ -20,7 +20,7 @@ from inspect_ai import eval
 from drawing.dataset_client import chat_client
 from drawing.dataset_specs import DIFFICULTIES
 from drawing.judges import JUDGE_MAX_TOKENS, correctness_judge_prompt, parse_correctness_judgment
-from evaluation.harness import (ROOT, check_native_bridge, drawing_task, inspect_swe_model_auth,
+from evaluation.harness import (ROOT, check_native_bridge, drawing_task,
                                 load_specs, model_from_env, sha256)
 from inference.model_catalog import model_catalog
 
@@ -147,11 +147,10 @@ def main(argv=None):
         check_native_bridge(args.model)
         args.output.mkdir(parents=True, exist_ok=False)
         (args.output / "plan.json").write_text(json.dumps(plan, indent=2) + "\n")
-        with inspect_swe_model_auth():
-            logs = eval(drawing_task(specs, str(args.output / "artifacts"),
-                                     temperature=args.temperature, max_connections=args.max_samples),
-                        model=model_from_env(args.model), epochs=args.group_size,
-                        max_samples=args.max_samples, log_dir=str(args.output / "logs"))
+        logs = eval(drawing_task(specs, str(args.output / "artifacts"),
+                                 temperature=args.temperature, max_connections=args.max_samples),
+                    model=model_from_env(args.model), epochs=args.group_size,
+                    max_samples=args.max_samples, log_dir=str(args.output / "logs"))
         if not logs or any(log.status != "success" for log in logs):
             raise RuntimeError("Rollout collection did not complete successfully; inspect logs before retrying")
     # Incomplete/errored collection must not enter reward statistics.
