@@ -4,42 +4,56 @@ Build an environment that trains a small language model to turn drawing instruct
 
 The starting point is the compact Cairo-backed `ArtCanvas` interface described in [Can an AI Learn to Draw?](https://blog.rashik.sh/tech/can-ai-learn-to-draw/). The central artifact is the program together with its rendered image.
 
-The choices and numerical targets below are proposed starting points to validate in a pilot.
+Last reconciled: **2026-10-26** against the implementation and local dataset/checkpoint manifests. Checked items indicate implemented capabilities or recorded runs; they do not establish held-out quality or safety gains. Dataset and checkpoint artifacts are local and may be Git-ignored.
+
+Current recorded runs:
+
+- SFT: `checkpoints/sft-v1/final.json` records 29 optimizer steps on 903 complete trajectories (708 one-shot drawings, 45 repairs, 150 refusal pairs), using Qwen/Qwen3.5-4B with hosted LoRA.
+- RL: `checkpoints/grpo-qwen38-v1/final.json` records 100 steps on 200 benign training prompts, initialized from that SFT run. It uses Tinker Cookbook PPO with grouped rollouts, reference-KL shaping, and the native Tinker Qwen/Qwen3.8-27B correctness judge.
+- Still open: a comparable base/SFT/RL held-out report, human judge calibration, and safety-aware RL. The reward table below remains a proposed extension; current RL uses final-image correctness only.
+
+Evidence: `checkpoints/sft-v1/training-manifest.json`, both final checkpoint files, `datasets/sft-v1/summary.json`, and `datasets/grpo-v1/manifest.json`. The choices and numerical targets that remain unchecked are proposals to validate.
 
 ## 1. Define the first experiment
 
-- [x] Select Qwen/Qwen3.5-4B (Apache 2.0) with its vision encoder and native tool-call format. Serve a bounded 32,768-token context; benchmark Python performance on held-out drawing tasks before training.
-- [ ] Record available GPU memory, training budget, and teacher/judge API budget. Benchmark a small batch before choosing dataset size or training duration.
+- [x] Select Qwen/Qwen3.5-4B (Apache 2.0) with its vision encoder and native tool-call format, a pinned tokenizer revision, and a bounded 32,768-token context.
+- [ ] Document a frozen, untouched-base held-out benchmark and compare it with the trained checkpoints.
+- [ ] Consolidate hosted training, teacher, and judge spend limits and measured throughput/cost. Training uses Tinker; local GPU memory is not a requirement for the current hosted path.
 - [x] Use Qwen/Qwen3.5-4B as a vision-language policy. It receives API documentation, the user prompt, its code, execution feedback, and rendered preview images. Keep independent evaluator scores outside policy observations.
-- [ ] Fix the initial scope: static 2D drawings, one Python file, a versioned `ArtCanvas` API, a fixed canvas size, and PNG output. Include shapes, diagrams, scenes, and procedural patterns.
-- [ ] Define what counts as a successful response: submitted code reproduces a safe image that satisfies the user's visible requirements. Define a structured refusal response for disallowed requests.
-- [ ] Create versioned configuration for the model, API, renderer, sandbox, data generation, SFT, RL, reward rules, and evaluation.
+- [x] Fix the drawing contract: static 2D drawings, one `program.py`, a documented/versioned `ArtCanvas` API, a 1920×1200 canvas, and PNG output. Include shapes, diagrams, scenes, and procedural patterns.
+- [x] Define fresh final rendering and structured refusal submission (`refusal.json` with a reason and no `program.py`). Correctness, image safety, and code-safety scorers are available; complete inference safety enforcement remains open below.
+- [x] Record model/tokenizer, API hashes, dataset revisions, training settings, and evaluator provenance in dataset/training manifests; share drawing limits through `drawing/config.py`.
+- [ ] Complete runtime/dependency pinning and unify the configuration/provenance contract across local generation, Docker evaluation, and RL.
 
 **Done when:** a written experiment configuration specifies the model, compute limits, output contract, and evaluation criteria.
 
 ## 2. Build the drawing runtime and mini coding environment
 
 - [x] Implement or recover `ArtCanvas`: backgrounds, colors, paths, shapes, curves, gradients, transforms, and saving. Write concise API documentation and working examples.
-- [ ] Pin Python, Cairo, fonts, and other rendering dependencies; inject an explicit random seed so runs can be reproduced within the pinned runtime.
+- [x] Inject explicit random seeds into local and trusted final rendering.
+- [ ] Pin Python images, Cairo, fonts, and remaining rendering dependencies so seeded output is reproducible across machines.
 - [x] Implement episode operations: `reset(prompt, seed)`, `write_code(source)`, `run_code()`, `submit()`, and `refuse(reason)`. Keep the training adapter separate from the environment core.
 - [x] Return bounded execution feedback: syntax/runtime errors, exit status, elapsed time, output dimensions, and artifact identifiers. Keep hidden grading criteria and evaluator answers outside policy observations.
-- [ ] Run generated code in an isolated worker with no network, credentials, host mounts, or access to the grader. Use a read-only runtime, an ephemeral writable directory, and CPU, memory, process, file-size, and wall-clock limits. Import/AST checks are additional validation, not the isolation boundary.
+- [x] Isolate Mini SWE evaluation and Cookbook RL rollouts in per-sample Docker containers with no outbound network or host mounts, CPU/memory limits, command timeouts, and a separate fresh final render.
+- [ ] Extend isolation to dataset generation and the standalone renderer; harden Docker with a read-only runtime and explicit process/file-size limits. Import/AST checks are additional validation, not the isolation boundary.
 - [ ] Restrict the drawing program to the documented API and approved utilities. Prevent external image downloads, arbitrary file access, and loading pre-rendered images as a substitute for drawing.
-- [x] Give each episode a bounded token and tool-call budget; start with at most three render attempts. Define explicit outcomes for submission, refusal, invalid calls, timeouts, and budget exhaustion.
+- [x] Bound episode execution and model interaction. The independent episode core permits three previews; Mini SWE/Cookbook use their configured turn, token, and command limits. Define outcomes for submission, refusal, invalid calls, timeouts, and budget exhaustion.
 - [x] Re-run submitted code in a fresh worker with the same seed. Score that render so stale previews or modified artifacts cannot earn credit.
 - [x] Store the full observable trajectory, source, images, errors, seed, and runtime version. Ensure reset removes all state between episodes.
-- [ ] Verify isolation, cleanup, deterministic examples, infinite-loop termination, oversized output handling, and recovery from worker crashes.
+- [x] Add local regression tests for cleanup, seeded rendering, timeouts, oversized output, fresh final rendering, and recovery after execution/startup failures.
+- [ ] Complete live Docker isolation/adversarial checks and worker-crash recovery validation across evaluation and RL.
 
-**Current scope:** Mini SWE drawing/evaluation runs in per-sample Docker containers
+**Current scope:** Mini SWE drawing/evaluation and Cookbook RL run in per-sample Docker containers
 with no outbound network or host mounts. Dataset generation and the standalone
 renderer continue to execute locally; API/file-access restrictions remain deferred.
-Python packages are pinned; host Cairo/fonts remain
+Python packages are pinned; host Cairo/fonts and Docker base/apt packages remain
 unpinned. Local tests cover cleanup, reproducibility, timeouts, oversized PNGs,
-and recovery after execution/startup failures. The independent episode core is
-available for future data/training adapters. Mini SWE replaces Pi's model loop;
+and recovery after execution/startup failures. The independent episode core supports
+local dataset generation; evaluation and RL use separate adapters sharing the
+drawing/tool contract. Mini SWE replaces Pi's model loop;
 Inspect logs retain its transcript, without Pi SQLite session resume.
 
-**Done when:** the same episode runner supports teacher data generation, model rollouts, and evaluation, and reliably contains failing programs.
+**Done when:** teacher data generation, model rollouts, and evaluation share a verified drawing contract and isolated execution that reliably contains failing programs.
 
 ## 3. Generate prompt–code pairs and repair trajectories
 
@@ -47,34 +61,46 @@ Inspect logs retain its transcript, without Pi SQLite session resume.
 - [x] Create a curriculum from simple primitives to multi-object scenes and procedural art. Include varied wording and combinations, not just many paraphrases of one template.
 - [x] Have a stronger teacher generate several candidate programs per prompt using the exact API documentation and runtime constraints.
 - [x] Execute candidates in the local environment (sandbox deferred per current scope); use bounded repair attempts for syntax, API, and rendering failures. Keep successful edit–run–repair trajectories for tool-use SFT.
-- [ ] Check the rendered image against the prompt with deterministic checks where reliable and a vision evaluator for semantic requirements. Do not accept a pair merely because its code runs.
+- [x] Gate drawing acceptance on successful fresh rendering and separate correctness/image-safety judgments when configured. Correctness must reach the configured threshold (default 0.85); executable output without judges stays pending review.
+- [ ] Add trusted task-specific pixel/geometry checks where reliable and calibrate semantic acceptance against human labels.
 - [ ] Apply the content policy to prompts and every rendered candidate. Exclude harmful outputs from positive SFT targets; include correct refusal examples and benign lookalikes to reduce over-refusal.
 - [x] Save a dataset record containing `id`, `prompt`, code or refusal, trajectory, artifact references, seed, API/runtime versions, teacher provenance, evaluator versions/holistic scores, and safety labels.
-- [ ] Deduplicate prompts, related templates, code, and near-identical renders. Keep related task variants grouped for diversity audits; export one combined accepted dataset.
+- [x] Reject exact source/pixel duplicates, filter lexical prompt duplicates, export a combined accepted dataset, and document the historical duplication audit in `docs/dataset-duplication-audit.md`. Automatic train/validation/test splitting has been removed.
+- [ ] Fix the documented family/difficulty/skill scheduling correlations; add semantic task grouping and perceptual near-duplicate review across datasets and evaluation prompts.
 - [ ] Audit a stratified human-reviewed sample for correctness, diversity, safety, and evaluator agreement. Version accepted data and rejection reasons.
-- [ ] Produce a pilot of roughly 1,000 accepted examples, measure acceptance rate and cost per example, then choose the scale-up target from learning curves and budget.
+- [x] Run a 1,000-prompt generation pilot: 853 accepted records, 67 rejected, and 80 infrastructure errors; record acceptance rate (85.3%) and token/request accounting. Add 50 malicious-code refusal pairs for the 903-record SFT release.
+- [ ] Convert usage accounting into cost per accepted example and choose further data scale from learning curves, diversity audits, and budget.
 
 **Done when:** a reproducible command produces a versioned, audited dataset of executable prompt–code pairs, repair trajectories, and refusal examples.
 
-**Current implementation:** `.venv/bin/python -m drawing.generate_dataset` generates seeded prompt plans, runs a
-configurable teacher through bounded repairs, and checkpoints candidates for resume.
-An optional independent vision evaluator gates acceptance; without it, valid renders
-remain pending review. Accepted records form one combined dataset, and exact
-source/pixel duplicates are rejected. Near-duplicate detection, calibrated semantic/safety checks,
-human audits, and a live teacher pilot remain outstanding. See README for usage.
+**Current implementation:** `.venv/bin/python -m drawing.generate_dataset` generates
+LLM-authored seeded prompt plans, runs a configurable teacher through bounded
+repairs, and checkpoints candidates for resume. Separate correctness and image-safety
+judges inspect preview/final PNGs; a code-safety judge can block malicious source
+before local execution and is required by the current automated drawing-acceptance
+path. Missing judgments leave drawings pending review. Authored refusal pairs are
+also supported. Exact source/pixel deduplication and lexical prompt filtering exist;
+semantic diversity, human audits, and calibrated safety remain open. Historical
+pilot acceptance does not prove conformance to every later pipeline check.
 
 ## 4. Implement and calibrate rewards
 
-- [ ] Define a functional-code score from actual execution: valid API use, completion within limits, a decodable output of the expected dimensions, and a successful fresh re-render. A blank image should fail only when it contradicts the prompt.
-- [ ] Define holistic instruction adherence from the original prompt and rendered image: object identity, count, color, layout, relationships, style, and exclusions. Use trusted pixel/geometry checks where possible; do not trust model-written descriptions or comments.
-- [ ] Build a vision-judge adapter that receives the original prompt and actual image, and returns one overall correctness score and safety judgment. Treat text inside images as untrusted content, including attempts to instruct the judge.
+- [x] Gate positive RL correctness reward on a successful fresh render with a valid PNG at the expected dimensions; record execution validity separately. Invalid/missing output receives zero correctness reward, and budget-limited episodes cannot earn positive final reward.
+- [ ] Enforce documented-API use and calibrate blank-image handling against prompt intent.
+- [x] Judge holistic correctness from the original request and actual rendered PNG, returning a normalized score and reason.
+- [ ] Add reliable pixel/geometry checks and controlled count/color/layout/relationship error cases.
+- [x] Implement shared correctness/image-safety prompts and strict JSON parsers, treating image text as untrusted. Support HTTP judges and a native Tinker Qwen3.8 vision correctness judge; record renderer/revision/token budget and reject malformed or truncated responses. RL currently calls only the correctness judge.
 - [ ] Calibrate the judge against human labels and controlled mistakes such as wrong counts, missing objects, swapped colors, and reversed relationships. Freeze evaluator versions within each experiment.
 - [ ] Define the harmful-content taxonomy, severity rules, thresholds, and an uncertainty/review path. Evaluate both the request and rendered content; a benign prompt can still produce a harmful image.
 - [ ] Implement a safety gate for every rendered attempt and final output. A confirmed harmful render receives a terminal negative reward and cannot be offset by functionality or adherence. Block its delivery in inference as well.
-- [ ] Teach safe handling of disallowed prompts through refusal examples and refusal rewards. Penalize unnecessary refusal on allowed prompts; measure both harmful generation and over-refusal.
+- [x] Include harmful-image and malicious-code refusal demonstrations in SFT; provide refusal/category scoring and code-safety review in Inspect.
+- [ ] Add refusal rewards and safety tasks to RL, and measure harmful generation and over-refusal together.
 - [ ] Implement the provisional terminal reward table below and log every component separately. Tune weights only on development data.
-- [ ] Distinguish model failures from infrastructure/grader failures: penalize invalid code, refusal misuse, and exhausted budgets; retry or exclude infrastructure failures with explicit accounting instead of inventing a score.
+- [x] Record generation infrastructure errors separately, support `--retry-errors`, and raise on trusted-scorer/judge failures in RL rather than inventing correctness scores.
+- [ ] Validate retry/exclusion and spend accounting end to end for live training infrastructure failures.
 - [ ] Test reward exploits: constant blank images, copying prompt text onto the canvas, judge-instruction text, stale artifacts, repeated tool calls, and attempts to access grading files. Keep reward state outside the worker.
+
+**Future safety-aware reward proposal (not the current correctness-only RL objective):**
 
 | Episode outcome | Proposed reward |
 | --- | --- |
@@ -88,56 +114,62 @@ human audits, and a live teacher pilot remain outstanding. See README for usage.
 
 **Done when:** controlled failures receive the expected scores and sampled reward rankings agree adequately with human judgments under a documented acceptance criterion.
 
-## 5. Run the SFT warm-up
+## 5. Run and evaluate SFT
 
-- [x] Implement the first-run dataset recipe: retain 80 pilot one-shot drawings and all four natural execution repairs, then generate sixteen harder natural execution/visual repair trajectories sampled from a bounded pool, with actual PNG observations with recorded errors and successful fresh submissions. Preserve original review/split provenance and the three explicit duplicate exceptions; export the 100-row selection only when the 80/20 target is complete. See `make dataset-warmup`.
-- [ ] Review the 100 selected final images and freeze this first SFT dataset revision. Use the selected hosted Qwen3.5 vision model with multimodal observations. New repairs must arise naturally from harder tasks; execute model code verbatim, inspect the actual PNG during generation, and exclude the archived synthetic experiment; failed assistant actions are context-only loss-masked prefixes. Create a new held-out evaluation set because this selection consumes former pilot validation/test examples.
-- [ ] Evaluate the untouched base model on a frozen development benchmark before training.
-- [ ] Validate the Tinker Qwen3.5 SFT adapter against production prompts, tool schemas, actual preview PNG observations, code submissions, and refusal format.
-- [ ] Train on both direct prompt–code examples and successful repair trajectories so the model learns how to operate the environment before RL.
-- [ ] Mask user prompts, image/input tokens, tool outputs, and failed assistant actions from the loss; train on successful assistant responses and tool calls. Verify that packing and truncation preserve complete examples and tool-call boundaries.
-- [ ] Start with a short, conservative hosted LoRA SFT pilot on Qwen/Qwen3.5-4B using Tinker. Validate a representative batch before the run; save remote optimizer/sampler checkpoints, model and renderer configuration, and dataset revision with reproducible resume metadata.
-- [ ] Compare checkpoints by render success, adherence, repair success, harmful-output rate, and benign refusal rate. Select on development results rather than training loss alone.
-- [ ] Require a useful execution baseline before RL; a provisional gate is at least 90% valid renders on simple held-out development tasks, with separately specified adherence and safety criteria.
+- [x] Replace the historical 100-row 80/20 warm-up selection with the combined dataset workflow. There is no `make dataset-warmup` target. The recorded SFT release has 903 trajectories: 753 drawings and 150 refusal pairs.
+- [x] Convert recorded code, execution feedback, and actual preview PNGs into separate bash write → preview → submit demonstrations using the native Qwen3.5 tool format. Refusals write only `refusal.json`. Wrappers are synthesized; these are converted demonstrations, not collected Mini SWE transcripts.
+- [x] Train all converted assistant actions, including unsuccessful executed attempts in successful trajectories. Mask instructions, user/tool messages, image context, and assistant headers; omit malformed teacher replies that were never executed. The current policy is `assistant-only`, conversion v9.
+- [x] Validate artifact hashes and complete trajectory lengths before hosted training; never pack or truncate examples. Support offline `--dry-run` export and `--check-batch` tokenization/preflight.
+- [x] Complete hosted LoRA SFT on Qwen/Qwen3.5-4B: 903 trajectories, batch size 32, rank 32, learning rate 2e-4, 29 optimizer steps. Save remote optimizer/sampler paths and dataset/model/configuration provenance in `checkpoints/sft-v1/`.
+- [x] Implement deterministic batch order, checkpoint compatibility checks, optimizer resume, and constant/cosine learning-rate schedules.
+- [ ] Complete a stratified human correctness/diversity/safety audit of the final dataset. The training manifest reports zero unreviewed records; that is not evidence of independent human review.
+- [ ] Establish semantic separation of held-out tasks from all SFT data; former pilot split labels no longer define holdouts.
+- [ ] Compare base and SFT checkpoints on render validity, adherence, repair success, harmful-output rate, benign refusal rate, latency, and cost.
+- [ ] Document whether SFT meets the provisional 90% valid-render gate on simple held-out tasks and separate adherence/safety criteria. RL has already run; this gate still needs a reported measurement.
 
-**Done when:** the model can reliably call tools and produce valid drawings, and its measured strengths and failures are documented.
+**Done when:** the trained model's held-out strengths and failures are documented, beyond training loss and successful checkpoint export.
 
-## 6. Add RL training in the mini environment
+## 6. Run and evaluate RL in the mini environment
 
-- [ ] Integrate a group-based RL trainer, initially GRPO, with one isolated environment per rollout. Initialize from the selected SFT checkpoint.
-- [ ] First validate an end-to-end batch: sample programs, execute, grade, compute advantages, update the policy, and save/resume a checkpoint.
-- [ ] Begin with one render per rollout, then enable bounded edit–run–submit episodes once the basic reward pipeline is reliable.
-- [ ] Sample multiple independent trajectories per prompt; choose group size and batch size from memory/throughput measurements. Track groups with no reward variation and improve the curriculum when learning stalls.
-- [ ] Apply training loss only to policy-generated tokens, excluding tool feedback. Verify correct sequence boundaries, completion masks, and rollout log probabilities for multi-turn trajectories.
-- [ ] Configure a conservative learning rate, KL control against a frozen reference policy, completion limits, and checkpoint intervals. Monitor divergence and loss of SFT capabilities.
-- [ ] Mix easy, compositional, repair, and safety tasks. Balance refusal tasks so always refusing cannot become a successful strategy.
-- [ ] Keep terminal rewards primary; if adding intermediate repair rewards, cap them and prevent repeated failures or renders from accumulating credit.
-- [ ] Log component rewards, execution/adherence/safety metrics, refusal rate, scoring coverage, truncation, KL, reward variance, render latency, judge cost, and GPU usage.
-- [ ] Cache identical evaluations by prompt, code, seed, and runtime/judge versions; support resumable jobs, worker retries, and strict spend limits.
-- [ ] Run controlled comparisons: base vs. SFT vs. SFT+RL, single attempt vs. repair, and different adherence evaluators. Keep evaluation token/tool budgets comparable.
+- [x] Integrate Tinker Cookbook `EnvFromMessageEnv`, grouped environment/dataset builders, and `rl.train.main`, initialized from the selected SFT state. Cookbook owns token-level PPO updates, grouped advantages, and reference-KL reward shaping; the earlier custom GRPO objective is superseded.
+- [x] Support bounded multi-turn bash write → run → fix → submit rollouts with actual PNG observations, one network-isolated Docker workspace per trajectory, and a separate fresh Docker final render. Inspect remains the independent evaluation harness.
+- [x] Freeze 200 benign training prompts in `datasets/grpo-v1/` with difficulty/skill coverage, provenance, and cross-source lexical overlap checks. These are training prompts, not a held-out benchmark.
+- [x] Complete the recorded `grpo-qwen38-v1` run: 100 steps, two prompt groups per batch, four trajectories per group, learning rate 1e-5, PPO clipping ±0.2, and reference-KL coefficient 0.01. Use the independent native Tinker Qwen/Qwen3.8-27B judge and save final optimizer/sampler paths.
+- [x] Delegate policy-token loss/log-probability handling to Cookbook; support per-prompt reward centering, optional variance normalization, and removal of constant-reward groups.
+- [x] Keep terminal final-image correctness primary; zero positive reward on budget-limit termination. No intermediate render reward is accumulated.
+- [x] Save Cookbook metrics/checkpoints, grouped rollout logs, and per-episode source/final PNG/correctness scores. Validate dataset/source/configuration compatibility on resume and support `--finalize-only` checkpoint-export recovery.
+- [ ] Validate live optimizer-resume equivalence and failure recovery; existing configuration/export tests do not establish a successful interrupted-run recovery.
+- [ ] Measure reward variance, throughput, judge cost, and loss of SFT capabilities; use them to tune group sizes, curriculum, and concurrency.
+- [ ] Add safety/refusal tasks and safety-aware rewards. Current RL excludes refusal prompts and optimizes final-image correctness only.
+- [ ] Complete component/safety/refusal/cost reporting, evaluation caching keyed by prompt/code/seed/runtime/judge version, worker retries, and strict spend limits.
+- [ ] Run controlled base vs. SFT vs. SFT+RL, single-attempt vs. repair, and evaluator comparisons with equal token/tool budgets. Confirm held-out improvement without unacceptable validity, safety, or benign-refusal regressions.
 
-**Done when:** a repeatable RL pilot improves held-out instruction adherence over SFT without an unacceptable regression in code validity, safety, or benign refusal rate.
+**Done when:** a repeatable RL run shows measured held-out improvements over SFT under documented validity and safety criteria. A completed 100-step run alone does not satisfy this gate.
 
 ## 7. Evaluate and package the environment
 
 - [ ] Freeze a test set covering unseen combinations, precise counts and relationships, negative constraints, long prompts, procedural patterns, and repair tasks. Keep it separate from reward tuning.
-- [ ] Build a safety evaluation set with disallowed requests, indirect requests, and allowed neighboring cases. Use controlled access for any sensitive evaluation artifacts.
-- [ ] Report first-attempt success and bounded-repair success separately, plus per-category adherence, code validity, reproducibility, harmful-output rate, benign refusal rate, latency, and cost. Include sample counts and uncertainty.
+- [x] Add harmful-image refusal cases and `evaluation/malicious-code-10.jsonl`, combined with drawing tasks in `evaluation/generated-110.jsonl`.
+- [ ] Audit safety-evaluation coverage, add indirect requests and allowed neighboring cases, and document semantic separation from training data. Use controlled access for sensitive artifacts.
+- [x] Implement Inspect summaries for render validity, execution-repair behavior, authored difficulty, refusal categories, code-safety judgments, usage, and incomplete/error accounting.
+- [ ] Publish comparable first-attempt/bounded-repair and per-category adherence/validity/safety/refusal/latency/cost results with sample counts and uncertainty; distinguish execution recovery from visual correction.
 - [ ] Use an independent evaluator and blinded human review on a subset to check whether reward gains represent better drawings rather than exploitation of the training judge.
-- [ ] Create a lightweight comparison gallery with prompt, code, rendered image, holistic judge score, and trajectory for base/SFT/RL checkpoints.
-- [ ] Provide CLI entry points for generating data, validating data, running SFT, running RL, evaluating a checkpoint, and drawing from a prompt.
+- [x] Provide a local generation UI with checkpoint discovery, saved-run reopening, PNG/source downloads, and Inspect trajectory/preview inspection.
+- [ ] Build a side-by-side base/SFT/RL comparison gallery with prompts and independent judge scores.
+- [x] Provide Python CLI entry points for dataset generation, SFT validation/training, Cookbook RL, evaluation, and drawing; document setup and Makefile shortcuts.
 - [ ] Package model adapters, drawing API documentation, versioned environment configuration, dataset provenance, experiment reports, and setup instructions.
 - [ ] Keep the sandbox and content checks active in the inference path; release code and the image only after final validation.
 
 **Done when:** a fresh setup can reproduce the data pilot, SFT run, RL pilot, and evaluation report from documented commands and pinned configurations.
 
-## First milestone
+## Next milestone
 
-- [ ] Complete one vertical slice: 20 varied prompts → teacher programs → isolated renders → functional/adherence/safety scores → dataset records → a short SFT smoke run → one RL update → a base/SFT/RL comparison report.
-- [ ] Use that slice to measure GPU needs, render throughput, evaluator reliability, and cost before generating the full dataset or launching long training jobs.
+- [x] Complete data generation → SFT → isolated correctness-scored RL → saved checkpoint export. The recorded runs exceed the original one-update smoke target.
+- [ ] Finish the vertical slice with a frozen, semantically separated base/SFT/RL evaluation and comparison report, including independent/human review and safety/refusal outcomes.
+- [ ] Summarize measured throughput, judge reliability, and actual hosted generation/training/evaluation cost before choosing the next data or training scale.
 
 ## Implementation references
 
 - [Original Artsy post and `ArtCanvas` example](https://blog.rashik.sh/tech/can-ai-learn-to-draw/) — motivation and drawing API direction.
 - [Tinker SFT tutorial](https://tinker-docs.thinkingmachines.ai/tutorials/basics/first-sft/) and [rendering](https://tinker-docs.thinkingmachines.ai/tutorials/core-concepts/rendering/) — hosted LoRA training and multimodal loss masking.
-- [Tinker Cookbook](https://tinker-docs.thinkingmachines.ai/cookbook/) — candidate group-based RL and environment integration. Confirm capabilities against the pinned version during implementation.
+- [Tinker Cookbook](https://tinker-docs.thinkingmachines.ai/cookbook/) — current grouped-rollout PPO trainer and environment integration; dependencies are pinned in the training requirements.
