@@ -107,7 +107,9 @@ class ArtsyEnv(Env):
         else:
             # Preserve the wire-format tool calls as context on the next turn.
             self.messages.append({"role": "assistant", "content": "",
-                                  "tool_calls": calls})
+                                  "tool_calls": [{**c, "function": {**c["function"],
+                                      "arguments": json.loads(c["function"]["arguments"])}}
+                                      for c in calls]})
             for call in calls:
                 command = json.loads(call["function"]["arguments"])["command"]
                 self.commands.append(command)
