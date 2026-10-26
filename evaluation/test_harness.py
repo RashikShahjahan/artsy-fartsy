@@ -122,11 +122,11 @@ class EvaluationTest(unittest.TestCase):
             sbox.exec.assert_not_awaited()
 
     def test_dataset_is_fresh_valid_and_does_not_reuse_warmup_prompts(self):
-        specs = load_specs(ROOT / "evaluation/prompts.jsonl")
-        self.assertEqual(len(specs), 20)
+        specs = load_specs(ROOT / "evaluation/generated-110.jsonl")
+        self.assertEqual(len(specs), 110)
         self.assertEqual({level: sum(row.get("difficulty") == level for row in specs)
                           for level in ("easy", "medium", "hard", "very-hard")},
-                         {"easy": 5, "medium": 5, "hard": 5, "very-hard": 5})
+                         {"easy": 28, "medium": 28, "hard": 27, "very-hard": 27})
         self.assertTrue(all("requirements" not in row for row in specs))
         training = ROOT / "datasets/sft-warmup-100/accepted.jsonl"
         if training.exists():
@@ -138,7 +138,7 @@ class EvaluationTest(unittest.TestCase):
         self.assertEqual(task.config.max_tokens, 4096)
 
     def test_dataset_rejects_duplicate_prompts_and_invalid_inputs(self):
-        original = load_specs(ROOT / "evaluation/prompts.jsonl")[0]
+        original = load_specs(ROOT / "evaluation/generated-110.jsonl")[0]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "data.jsonl"
             path.write_text(json.dumps({**original, "split": "train"}))

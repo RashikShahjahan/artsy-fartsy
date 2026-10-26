@@ -62,7 +62,7 @@ automatic drawing acceptance requires it in addition to both vision judges.
 
 ```mermaid
 flowchart TD
-    A[evaluation/prompts.jsonl or custom dataset] --> B[Validate specs<br/>select limit and epochs]
+    A[evaluation/generated-110.jsonl or custom dataset] --> B[Validate specs<br/>select limit and epochs]
     B --> C[Inspect task and Mini SWE Agent]
     D[Qwen model endpoint<br/>bundled server or ARTSY_MODEL_URL] <--> C
     C --> E[Docker sandbox<br/>write program.py, preview, repair]

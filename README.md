@@ -169,10 +169,10 @@ cross-platform pixel identity is not guaranteed.
 
 The drawing CLI and evaluation use the same Inspect SWE Mini SWE harness, model
 endpoint, API documentation, limits, and fresh final-render scorer.
-The checked-in `evaluation/prompts.jsonl` contains twenty test specifications,
-with five each at easy, medium, hard, and very-hard difficulty, covering landscapes,
-flowers, grids, houses, and interlinked rings. Keep these out of SFT data; the old pilot splits were
-partly consumed by warmup selection. This small suite is a smoke baseline, not a
+The checked-in `evaluation/generated-110.jsonl` is the full evaluation suite: 110
+specifications with 90 drawing requests and 20 refusal requests, split across the
+easy, medium, hard, and very-hard difficulty levels. Keep these out of SFT data;
+the old pilot splits were partly consumed by warmup selection. This suite is not a
 calibrated benchmark or a claim of template-family separation from training.
 
 ```sh
@@ -192,7 +192,14 @@ export ARTSY_SAFETY_JUDGE_URL=http://127.0.0.1:9002/v1
 
 # Run all checks; repeat with --epochs 3 to measure variability:
 .eval-venv/bin/python -m evaluation.evaluate --output eval-results/base
+
+# Rebuild summary metrics from saved artifacts without rerunning model requests:
+.eval-venv/bin/python -m evaluation.evaluate --report-only --output eval-results/base
 ```
+
+Reports separate drawing render rates from refusal success rates. Use
+`by_kind.drawing.render_rate` and `by_kind.refusal.refusal_success_rate` for
+those comparisons; raw Inspect aggregate scores include both prompt kinds.
 
 Set `ARTSY_MODEL_URL` and optionally `ARTSY_MODEL_API_KEY` to select a different
 chat-completions endpoint. The drawing and evaluation CLIs load settings from the
@@ -637,7 +644,7 @@ can be increased for constant-rate runs. `final.json` records both the training 
 weights path. Use Tinker's sampling client or
 [adapter export workflow](https://tinker-docs.thinkingmachines.ai/cookbook/deployment/lora-adapter/)
 for inference. No local full-model `final/` directory is produced.
-Use the fresh `evaluation/prompts.jsonl` for behavioral evaluation with sufficient
+Use `evaluation/generated-110.jsonl` for full behavioral evaluation with sufficient
 generation limits in both the serving endpoint and harness.
 
 ## RL training with Tinker Cookbook
@@ -718,6 +725,20 @@ On completion, Artsy writes a compatible `final.json` containing remote
 state/sampler paths for the UI and model catalog. Cookbook resumes from its
 last committed optimizer checkpoint; the wrapper validates the dataset,
 source hashes, initial SFT state, and hyperparameters before resuming.
+
+To extend a completed run while retaining its optimizer state and original SFT
+KL reference, use a new output directory and an explicit update budget:
+
+```sh
+.venv/bin/python -m training.grpo \
+  --continue-from checkpoints/grpo-qwen38-v1 --additional-steps 25 \
+  --output-dir checkpoints/grpo-qwen38-v1-step125 --dry-run
+```
+
+Remove `--dry-run` to train; repeat the same command after interruption.
+Training and judge settings are inherited from the completed run. See
+[continuation and checkpoint selection](docs/grpo-continuation.md) for the
+resume semantics and a proposed development-evaluation stopping policy.
 
 All commands run directly as Python modules; no Node.js or compilation step is required.
 The Makefile provides `serve`, `draw`, `render`, `dataset`, and

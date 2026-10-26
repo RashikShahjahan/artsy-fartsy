@@ -17,6 +17,7 @@ import math
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
 from drawing.eval_specs import load_specs
@@ -79,6 +80,81 @@ def load_run(args):
     if args.max_steps != -1:
         total = min(total, args.max_steps)
     return specs, config, total
+
+
+# The original wrapper predates continuation. Accept only this known migration;
+# subsequent runs must match all current source and dependency hashes.
+LEGACY_GRPO_SHA256 = "e33e57a06e9e20f4f69d3f61cafbe7bad45f4347c0c073bd44c892da79a1e1d0"
+INHERITED_PARAMETERS = (
+    "batch_size", "group_size", "learning_rate", "clip_epsilon", "kl_coef",
+    "normalize_rewards", "temperature", "max_tokens", "max_length",
+    "max_samples", "seed",
+)
+
+
+def load_continuation(args):
+    """Plan a bounded fork, retaining global batch indices and optimizer state."""
+    origin = args.continue_from.resolve()
+    if args.output_dir.resolve() == origin or origin in args.output_dir.resolve().parents:
+        raise ValueError("Continuation requires a new output directory")
+    manifest_bytes = (origin / "training-manifest.json").read_bytes()
+    saved = json.loads(manifest_bytes)
+    previous = saved["config"]
+    final = json.loads((origin / "final.json").read_text())
+    records = [json.loads(line) for line in (origin / "checkpoints.jsonl").read_text().splitlines()
+               if line.strip()]
+    record = records[-1] if records else {}
+    start = final["step"]
+    if (previous.get("algorithm") != ALGORITHM or final.get("config") != previous
+            or type(start) is not int or start < 1 or start != saved["total_steps"]
+            or record.get("name") != "final" or record.get("batch") != start
+            or any(record.get(k) != final.get(k) or not isinstance(final.get(k), str)
+                   or not final[k].startswith("tinker://")
+                   for k in ("state_path", "sampler_path"))):
+        raise ValueError("Continuation source must be a completed compatible Cookbook run")
+    current_hashes = {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES}
+    old_hashes = previous["source_sha256"]
+    if set(old_hashes) != set(current_hashes) or any(
+            old_hashes[p] != h for p, h in current_hashes.items()
+            if not (p == "training/grpo.py" and old_hashes[p] == LEGACY_GRPO_SHA256)):
+        raise ValueError("Continuation source runtime or training dependencies changed")
+    if (previous["model"] != MODEL_ID or previous["tokenizer_revision"] != MODEL_REVISION
+            or previous["renderer"] != RENDERER or previous["image_size"] != IMAGE_SIZE
+            or digest(args.dataset.read_bytes()) != previous["dataset_sha256"]):
+        raise ValueError("Continuation model or dataset changed")
+    all_specs = load_specs(args.dataset)
+    wanted = previous["prompt_ids"]
+    specs = all_specs[:len(wanted)]
+    if not specs or [s["id"] for s in specs] != wanted:
+        raise ValueError("Continuation prompt selection changed")
+    for key in INHERITED_PARAMETERS:
+        setattr(args, key, previous[key])
+    total = start + args.additional_steps
+    args.epochs = math.ceil(total / math.ceil(len(specs) / args.batch_size))
+    args.max_steps = total
+    config = {**previous, "epochs": args.epochs, "max_steps": total,
+              "source_sha256": current_hashes,
+              "continuation": {"source_dir": str(origin), "source_manifest_sha256": digest(manifest_bytes),
+                               "start_step": start, "additional_steps": args.additional_steps,
+                               "state_path": final["state_path"],
+                               "sampler_path": final["sampler_path"],
+                               "source_sha256": old_hashes}}
+    return specs, config, total
+
+
+def seed_continuation(output_dir, config):
+    """Use Cookbook's resume branch, which loads weights AND optimizer state.
+
+    load_checkpoint_path alone deliberately resets the optimizer in Cookbook.
+    The synthetic checkpoint only points at the immutable source; later records
+    and rollouts belong to this new directory and use cumulative batch indices.
+    """
+    path = output_dir / "checkpoints.jsonl"
+    if "continuation" in config and not path.exists():
+        source = config["continuation"]
+        record = {"name": "continuation", "batch": source["start_step"],
+                  "state_path": source["state_path"], "sampler_path": source["sampler_path"]}
+        path.write_text(json.dumps(record) + "\n")
 
 
 def make_cookbook_config(args, specs, plan, total):
@@ -176,11 +252,13 @@ async def train(args, specs, plan, total):
 
 
 def parser():
-    p = argparse.ArgumentParser(description=__doc__)
+    p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     p.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v1/prompts.jsonl")
     p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v1/final.json")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v1")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
+    p.add_argument("--additional-steps", type=int, help="Positive number of extra updates")
     p.add_argument("--finalize-only", action="store_true",
                    help="Recover final.json from a completed Cookbook run without training")
     p.add_argument("--limit", type=int, help="First N prompts for a pilot")
@@ -206,7 +284,17 @@ def main(argv=None):
     from dotenv import load_dotenv
     load_dotenv(ROOT / ".env")
     p = parser()
-    args = p.parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    args = p.parse_args(arguments)
+    if args.continue_from is not None:
+        forbidden = {"--" + k.replace("_", "-") for k in INHERITED_PARAMETERS}
+        forbidden.update({"--epochs", "--max-steps", "--limit", "--init-checkpoint"})
+        if any(token.split("=", 1)[0] in forbidden for token in arguments):
+            p.error("Continuation inherits training parameters; only dataset, output and save cadence may be set")
+        if args.additional_steps is None or args.additional_steps < 1 or args.finalize_only:
+            p.error("--continue-from requires positive --additional-steps and cannot use --finalize-only")
+    elif args.additional_steps is not None:
+        p.error("--additional-steps requires --continue-from")
     if args.finalize_only:
         if args.dry_run:
             p.error("--finalize-only and --dry-run are mutually exclusive")
@@ -231,12 +319,13 @@ def main(argv=None):
             or not 0 < args.clip_epsilon < 1 or args.kl_coef < 0):
         p.error("Invalid training hyperparameters")
     try:
-        specs, config, total = load_run(args)
-    except (ValueError, OSError, KeyError) as error:
+        specs, config, total = (load_continuation(args) if args.continue_from else load_run(args))
+    except (ValueError, OSError, KeyError, TypeError, AttributeError) as error:
         p.error(str(error))
+    start = config.get("continuation", {}).get("start_step", 0)
     plan = {"config": config, "prompts": len(specs), "total_steps": total,
             "episodes": sum(len(batch) * args.group_size for i, batch in enumerate(
-                batches(specs, args.batch_size, args.epochs, args.seed)) if i < total)}
+                batches(specs, args.batch_size, args.epochs, args.seed)) if start <= i < total)}
     print(json.dumps(plan, indent=2))
     if args.dry_run:
         return 0
@@ -246,13 +335,14 @@ def main(argv=None):
         p.error("RL output must differ from the initial SFT checkpoint directory")
     manifest = args.output_dir / "training-manifest.json"
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
-        if not manifest.is_file() or not (args.output_dir / "checkpoints.jsonl").is_file():
+        if not manifest.is_file() or (not args.continue_from and not (args.output_dir / "checkpoints.jsonl").is_file()):
             p.error("Output is not a resumable Cookbook run; choose a new directory")
         if json.loads(manifest.read_text()) != plan:
             p.error("Training configuration changed; resume with the original settings")
     else:
         args.output_dir.mkdir(parents=True, exist_ok=True)
         manifest.write_text(json.dumps(plan, indent=2) + "\n")
+    seed_continuation(args.output_dir, config)
     _build_sandbox_image()
     asyncio.run(train(args, specs, config, total))
     return 0
