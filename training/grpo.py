@@ -1,51 +1,45 @@
-"""On-policy, correctness-only GRPO for the hosted ArtCanvas drawing policy.
+"""Correctness-only multi-turn RL with Tinker Cookbook.
 
 python -m training.grpo --dry-run
 python -m training.grpo --max-steps 1 --output-dir checkpoints/grpo-pilot
 
-Requires Docker, Tinker authentication, and ARTSY_CORRECTNESS_JUDGE_{MODEL,URL}.
-Rollouts use the host-side evaluation agent and Docker tools; no inference server is required.
+The Cookbook owns rollout sampling, grouped advantages, PPO updates and
+checkpointing. Artsy's Docker tool environment supplies image observations
+and a separately rendered correctness reward. Inspect is used for evaluation.
 """
+
+from __future__ import annotations
 
 import argparse
 import asyncio
-from collections import defaultdict
 import json
 import math
 import os
 from pathlib import Path
-import statistics
-from time import monotonic
-from uuid import uuid4
+import subprocess
 
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
+from drawing.eval_specs import load_specs
 from training.data import ROOT, digest
-from training.sft import RENDERER, batches, create_encoder, save_checkpoint
+from training.sft import RENDERER, batches
 
-ALGORITHM = "correctness-grpo-v1"
-
-
-def advantages(rewards, normalize=False):
-    if len(rewards) < 2 or any(type(r) not in (int, float) or not math.isfinite(r)
-                              or not 0 <= r <= 1 for r in rewards):
-        raise ValueError("A group needs at least two finite correctness rewards in [0, 1]")
-    mean = statistics.mean(rewards)
-    scale = statistics.pstdev(rewards) + 1e-8 if normalize else 1.0
-    return [(reward - mean) / scale for reward in rewards]
-
-
-def write_json(path, value):
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n")
-    temporary.replace(path)
+ALGORITHM = "tinker-cookbook-ppo-v1"
+PROVENANCE_FILES = (
+    "docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
+    "drawing/agent_contract.py", "drawing/eval_specs.py",
+    "runtime/artcanvas.py", "runtime/cairo.py", "runtime/requirements.txt",
+    "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/mini.yaml",
+    "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
+    "evaluation/requirements.txt", "training/cookbook_env.py",
+    "training/cookbook_dataset.py", "training/score_rl.py", "training/grpo.py",
+    "training/sft.py", "training/requirements.txt", "training/requirements-grpo.txt",
+)
 
 
 def load_run(args):
-    from evaluation.harness import load_specs
-
     specs = load_specs(args.dataset)
-    if any(spec.get("kind") == "refusal" for spec in specs):
-        raise ValueError("Correctness-only GRPO requires benign drawing prompts")
+    if any(row.get("kind") == "refusal" for row in specs):
+        raise ValueError("Correctness-only RL requires benign drawing prompts")
     if args.limit:
         specs = specs[:args.limit]
     initial = json.loads(args.init_checkpoint.read_text())
@@ -56,343 +50,121 @@ def load_run(args):
             or source.get("api_doc_sha256") != digest((ROOT / "docs/artcanvas.md").read_bytes())
             or any(not isinstance(initial.get(key), str) or not initial[key].startswith("tinker://")
                    for key in ("state_path", "sampler_path"))):
-        raise ValueError("Initial checkpoint must contain compatible SFT state and sampler paths")
-    files = ["docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
-             "runtime/artcanvas.py", "runtime/cairo.py", "runtime/requirements.txt",
-             "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/render.py", "evaluation/mini.yaml",
-             "evaluation/Dockerfile", "evaluation/compose.yaml", "evaluation/requirements.txt",
-             "evaluation/sample_grpo.py", "inference/tinker_backend.py", "inference/server.py",
-             "training/grpo.py", "training/sft.py", "training/requirements.txt",
-             "training/requirements-grpo.txt"]
-    config = {"algorithm": ALGORITHM, "model": MODEL_ID, "tokenizer_revision": MODEL_REVISION,
-              "renderer": RENDERER, "image_size": IMAGE_SIZE, "lora_rank": source["lora_rank"],
-              "dataset_sha256": digest(args.dataset.read_bytes()), "prompt_ids": [s["id"] for s in specs],
-              "initial_state_path": initial["state_path"], "reference_sampler_path": initial["sampler_path"],
-              "api_doc_sha256": digest((ROOT / "docs/artcanvas.md").read_bytes()),
-              "source_sha256": {name: digest((ROOT / name).read_bytes()) for name in files},
-              "batch_size": args.batch_size, "group_size": args.group_size,
-              "learning_rate": args.learning_rate, "clip_epsilon": args.clip_epsilon,
-              "kl_coef": args.kl_coef, "normalize_rewards": args.normalize_rewards,
-              "temperature": args.temperature, "max_tokens": args.max_tokens,
-              "max_length": args.max_length, "max_samples": args.max_samples, "seed": args.seed,
-              "correctness_judge_model": os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL"),
-              "correctness_judge_url": os.getenv("ARTSY_CORRECTNESS_JUDGE_URL"),
-              "reward": "final-image correctness only", "loss_reduction": "mean of trajectory token means"}
+        raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
+    config = {
+        "algorithm": ALGORITHM, "model": MODEL_ID, "tokenizer_revision": MODEL_REVISION,
+        "renderer": RENDERER, "image_size": IMAGE_SIZE, "lora_rank": source["lora_rank"],
+        "dataset_sha256": digest(args.dataset.read_bytes()),
+        "prompt_ids": [row["id"] for row in specs],
+        "initial_state_path": initial["state_path"],
+        "reference_sampler_path": initial["sampler_path"],
+        "api_doc_sha256": digest((ROOT / "docs/artcanvas.md").read_bytes()),
+        "source_sha256": {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES},
+        "batch_size": args.batch_size, "group_size": args.group_size,
+        "learning_rate": args.learning_rate, "clip_epsilon": args.clip_epsilon,
+        "kl_coef": args.kl_coef, "normalize_rewards": args.normalize_rewards,
+        "temperature": args.temperature, "max_tokens": args.max_tokens,
+        "max_length": args.max_length, "max_samples": args.max_samples,
+        "seed": args.seed, "epochs": args.epochs, "max_steps": args.max_steps,
+        "correctness_judge_model": os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL"),
+        "correctness_judge_url": os.getenv("ARTSY_CORRECTNESS_JUDGE_URL"),
+        "reward": "final-image correctness only",
+        "loss": "Cookbook PPO; optional reference-KL reward penalty",
+    }
     total = math.ceil(len(specs) / args.batch_size) * args.epochs
     if args.max_steps != -1:
         total = min(total, args.max_steps)
     return specs, config, total
 
 
-class ReferenceLogprobs:
-    """Fetch frozen-reference action scores while rollout episodes continue."""
+def make_cookbook_config(args, specs, plan, total):
+    """Build the published Tinker Cookbook trainer configuration."""
+    from tinker_cookbook.rl import train as cookbook
+    from tinker_cookbook.rl.rollout_limits import TerminationRewardPolicy
+    from training.cookbook_dataset import ArtsyDatasetBuilder
 
-    def __init__(self, reference, concurrency):
-        self.reference = reference
-        self.semaphore = asyncio.Semaphore(concurrency)
-        self.tasks = []
-
-    def submit(self, prompt, record, path):
-        self.tasks.append(asyncio.create_task(self._annotate(prompt, record, path)))
-
-    async def _annotate(self, prompt, record, path):
-        import tinker
-        full = tinker.ModelInput(chunks=[*prompt.chunks, tinker.EncodedTextChunk(tokens=record["tokens"])])
-        async with self.semaphore:
-            values = await self.reference.compute_logprobs_async(full)
-        action = values[prompt.length:]
-        if (len(values) != full.length or len(action) != len(record["tokens"])
-                or any(value is None or not math.isfinite(value) for value in action)):
-            raise ValueError("Reference returned invalid action log probabilities")
-        record["reference_logprobs"] = action
-        write_json(path, record)
-
-    @property
-    def completed(self):
-        return sum(task.done() and not task.cancelled() and task.exception() is None for task in self.tasks)
-
-    async def finish(self):
-        await asyncio.gather(*self.tasks)
-
-    async def close(self):
-        for task in self.tasks:
-            task.cancel()
-        await asyncio.gather(*self.tasks, return_exceptions=True)
-
-
-class NativeRollouts:
-    """Sample host-agent requests and retain the exact native sampling evidence."""
-
-    def __init__(self, backend, args, step, directory, reference_prefetch=None):
-        self.backend, self.args, self.step, self.directory = backend, args, step, directory
-        self.turns = defaultdict(list)
-        self.reference_prefetch = reference_prefetch
-
-    async def __call__(self, model, messages, tools, tool_choice, config):
-        import tinker
-        from inspect_ai.model import ChatMessageAssistant, ChatCompletionChoice, ModelOutput, ModelUsage
-        # These adapters are version-bound to evaluation/requirements.txt. They
-        # preserve Inspect's image observations and per-sample epoch context.
-        from inspect_ai.model._openai import messages_to_openai, openai_chat_tools
-        from inspect_ai.solver._task_state import sample_state
-        from inspect_ai.tool import ToolCall
-        from inference.server import parse_tools, template_messages
-
-        state = sample_state()
-        if state is None:
-            raise RuntimeError("Native sampling requires an active Inspect sample")
-        key = (str(state.sample_id), state.epoch)
-        turn = len(self.turns[key])
-        tool_specs = openai_chat_tools(tools)
-        wire = await messages_to_openai(messages)
-        prompt = self.backend.render(template_messages(wire, self.backend.prepare_image), tool_specs)
-        budget = min(self.args.max_tokens, self.args.max_length - prompt.length)
-        if budget < 1:
-            # Abort collection instead of dropping a member from its reward group.
-            raise ValueError("Rollout context exhausted; no room for a sampled action")
-        sampling_seed = int(digest(f"{self.args.seed}:{self.step}:{key}:{turn}".encode())[:8], 16)
-        response = await self.backend.client.sample_async(
-            prompt=prompt, num_samples=1, sampling_params=tinker.SamplingParams(
-                max_tokens=budget, temperature=self.args.temperature, seed=sampling_seed,
-                stop=self.backend.renderer.get_stop_sequences()))
-        sequence = response.sequences[0]
-        tokens, logprobs = sequence.tokens, sequence.logprobs
-        if (not tokens or logprobs is None or len(tokens) != len(logprobs)
-                or any(not math.isfinite(value) for value in logprobs)):
-            raise ValueError("Sampling returned missing or invalid action log probabilities")
-        record = {"prompt": prompt.model_dump(mode="json"), "tokens": tokens,
-                  "logprobs": logprobs, "stop_reason": sequence.stop_reason, "seed": sampling_seed}
-        self.turns[key].append(record)
-        directory = self.directory / "native" / f"{key[0]}-{key[1]}"
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"turn-{turn:03d}.json"
-        write_json(path, record)
-        if self.reference_prefetch is not None:
-            self.reference_prefetch.submit(prompt, record, path)
-        raw = self.backend.tokenizer.decode(tokens, skip_special_tokens=False)
-        try:
-            text, calls = parse_tools(raw, tool_specs)
-        except (ValueError, SyntaxError):
-            text, calls = raw, []
-        output_calls = [ToolCall(id=call["id"], function=call["function"]["name"],
-                                 arguments=json.loads(call["function"]["arguments"])) for call in calls]
-        reason = "max_tokens" if sequence.stop_reason == "length" else "tool_calls" if calls else "stop"
-        return ModelOutput(model=MODEL_ID, choices=[ChatCompletionChoice(
-            message=ChatMessageAssistant(content=text, tool_calls=output_calls or None), stop_reason=reason)],
-            usage=ModelUsage(input_tokens=prompt.length, output_tokens=len(tokens),
-                             total_tokens=prompt.length + len(tokens)))
+    return cookbook.Config(
+        log_path=str(args.output_dir.resolve()),
+        model_name=MODEL_ID,
+        recipe_name="artsy_rl",
+        renderer_name=RENDERER,
+        load_checkpoint_path=plan["initial_state_path"],
+        lora_rank=plan["lora_rank"],
+        dataset_builder=ArtsyDatasetBuilder(
+            specs=tuple(specs), output_dir=str((args.output_dir / "rollouts").resolve()),
+            batch_size=args.batch_size, group_size=args.group_size,
+            epochs=args.epochs, seed=args.seed,
+            max_tokens=args.max_tokens, max_length=args.max_length,
+            normalize_rewards=args.normalize_rewards,
+            judge_model=plan["correctness_judge_model"],
+            judge_url=plan["correctness_judge_url"],
+        ),
+        learning_rate=args.learning_rate,
+        # The Cookbook rollout cap is cumulative; RolloutLimits separately
+        # enforces the per-turn max_tokens and context-size max_length.
+        max_tokens=args.max_length,
+        temperature=args.temperature,
+        loss_fn="ppo",
+        loss_fn_config={"clip_low_threshold": 1 - args.clip_epsilon,
+                        "clip_high_threshold": 1 + args.clip_epsilon},
+        kl_penalty_coef=args.kl_coef,
+        kl_reference_config=(cookbook.KLReferenceConfig(
+            base_model=MODEL_ID, load_checkpoint_path=plan["reference_sampler_path"])
+            if args.kl_coef else None),
+        remove_constant_reward_groups=True,
+        eval_every=0,
+        save_every=args.save_every,
+        max_steps=total,
+        # Terminations from tool/turn/token limits must not earn positive reward.
+        termination=TerminationRewardPolicy(zero_reward_on_limit=True),
+    )
 
 
-async def collect_rollouts(args, specs, sampler, encoder, step, directory, judge, reference=None):
-    from inspect_ai import eval_async
-    from inspect_ai.model import GenerateConfig, get_model
-    from evaluation.harness import drawing_task
-    from evaluation.sample_grpo import score_outputs, summarize_rewards
-    from inference.tinker_backend import TinkerBackend
-
-    # Reuse the serving renderer and image preparation without loading a second
-    # tokenizer or creating a sampler for the base policy.
-    backend = object.__new__(TinkerBackend)
-    backend.client, backend.renderer = sampler, encoder.renderer
-    backend.tokenizer, backend.image_processor = encoder.renderer.tokenizer, encoder.image_processor
-    backend.image_size = IMAGE_SIZE
-    prefetch = ReferenceLogprobs(reference, args.max_samples) if reference is not None else None
-    recorder = NativeRollouts(backend, args, step, directory, prefetch)
-    task = drawing_task(specs, str(directory / "artifacts"), temperature=args.temperature,
-                        max_connections=args.max_samples, generation_filter=recorder)
-    # Every request is handled by the filter. This local placeholder is never
-    # called and does not require a running inference bridge.
-    placeholder = get_model("openai-api/artsy/grpo", base_url="http://127.0.0.1:8080/v1",
-                            api_key="local-no-auth", responses_api=False, stream=False,
-                            config=GenerateConfig(max_retries=0))
+def _build_sandbox_image():
     try:
-        began = monotonic()
-        logs = await eval_async(task, model=placeholder, epochs=args.group_size,
-                                max_samples=args.max_samples, log_dir=str(directory / "logs"))
-        rollout_seconds = monotonic() - began
-        completed_during_rollouts = prefetch.completed if prefetch is not None else 0
-        if (not logs or any(log.status != "success" for log in logs)
-                or any(sample.error is not None for log in logs for sample in (log.samples or []))):
-            raise RuntimeError("Rollout collection failed; no policy update was made")
-        for spec in specs:
-            for epoch in range(1, args.group_size + 1):
-                if (not recorder.turns[(spec["id"], epoch)] or not
-                        (directory / "artifacts" / f"{spec['id']}-{epoch}" / "result.json").is_file()):
-                    raise RuntimeError("Incomplete rollout group; no policy update was made")
-        began = monotonic()
-        groups = await score_outputs(specs, directory, args.group_size, judge, args.max_samples)
-        judge_seconds = monotonic() - began
-        began = monotonic()
-        if prefetch is not None:
-            await prefetch.finish()
-        reference_wait_seconds = monotonic() - began
-    finally:
-        if prefetch is not None:
-            await prefetch.close()
-    for group in groups:
-        for attempt in group["attempts"]:
-            attempt["turns"] = recorder.turns[(group["id"], attempt["epoch"])]
-            # A clipped action is still sampled evidence, but cannot earn a
-            # positive terminal reward just because an earlier file renders.
-            attempt["truncated"] = any(t["stop_reason"] == "length" for t in attempt["turns"])
-            if attempt["truncated"]:
-                attempt["reward"] = 0.0
-        group.update(summarize_rewards([attempt["reward"] for attempt in group["attempts"]]))
-    write_json(directory / "groups.json", groups)
-    write_json(directory / "phase-metrics.json", {
-        "rollout_seconds": rollout_seconds, "judge_seconds": judge_seconds,
-        "reference_wait_seconds": reference_wait_seconds,
-        "reference_requests": len(prefetch.tasks) if prefetch is not None else 0,
-        "reference_completed_during_rollouts": completed_during_rollouts})
-    return groups
+        subprocess.run(
+            ["docker", "build", "--file", "evaluation/Dockerfile",
+             "--tag", "artsy-rl-runtime", "."],
+            cwd=ROOT, check=True, timeout=600)
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError("Cannot build the RL Docker sandbox; start Docker and check its build output") from error
 
 
-def build_training_data(groups, normalize=False):
-    """One datum per sampled action; previous actions and pixels are context only."""
-    import tinker
-    from tinker_cookbook.supervised.common import create_rightshifted_model_input_and_leftshifted_targets
+def artsy_final_checkpoint(record, plan):
+    """Convert Cookbook's named final record into Artsy's model-catalog format.
 
-    data = []
-    trajectories = sum(len(group["attempts"]) for group in groups)
-    for group in groups:
-        centered = advantages([attempt["reward"] for attempt in group["attempts"]], normalize)
-        for attempt, advantage in zip(group["attempts"], centered, strict=True):
-            count = sum(len(turn["tokens"]) for turn in attempt["turns"])
-            if not count:
-                raise ValueError("Rollout has no sampled actions")
-            for turn in attempt["turns"]:
-                prompt = tinker.ModelInput.model_validate(turn["prompt"])
-                tokens, logprobs = turn["tokens"], turn["logprobs"]
-                if (prompt.length < 1 or not tokens or len(tokens) != len(logprobs)
-                        or any(not math.isfinite(value) for value in logprobs)):
-                    raise ValueError("Invalid recorded action or log probabilities")
-                full = tinker.ModelInput(chunks=[*prompt.chunks, tinker.EncodedTextChunk(tokens=tokens)])
-                inputs, targets = create_rightshifted_model_input_and_leftshifted_targets(list(full.chunks))
-                prefix = prompt.length - 1
-                fields = {"target_tokens": (targets, "int64"),
-                          "logprobs": ([0.0] * prefix + logprobs, "float32"),
-                          "advantages": ([0.0] * prefix + [advantage] * len(tokens), "float32"),
-                          "weights": ([0.0] * prefix + [1 / (count * trajectories)] * len(tokens), "float32")}
-                if "reference_logprobs" in turn:
-                    reference = turn["reference_logprobs"]
-                    if (len(reference) != len(tokens)
-                            or any(value is None or not math.isfinite(value) for value in reference)):
-                        raise ValueError("Invalid recorded reference log probabilities")
-                    fields["reference_logprobs"] = ([0.0] * prefix + reference, "float32")
-                data.append(tinker.Datum(model_input=inputs, loss_fn_inputs={
-                    name: tinker.TensorData(data=values, dtype=dtype, shape=[len(targets)])
-                    for name, (values, dtype) in fields.items()}))
-    return data
+    Cookbook v0.5.8 records the final checkpoint with ``name='final'``,
+    while its optional ``final`` field may be None even on a successful run.
+    """
+    if (record is None or record.name != "final"
+            or not record.state_path or not record.sampler_path):
+        raise RuntimeError("Cookbook did not produce a final state and sampler checkpoint")
+    return {"step": record.batch, "state_path": record.state_path,
+            "sampler_path": record.sampler_path, "config": plan}
 
 
-def grpo_loss(clip_epsilon, kl_coef):
-    """Clipped policy objective plus k3 KL, averaged equally over trajectories."""
-    def loss(data, logprobs):
-        import torch
-        total, policy_metric, kl_metric, clipped_metric = None, 0.0, 0.0, 0.0
-        for datum, current in zip(data, logprobs, strict=True):
-            fields = datum.loss_fn_inputs
-            weights = fields["weights"].to_torch().to(current.device)
-            active = weights > 0
-            current = current[active]
-            weights = weights[active]
-            old = fields["logprobs"].to_torch().to(current.device)[active]
-            advantage = fields["advantages"].to_torch().to(current.device)[active]
-            ratio = (current - old).exp()
-            objective = torch.minimum(ratio * advantage,
-                                      ratio.clamp(1 - clip_epsilon, 1 + clip_epsilon) * advantage)
-            policy = -(weights * objective).sum()
-            kl = current.sum() * 0.0
-            if kl_coef:
-                ref = fields["reference_logprobs"].to_torch().to(current.device)[active]
-                delta = ref - current
-                kl = (weights * (delta.exp() - delta - 1)).sum()
-            value = policy + kl_coef * kl
-            if not torch.isfinite(value):
-                raise ValueError("Non-finite GRPO loss; no optimizer step was made")
-            total = value if total is None else total + value
-            policy_metric += float(policy.detach())
-            kl_metric += float(kl.detach())
-            clipped_metric += float((weights * ((ratio - 1).abs() > clip_epsilon)).sum().detach())
-        if total is None:
-            raise ValueError("No GRPO training data")
-        return total, {"policy_loss": policy_metric, "reference_kl": kl_metric,
-                       "clip_fraction": clipped_metric}
-    return loss
+def write_final_checkpoint(output_dir: Path, plan: dict):
+    """Publish the completed Cookbook checkpoint for Artsy's model catalog."""
+    from tinker_cookbook import checkpoint_utils
+
+    record = checkpoint_utils.get_last_checkpoint(str(output_dir))
+    final = artsy_final_checkpoint(record, plan)
+    destination = output_dir / "final.json"
+    if destination.exists() and json.loads(destination.read_text()) != final:
+        raise ValueError("An incompatible final.json already exists in the output directory")
+    destination.write_text(json.dumps(final, indent=2) + "\n")
+    return final
 
 
-def train(args, specs, config, total_steps):
-    import tinker
-    from importlib.metadata import version
-    from drawing.dataset_client import chat_client
+async def train(args, specs, plan, total):
+    from tinker_cookbook.rl import train as cookbook
+    from training.cookbook_env import configure_concurrency
 
-    judge = chat_client({"model": config["correctness_judge_model"],
-                         "baseUrl": config["correctness_judge_url"],
-                         "apiKey": os.getenv("ARTSY_CORRECTNESS_JUDGE_API_KEY"), "timeoutMs": 120000})
-    start = 0
-    checkpoint = None
-    if args.resume_from_checkpoint:
-        checkpoint = json.loads(args.resume_from_checkpoint.read_text())
-        if checkpoint["config"] != config:
-            raise ValueError("Checkpoint dataset/model/training configuration does not match this run")
-        start = checkpoint["step"]
-    if not 0 <= start < total_steps:
-        raise ValueError("No remaining steps; increase --epochs or --max-steps")
-    encoder = create_encoder(MODEL_ID, args.max_length)
-    service = tinker.ServiceClient()
-    client = (service.create_training_client_from_state_with_optimizer(checkpoint["state_path"])
-              if checkpoint else service.create_training_client_from_state(config["initial_state_path"]))
-    reference = (service.create_sampling_client(model_path=config["reference_sampler_path"])
-                 if args.kl_coef else None)
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    write_json(args.output_dir / "training-manifest.json", {
-        "config": config, "total_steps": total_steps,
-        "packages": {name: version(name) for name in ("tinker", "tinker-cookbook", "inspect-ai", "inspect-swe")}})
-    metrics_path = args.output_dir / "metrics.jsonl"
-    # Rows after the chosen checkpoint are uncommitted when resuming an
-    # interrupted run. Preserve rollout artifacts, but discard stale metrics.
-    if metrics_path.exists():
-        rows = [json.loads(line) for line in metrics_path.read_text().splitlines() if line.strip()]
-        metrics_path.write_text("".join(json.dumps(row) + "\n" for row in rows if row["step"] <= start))
-    with metrics_path.open("a") as metrics:
-        for step, batch in enumerate(batches(specs, args.batch_size, args.epochs, args.seed), 1):
-            if step <= start:
-                continue
-            if step > total_steps:
-                break
-            began = monotonic()
-            sampler = client.save_weights_and_get_sampling_client()
-            directory = args.output_dir / "rollouts" / f"step-{step:06d}" / uuid4().hex
-            directory.mkdir(parents=True)
-            groups = asyncio.run(collect_rollouts(args, batch, sampler, encoder, step, directory, judge, reference))
-            data = build_training_data(groups, args.normalize_rewards)
-            signal = sum(len(set(a["reward"] for a in g["attempts"])) > 1 for g in groups)
-            result_metrics = {}
-            # No relative signal means no update, including no KL-only drift.
-            if signal:
-                result = client.forward_backward_custom(data, grpo_loss(args.clip_epsilon, args.kl_coef)).result()
-                client.optim_step(tinker.AdamParams(learning_rate=args.learning_rate)).result()
-                result_metrics = result.metrics
-            rewards = [a["reward"] for g in groups for a in g["attempts"]]
-            phase_path = directory / "phase-metrics.json"
-            phase_metrics = json.loads(phase_path.read_text()) if phase_path.exists() else {}
-            row = {**result_metrics, **phase_metrics, "step": step, "optimizer_updated": bool(signal),
-                   "prompts": len(batch), "episodes": len(rewards), "reward_mean": statistics.mean(rewards),
-                   "valid_renders": sum(a.get("render_valid", False) for g in groups for a in g["attempts"]),
-                   "groups_with_learning_signal": signal,
-                   "reward_std_mean": statistics.mean(statistics.pstdev([a["reward"] for a in g["attempts"]])
-                                                      for g in groups),
-                   "truncated": sum(a.get("truncated", False) for g in groups for a in g["attempts"]),
-                   "sampled_tokens": sum(len(t["tokens"]) for g in groups for a in g["attempts"] for t in a["turns"]),
-                   "learning_rate": args.learning_rate, "seconds": monotonic() - began,
-                   "rollouts": str(directory.resolve())}
-            metrics.write(json.dumps(row) + "\n")
-            metrics.flush()
-            print(json.dumps(row), flush=True)
-            if step % args.save_every == 0 or step == total_steps:
-                checkpoint = save_checkpoint(client, args.output_dir, step, config)
-    final = {**checkpoint, "sampler_path": client.save_weights_for_sampler("final").result().path}
-    write_json(args.output_dir / "final.json", final)
+    configure_concurrency(args.max_samples)
+    config = make_cookbook_config(args, specs, plan, total)
+    await cookbook.main(config)
+    # Retain Artsy's model-catalog format for make serve, evaluation and the UI.
+    final = write_final_checkpoint(args.output_dir, plan)
     print(json.dumps(final, indent=2))
 
 
@@ -401,21 +173,23 @@ def parser():
     p.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v1/prompts.jsonl")
     p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v1/final.json")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v1")
-    p.add_argument("--resume-from-checkpoint", type=Path)
-    p.add_argument("--dry-run", action="store_true", help="Validate inputs and print plan without API calls or Docker")
-    p.add_argument("--limit", type=int, help="Use the first N dataset prompts for a smoke run")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--finalize-only", action="store_true",
+                   help="Recover final.json from a completed Cookbook run without training")
+    p.add_argument("--limit", type=int, help="First N prompts for a pilot")
     p.add_argument("--epochs", type=int, default=1)
-    p.add_argument("--max-steps", type=int, default=-1, help="Total prompt batches, including groups with no signal")
+    p.add_argument("--max-steps", type=int, default=-1)
     p.add_argument("--batch-size", type=int, default=2, help="Prompt groups per update")
     p.add_argument("--group-size", type=int, default=4, help="Independent trajectories per prompt")
-    p.add_argument("--max-samples", type=int, default=4, help="Concurrent sandbox episodes, correctness judgments, and reference requests")
+    p.add_argument("--max-samples", type=int, default=4, help="Maximum concurrent Docker episodes")
     p.add_argument("--learning-rate", type=float, default=1e-5)
-    p.add_argument("--temperature", type=float, default=0.8)
+    # Cookbook recommends T=1 when using a reference-policy KL penalty.
+    p.add_argument("--temperature", type=float, default=1.0)
     p.add_argument("--clip-epsilon", type=float, default=0.2)
-    p.add_argument("--kl-coef", type=float, default=0.01, help="KL coefficient against the frozen initial SFT policy")
-    p.add_argument("--normalize-rewards", action="store_true", help="Divide centered rewards by group population std")
-    p.add_argument("--max-tokens", type=int, default=4096, help="Maximum sampled tokens per action")
-    p.add_argument("--max-length", type=int, default=32768, help="Maximum native context including each sampled action")
+    p.add_argument("--kl-coef", type=float, default=0.01)
+    p.add_argument("--normalize-rewards", action="store_true")
+    p.add_argument("--max-tokens", type=int, default=4096, help="Maximum generated tokens per turn")
+    p.add_argument("--max-length", type=int, default=32768, help="Maximum trajectory context tokens")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--save-every", type=int, default=1)
     return p
@@ -426,16 +200,29 @@ def main(argv=None):
     load_dotenv(ROOT / ".env")
     p = parser()
     args = p.parse_args(argv)
-    if (any(value < 1 for value in (args.epochs, args.batch_size, args.max_samples, args.save_every,
-                                   args.max_tokens, args.max_length)) or args.group_size < 2
-            or args.max_steps == 0 or args.max_steps < -1 or (args.limit is not None and args.limit < 1)
+    if args.finalize_only:
+        if args.dry_run:
+            p.error("--finalize-only and --dry-run are mutually exclusive")
+        try:
+            recorded = json.loads((args.output_dir / "training-manifest.json").read_text())
+            config = recorded["config"]
+            if not isinstance(config, dict) or config.get("algorithm") != ALGORITHM:
+                raise ValueError("Output directory does not contain a compatible Cookbook run")
+            print(json.dumps(write_final_checkpoint(args.output_dir, config), indent=2))
+        except (OSError, ValueError, KeyError, RuntimeError) as error:
+            p.error(str(error))
+        return 0
+    if (any(value < 1 for value in (args.epochs, args.batch_size, args.max_samples,
+                                   args.save_every, args.max_tokens, args.max_length))
+            or args.group_size < 2 or args.max_steps == 0 or args.max_steps < -1
+            or (args.limit is not None and args.limit < 1)
             or not 0 <= args.seed <= 2**32 - 1 or args.max_length > 32768
             or args.max_tokens > args.max_length
-            or any(not math.isfinite(value) for value in (args.learning_rate, args.temperature,
-                                                         args.clip_epsilon, args.kl_coef))
+            or any(not math.isfinite(v) for v in
+                   (args.learning_rate, args.temperature, args.clip_epsilon, args.kl_coef))
             or args.learning_rate <= 0 or not 0 < args.temperature <= 2
             or not 0 < args.clip_epsilon < 1 or args.kl_coef < 0):
-        p.error("Invalid counts, token limits, seed, learning rate, temperature, clipping or KL coefficient")
+        p.error("Invalid training hyperparameters")
     try:
         specs, config, total = load_run(args)
     except (ValueError, OSError, KeyError) as error:
@@ -445,15 +232,24 @@ def main(argv=None):
                 batches(specs, args.batch_size, args.epochs, args.seed)) if i < total)}
     print(json.dumps(plan, indent=2))
     if args.dry_run:
-        return
+        return 0
     if not config["correctness_judge_model"] or not config["correctness_judge_url"]:
         p.error("Set ARTSY_CORRECTNESS_JUDGE_MODEL and ARTSY_CORRECTNESS_JUDGE_URL")
-    if not args.resume_from_checkpoint and args.output_dir.exists() and any(args.output_dir.iterdir()):
-        p.error("Output directory is not empty; choose a fresh directory or --resume-from-checkpoint")
     if args.output_dir.resolve() == args.init_checkpoint.resolve().parent:
-        p.error("GRPO output must differ from the initial SFT checkpoint directory")
-    train(args, specs, config, total)
+        p.error("RL output must differ from the initial SFT checkpoint directory")
+    manifest = args.output_dir / "training-manifest.json"
+    if args.output_dir.exists() and any(args.output_dir.iterdir()):
+        if not manifest.is_file() or not (args.output_dir / "checkpoints.jsonl").is_file():
+            p.error("Output is not a resumable Cookbook run; choose a new directory")
+        if json.loads(manifest.read_text()) != plan:
+            p.error("Training configuration changed; resume with the original settings")
+    else:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        manifest.write_text(json.dumps(plan, indent=2) + "\n")
+    _build_sandbox_image()
+    asyncio.run(train(args, specs, config, total))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
