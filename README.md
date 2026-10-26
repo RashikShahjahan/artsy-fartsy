@@ -692,8 +692,10 @@ log probabilities, incomplete groups, context overflow, and collection errors
 abort the batch before an optimizer step. Groups with identical rewards have
 zero relative advantage; an entire batch without reward variation skips the
 update and still checkpoints its consumed prompt batch. `--max-steps` counts
-these batches too. `--max-samples` bounds concurrent sandbox episodes and
-reference requests; `--limit` restricts the prompt set for small experiments.
+these batches too. `--max-samples` bounds concurrent sandbox episodes,
+correctness judgments, and reference requests within each phase. Judging preserves
+prompt/episode order even when requests finish out of order; a judge failure aborts
+the batch before any update. `--limit` restricts the prompt set for small experiments.
 
 Outputs include native sampling evidence, Inspect logs, final render artifacts,
 judge responses, group rewards, `metrics.jsonl`, `training-manifest.json`, and

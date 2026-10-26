@@ -42,49 +42,63 @@ def summarize_rewards(rewards):
             "has_learning_signal": len(set(rewards)) > 1}
 
 
-async def score_outputs(specs, output, group_size, judge):
+async def score_outputs(specs, output, group_size, judge, concurrency=4):
     """Judge final renders only. Judge failures stop the pilot, never score zero."""
-    groups = []
-    for spec in specs:
-        attempts, rewards = [], []
-        for epoch in range(1, group_size + 1):
-            directory = output / "artifacts" / f"{spec['id']}-{epoch}"
-            result = json.loads((directory / "result.json").read_text())
-            record_path = directory / "correctness.json"
-            if record_path.exists():
-                judgment = json.loads(record_path.read_text())
-            elif result["scores"]["render_valid"]:
-                png = (directory / "image.png").read_bytes()
-                if sha256(png) != result["imageHash"]:
-                    raise ValueError("Final image hash mismatch")
+    if type(concurrency) is not int or concurrency < 1:
+        raise ValueError("Judge concurrency must be a positive integer")
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def score_attempt(spec, epoch):
+        directory = output / "artifacts" / f"{spec['id']}-{epoch}"
+        result = json.loads((directory / "result.json").read_text())
+        record_path = directory / "correctness.json"
+        if record_path.exists():
+            judgment = json.loads(record_path.read_text())
+        elif result["scores"]["render_valid"]:
+            png = (directory / "image.png").read_bytes()
+            if sha256(png) != result["imageHash"]:
+                raise ValueError("Final image hash mismatch")
+            async with semaphore:
                 response = await judge.complete([{"role": "user", "content": [
                     {"type": "text", "text": correctness_judge_prompt(spec["prompt"])},
                     {"type": "image_url", "image_url": {
                         "url": "data:image/png;base64," + base64.b64encode(png).decode()}},
                 ]}], JUDGE_MAX_TOKENS, temperature=0)
-                if response.get("finishReason") == "length":
-                    raise ValueError("Correctness judgment was truncated")
-                judgment = {**parse_correctness_judgment(response["text"]),
-                            "model": judge.model, "response": response,
-                            "image_sha256": result["imageHash"]}
-                record_path.write_text(json.dumps(judgment, indent=2) + "\n")
-            else:
-                judgment = {"score": 0.0, "reason": "No valid final rendered drawing",
-                            "outcome": result["outcome"]}
-                record_path.write_text(json.dumps(judgment, indent=2) + "\n")
-            reward = judgment["score"]
-            rewards.append(reward)
-            attempts.append({"epoch": epoch, "reward": reward,
-                             "render_valid": bool(result["scores"]["render_valid"]),
-                             "source_sha256": result.get("sourceHash"),
-                             "image_sha256": result.get("imageHash"),
-                             "trajectory": result.get("trajectory"),
-                             "artifacts": str(directory.resolve())})
-            print(json.dumps({"id": spec["id"], "difficulty": spec["difficulty"],
-                              "epoch": epoch, "reward": reward}), flush=True)
+            if response.get("finishReason") == "length":
+                raise ValueError("Correctness judgment was truncated")
+            judgment = {**parse_correctness_judgment(response["text"]),
+                        "model": judge.model, "response": response,
+                        "image_sha256": result["imageHash"]}
+            record_path.write_text(json.dumps(judgment, indent=2) + "\n")
+        else:
+            judgment = {"score": 0.0, "reason": "No valid final rendered drawing",
+                        "outcome": result["outcome"]}
+            record_path.write_text(json.dumps(judgment, indent=2) + "\n")
+        reward = judgment["score"]
+        print(json.dumps({"id": spec["id"], "difficulty": spec["difficulty"],
+                          "epoch": epoch, "reward": reward}), flush=True)
+        return {"epoch": epoch, "reward": reward,
+                "render_valid": bool(result["scores"]["render_valid"]),
+                "source_sha256": result.get("sourceHash"),
+                "image_sha256": result.get("imageHash"),
+                "trajectory": result.get("trajectory"),
+                "artifacts": str(directory.resolve())}
+
+    tasks = [asyncio.create_task(score_attempt(spec, epoch))
+             for spec in specs for epoch in range(1, group_size + 1)]
+    try:
+        attempts = await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+    groups = []
+    for index, spec in enumerate(specs):
+        members = attempts[index * group_size:(index + 1) * group_size]
         groups.append({"id": spec["id"], "prompt": spec["prompt"],
                        "difficulty": spec["difficulty"], "seed": spec["seed"],
-                       **summarize_rewards(rewards), "attempts": attempts})
+                       **summarize_rewards([attempt["reward"] for attempt in members]), "attempts": members})
     return groups
 
 
@@ -145,7 +159,7 @@ def main(argv=None):
         for epoch in range(1, args.group_size + 1):
             if not (args.output / "artifacts" / f"{spec['id']}-{epoch}" / "result.json").is_file():
                 raise RuntimeError("Missing rollout result; cannot compute reward variation")
-    groups = asyncio.run(score_outputs(specs, args.output, args.group_size, judge))
+    groups = asyncio.run(score_outputs(specs, args.output, args.group_size, judge, args.max_samples))
     summary = {**plan, "completed_at": datetime.now(timezone.utc).isoformat(), "groups": groups,
                "groups_with_learning_signal": sum(g["has_learning_signal"] for g in groups),
                "valid_renders": sum(a["render_valid"] for g in groups for a in g["attempts"])}

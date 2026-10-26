@@ -175,7 +175,7 @@ async def collect_rollouts(args, specs, sampler, encoder, step, directory, judge
             if (not recorder.turns[(spec["id"], epoch)] or not
                     (directory / "artifacts" / f"{spec['id']}-{epoch}" / "result.json").is_file()):
                 raise RuntimeError("Incomplete rollout group; no policy update was made")
-    groups = await score_outputs(specs, directory, args.group_size, judge)
+    groups = await score_outputs(specs, directory, args.group_size, judge, args.max_samples)
     for group in groups:
         for attempt in group["attempts"]:
             attempt["turns"] = recorder.turns[(group["id"], attempt["epoch"])]
@@ -363,7 +363,7 @@ def parser():
     p.add_argument("--max-steps", type=int, default=-1, help="Total prompt batches, including groups with no signal")
     p.add_argument("--batch-size", type=int, default=2, help="Prompt groups per update")
     p.add_argument("--group-size", type=int, default=4, help="Independent trajectories per prompt")
-    p.add_argument("--max-samples", type=int, default=4, help="Concurrent sandbox episodes and reference requests")
+    p.add_argument("--max-samples", type=int, default=4, help="Concurrent sandbox episodes, correctness judgments, and reference requests")
     p.add_argument("--learning-rate", type=float, default=1e-5)
     p.add_argument("--temperature", type=float, default=0.8)
     p.add_argument("--clip-epsilon", type=float, default=0.2)
