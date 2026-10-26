@@ -130,21 +130,41 @@ def _build_sandbox_image():
         raise RuntimeError("Cannot build the RL Docker sandbox; start Docker and check its build output") from error
 
 
-async def train(args, specs, plan, total):
+def artsy_final_checkpoint(record, plan):
+    """Convert Cookbook's named final record into Artsy's model-catalog format.
+
+    Cookbook v0.5.8 records the final checkpoint with ``name='final'``,
+    while its optional ``final`` field may be None even on a successful run.
+    """
+    if (record is None or record.name != "final"
+            or not record.state_path or not record.sampler_path):
+        raise RuntimeError("Cookbook did not produce a final state and sampler checkpoint")
+    return {"step": record.batch, "state_path": record.state_path,
+            "sampler_path": record.sampler_path, "config": plan}
+
+
+def write_final_checkpoint(output_dir: Path, plan: dict):
+    """Publish the completed Cookbook checkpoint for Artsy's model catalog."""
     from tinker_cookbook import checkpoint_utils
+
+    record = checkpoint_utils.get_last_checkpoint(str(output_dir))
+    final = artsy_final_checkpoint(record, plan)
+    destination = output_dir / "final.json"
+    if destination.exists() and json.loads(destination.read_text()) != final:
+        raise ValueError("An incompatible final.json already exists in the output directory")
+    destination.write_text(json.dumps(final, indent=2) + "\n")
+    return final
+
+
+async def train(args, specs, plan, total):
     from tinker_cookbook.rl import train as cookbook
     from training.cookbook_env import configure_concurrency
 
     configure_concurrency(args.max_samples)
     config = make_cookbook_config(args, specs, plan, total)
     await cookbook.main(config)
-    latest = checkpoint_utils.get_last_checkpoint(str(args.output_dir))
-    if not latest or not latest.final or not latest.state_path or not latest.sampler_path:
-        raise RuntimeError("Cookbook did not produce a final state and sampler checkpoint")
     # Retain Artsy's model-catalog format for make serve, evaluation and the UI.
-    final = {"step": latest.batch, "state_path": latest.state_path,
-             "sampler_path": latest.sampler_path, "config": plan}
-    (args.output_dir / "final.json").write_text(json.dumps(final, indent=2) + "\n")
+    final = write_final_checkpoint(args.output_dir, plan)
     print(json.dumps(final, indent=2))
 
 
@@ -154,6 +174,8 @@ def parser():
     p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v1/final.json")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v1")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--finalize-only", action="store_true",
+                   help="Recover final.json from a completed Cookbook run without training")
     p.add_argument("--limit", type=int, help="First N prompts for a pilot")
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--max-steps", type=int, default=-1)
@@ -178,6 +200,18 @@ def main(argv=None):
     load_dotenv(ROOT / ".env")
     p = parser()
     args = p.parse_args(argv)
+    if args.finalize_only:
+        if args.dry_run:
+            p.error("--finalize-only and --dry-run are mutually exclusive")
+        try:
+            recorded = json.loads((args.output_dir / "training-manifest.json").read_text())
+            config = recorded["config"]
+            if not isinstance(config, dict) or config.get("algorithm") != ALGORITHM:
+                raise ValueError("Output directory does not contain a compatible Cookbook run")
+            print(json.dumps(write_final_checkpoint(args.output_dir, config), indent=2))
+        except (OSError, ValueError, KeyError, RuntimeError) as error:
+            p.error(str(error))
+        return 0
     if (any(value < 1 for value in (args.epochs, args.batch_size, args.max_samples,
                                    args.save_every, args.max_tokens, args.max_length))
             or args.group_size < 2 or args.max_steps == 0 or args.max_steps < -1

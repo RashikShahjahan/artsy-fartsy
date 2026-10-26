@@ -16,7 +16,8 @@ from PIL import Image
 
 from training.cookbook_env import (ArtsyGroupBuilder, BashTool, DockerSession,
                                    _preview_observation, configure_concurrency)
-from training.grpo import make_cookbook_config, parser
+from training.grpo import (artsy_final_checkpoint, make_cookbook_config,
+                           parser, write_final_checkpoint)
 
 
 def response(code=0, output=b"", stderr=b""):
@@ -139,6 +140,37 @@ class PreviewTests(unittest.TestCase):
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_recover_final_json_without_rerunning_training(self):
+        record = SimpleNamespace(name="final", final=None, batch=1,
+                                 state_path="tinker://run/weights/final",
+                                 sampler_path="tinker://run/sampler_weights/final")
+        package = ModuleType("tinker_cookbook")
+        package.checkpoint_utils = SimpleNamespace(get_last_checkpoint=lambda _: record)
+        plan = {"algorithm": "tinker-cookbook-ppo-v1", "model": "Qwen/Qwen3.5-4B"}
+        with tempfile.TemporaryDirectory() as root, patch.dict(
+                sys.modules, {"tinker_cookbook": package}):
+            output_dir = Path(root)
+            result = write_final_checkpoint(output_dir, plan)
+            self.assertEqual(json.loads((output_dir / "final.json").read_text()), result)
+            self.assertEqual(write_final_checkpoint(output_dir, plan), result)
+            with self.assertRaisesRegex(ValueError, "incompatible final.json"):
+                write_final_checkpoint(output_dir, {**plan, "model": "other"})
+            self.assertEqual(json.loads((output_dir / "final.json").read_text()), result)
+
+    def test_cookbook_final_record_does_not_require_optional_final_flag(self):
+        record = SimpleNamespace(name="final", final=None, batch=1,
+                                 state_path="tinker://run/weights/final",
+                                 sampler_path="tinker://run/sampler_weights/final")
+        plan = {"model": "Qwen/Qwen3.5-4B"}
+        result = artsy_final_checkpoint(record, plan)
+        self.assertEqual(result["step"], 1)
+        self.assertEqual(result["sampler_path"], record.sampler_path)
+        self.assertIs(result["config"], plan)
+        with self.assertRaisesRegex(RuntimeError, "final state"):
+            artsy_final_checkpoint(SimpleNamespace(
+                name="step-000001", batch=1, state_path=record.state_path,
+                sampler_path=record.sampler_path), plan)
+
     def test_defaults_match_existing_agent_protocol(self):
         args = parser().parse_args([])
         self.assertEqual(args.group_size, 4)

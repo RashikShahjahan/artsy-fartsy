@@ -675,6 +675,10 @@ make grpo ARGS="--init-checkpoint checkpoints/sft-v1/final.json --output-dir che
 
 # Resume automatically from the last Cookbook optimizer checkpoint:
 .venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v1
+
+# Recover final.json when Cookbook finished but Artsy's post-training export failed.
+# This does not contact Tinker, rebuild Docker, or run training:
+.venv/bin/python -m training.grpo --finalize-only --output-dir checkpoints/grpo-v1
 ```
 
 Defaults: two prompt groups per batch, four trajectories per group,
