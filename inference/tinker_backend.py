@@ -5,15 +5,17 @@ RENDERER = "qwen3_5_disable_thinking"
 
 
 class TinkerBackend:
-    def __init__(self, model_id, revision, image_size, model_path=None):
+    def __init__(self, model_id, revision, image_size, model_path=None, *, sampling_model_id=None):
         import tinker
         from transformers import AutoImageProcessor, AutoTokenizer
         from tinker_cookbook import renderers
 
         self.model_id = model_id
+        self.sampling_model_id = sampling_model_id or model_id
         self.service = tinker.ServiceClient()
         self.client = self.service.create_sampling_client(
-            **({"model_path": model_path} if model_path else {"base_model": model_id}))
+            base_model=self.sampling_model_id,
+            **({"model_path": model_path} if model_path else {}))
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
         self.image_processor = AutoImageProcessor.from_pretrained(model_id, revision=revision)
         self.image_size = image_size
@@ -25,7 +27,8 @@ class TinkerBackend:
         from copy import copy
         backend = copy(self)
         backend.client = self.service.create_sampling_client(
-            **({"model_path": model_path} if model_path else {"base_model": self.model_id}))
+            base_model=self.sampling_model_id,
+            **({"model_path": model_path} if model_path else {}))
         return backend
 
     def prepare_image(self, image):
@@ -88,8 +91,10 @@ class TinkerBackend:
         import tinker
 
         prompt = self.render(messages, tools)
-        if prompt.length + budget > context_window:
+        remaining = context_window - prompt.length
+        if remaining < 1:
             raise ValueError("Context exceeds model capacity")
+        budget = min(budget, remaining)
         result = self.client.sample(prompt=prompt, num_samples=1,
             sampling_params=tinker.SamplingParams(
                 max_tokens=budget, temperature=temperature, stop=self.renderer.get_stop_sequences())).result()

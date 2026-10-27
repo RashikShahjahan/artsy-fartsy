@@ -15,12 +15,13 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from jinja2 import TemplateError
 
-from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
+from drawing.config import (IMAGE_SIZE, MODEL_CONTEXT_WINDOW, MODEL_ID, MODEL_REVISION,
+                            TINKER_SAMPLING_MODEL_ID)
 from .model_catalog import ModelCatalogCache, model_catalog
 
 SAMPLER_LOCK = threading.Lock()
 
-CONTEXT_WINDOW = 32768
+CONTEXT_WINDOW = MODEL_CONTEXT_WINDOW
 MAX_TOKENS = 16000
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -131,7 +132,8 @@ async def lifespan(app):
     from .tinker_backend import TinkerBackend
     app.state.backend = "tinker"
     app.state.tinker = TinkerBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE,
-                                    os.getenv("ARTSY_TINKER_MODEL_PATH") or None)
+                                    os.getenv("ARTSY_TINKER_MODEL_PATH") or None,
+                                    sampling_model_id=TINKER_SAMPLING_MODEL_ID)
     app.state.samplers = {}
     yield
 
@@ -146,6 +148,8 @@ def cached_model_catalog():
 @app.get("/health")
 def health():
     return {"model": MODEL_ID, "tokenizer_revision": MODEL_REVISION, "ready": True,
+            "context_window": CONTEXT_WINDOW, "max_output_tokens": MAX_TOKENS,
+            "sampling_model": TINKER_SAMPLING_MODEL_ID,
             "model_path": os.getenv("ARTSY_TINKER_MODEL_PATH") or None,
             "backend": app.state.backend, "input": ["text", "image"], "streaming": False, "models": cached_model_catalog()}
 
@@ -196,7 +200,8 @@ def complete(body: dict):
     message = {"role": "assistant", "content": text or None}
     if calls:
         message["tool_calls"] = calls
-    finish = "tool_calls" if calls else "length" if generated >= budget else "stop"
+    effective_budget = min(budget, CONTEXT_WINDOW - count)
+    finish = "tool_calls" if calls else "length" if generated >= effective_budget else "stop"
     common = {"id": "chatcmpl-" + uuid.uuid4().hex, "created": int(time.time()), "model": model_id}
     usage = {"prompt_tokens": count, "completion_tokens": generated, "total_tokens": count + generated}
     return {**common, "object": "chat.completion", "choices": [{"index": 0, "message": message, "finish_reason": finish}], "usage": usage}

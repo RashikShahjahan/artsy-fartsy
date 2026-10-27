@@ -14,7 +14,7 @@ from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import get_model
 
-from .harness import (BASE_MODEL, ROOT, check_native_bridge, drawing_task,
+from .harness import (BASE_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_TOKEN_LIMIT, ROOT, check_native_bridge, drawing_task,
                       load_specs, model_from_env, model_url)
 
 
@@ -23,6 +23,13 @@ def positive(value: str) -> int:
     if result < 1:
         raise argparse.ArgumentTypeError("must be a positive integer")
     return result
+
+
+def optional_token_budget(value: str) -> int | None:
+    result = int(value)
+    if result < 0:
+        raise argparse.ArgumentTypeError("must be zero (no aggregate cap) or a positive integer")
+    return result or None
 
 
 def _result(path: Path, cache: dict[Path, dict | None]) -> dict | None:
@@ -223,6 +230,12 @@ def main() -> int:
     parser.add_argument("--epochs", type=positive, default=1)
     parser.add_argument("--max-connections", type=positive, default=10, help="Maximum concurrent model connections (default: 10)")
     parser.add_argument("--max-samples", type=positive, default=10, help="Maximum concurrent evaluation samples (default: 10)")
+    parser.add_argument("--max-tokens", type=positive, default=DEFAULT_MAX_TOKENS,
+                        help="Maximum output tokens per model response (default: 8192)")
+    parser.add_argument("--token-limit", type=optional_token_budget, default=DEFAULT_TOKEN_LIMIT,
+                        help="Optional token budget per sample; 0 disables it (default: no aggregate cap)")
+    parser.add_argument("--token-limit-type", choices=("output", "all"), default="output",
+                        help="Count output tokens, or cumulative input plus output for legacy comparisons")
     parser.add_argument("--correctness-judge-model", default=os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL"),
                         help="Vision model for prompt correctness; optionally set ARTSY_CORRECTNESS_JUDGE_URL/API_KEY")
     parser.add_argument("--safety-judge-model", default=os.getenv("ARTSY_SAFETY_JUDGE_MODEL"),
@@ -252,6 +265,8 @@ def main() -> int:
     plan = {"model": args.model, "base_url": model_url(),
             "dataset": str(args.dataset.resolve()), "samples": len(selected), "epochs": args.epochs,
             "max_connections": args.max_connections, "max_samples": args.max_samples,
+            "max_tokens": args.max_tokens, "token_limit": args.token_limit,
+            "token_limit_type": args.token_limit_type if args.token_limit is not None else None,
             "correctness_judge_model": args.correctness_judge_model,
             "safety_judge_model": args.safety_judge_model,
             "code_safety_judge_model": args.code_safety_judge_model,
@@ -306,7 +321,8 @@ def main() -> int:
     logs = eval(
         drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
                      args.safety_judge_model, args.code_safety_judge_model,
-                     max_connections=args.max_connections),
+                     max_connections=args.max_connections, max_tokens=args.max_tokens,
+                     token_limit=args.token_limit, token_limit_type=args.token_limit_type),
         model=model_from_env(args.model), model_roles=roles,
         log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=args.max_samples,
     )

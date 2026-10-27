@@ -3,29 +3,31 @@
 ## Continue in bounded blocks
 
 The first `grpo-qwen38-v1` run completed 100 updates over 200 training
-prompts, with two prompt groups and four trajectories per group. A continuation
-adds updates to that completed run in a new output directory:
+prompts, with two prompt groups and four trajectories per group. Its first
+continuation completed step 125. A continuation adds updates to a completed run
+in a new output directory; this example also applies the expanded eval limits:
 
 ```sh
 # Validate locally; no files are written and no Docker/model requests are made.
 .venv/bin/python -m training.grpo \
-  --continue-from checkpoints/grpo-qwen38-v1 \
-  --additional-steps 25 \
-  --output-dir checkpoints/grpo-qwen38-v1-step125 \
+  --continue-from checkpoints/grpo-qwen38-v1-step125 \
+  --additional-steps 25 --match-eval-limits \
+  --output-dir checkpoints/grpo-qwen38-v1-step150 \
   --dry-run
 
-# Run the same command without --dry-run to train through cumulative step 125.
+# Run the same command without --dry-run to train through cumulative step 150.
 .venv/bin/python -m training.grpo \
-  --continue-from checkpoints/grpo-qwen38-v1 \
-  --additional-steps 25 \
-  --output-dir checkpoints/grpo-qwen38-v1-step125
+  --continue-from checkpoints/grpo-qwen38-v1-step125 \
+  --additional-steps 25 --match-eval-limits \
+  --output-dir checkpoints/grpo-qwen38-v1-step150
 ```
 
 Repeat the training command unchanged after interruption. The new directory's
 latest committed checkpoint takes precedence over the inherited starting state.
 After completing and evaluating this block, another block can use
-`--continue-from checkpoints/grpo-qwen38-v1-step125`, `--additional-steps 25`,
-and a new `--output-dir checkpoints/grpo-qwen38-v1-step150`.
+`--continue-from checkpoints/grpo-qwen38-v1-step150`, `--additional-steps 25`,
+and a new `--output-dir checkpoints/grpo-qwen38-v1-step175`. A run already using
+the expanded limits inherits them without needing another migration flag.
 
 Continuation restores the full optimizer checkpoint through Cookbook's resume
 path. Cookbook's `load_checkpoint_path` alone starts a fresh optimizer, so the
@@ -39,6 +41,34 @@ selection and concurrency are inherited from the saved configuration. The KL
 reference remains the original SFT sampler. Judge credentials still come from
 the environment. A changed training dataset or runtime is rejected. Pass
 `--dataset` explicitly when the source used a nondefault dataset path.
+
+### Match the expanded eval limits
+
+New training runs use the same token limits as the expanded evals: **262,144
+tokens of context per request**, **8,192 generated tokens per response**, and
+**no separate aggregate token budget**. History and preview image tokens count
+toward the context window. The next response is clipped to the remaining space;
+the rollout no longer stops early merely because a full response would not fit.
+The sixteen-turn limit and Docker execution limits remain aligned with evals.
+
+Existing runs keep their recorded limits unless explicitly migrated. To apply
+the expanded limits after the completed step-125 run:
+
+```sh
+.venv/bin/python -m training.grpo \
+  --continue-from checkpoints/grpo-qwen38-v1-step125 \
+  --additional-steps 25 --match-eval-limits \
+  --output-dir checkpoints/grpo-qwen38-v1-step150 \
+  --dry-run
+```
+
+Remove `--dry-run` to train. Repeat the exact command after interruption. The
+migration records the old settings and source hashes alongside the new rollout
+policy, retaining the optimizer state and original SFT reference. It accepts
+only the recorded limit-related source changes; dataset, reward and unrelated
+runtime changes still fail validation. Completed historical runs are preserved.
+Evaluate competing checkpoints under identical expanded eval settings before
+attributing any score change to the additional training.
 
 The wrapper extends deterministic, epoch-seeded prompt ordering and starts at
 the next global batch index. Step 100 begins the next shuffled epoch for this

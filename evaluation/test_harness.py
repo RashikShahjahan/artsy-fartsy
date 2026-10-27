@@ -134,8 +134,9 @@ class EvaluationTest(unittest.TestCase):
             self.assertFalse(prompts.intersection(row["prompt"] for row in specs))
         task = drawing_task(specs, "/tmp/artsy-test-artifacts")
         self.assertEqual(task.turn_limit, 16)
-        self.assertEqual(task.token_limit, 32768)
-        self.assertEqual(task.config.max_tokens, 4096)
+        self.assertIsNone(task.token_limit)
+        self.assertIsNone(task.token_limit_type)
+        self.assertEqual(task.config.max_tokens, 8192)
 
     def test_dataset_rejects_duplicate_prompts_and_invalid_inputs(self):
         original = load_specs(ROOT / "evaluation/generated-110.jsonl")[0]
@@ -186,7 +187,7 @@ class EvaluationTest(unittest.TestCase):
             with patch.object(model.api.client.chat.completions, "create",
                               new=AsyncMock(return_value=reply)) as request:
                 await inspect_completions_api_request({
-                    "model": "inspect", "max_tokens": 4096,
+                    "model": "inspect", "max_tokens": 8192,
                     "messages": [{"role": "user", "content": "Draw a circle"}],
                 }, None, bridge)
                 return request.call_args.kwargs
@@ -195,7 +196,7 @@ class EvaluationTest(unittest.TestCase):
                                     "ARTSY_MODEL_API_KEY": "test-only",
                                     "OPENAI_API_KEY": "test-only"}):
             request = asyncio.run(request_through_bridge())
-        self.assertEqual(request.get("max_completion_tokens", request.get("max_tokens")), 4096)
+        self.assertEqual(request.get("max_completion_tokens", request.get("max_tokens")), 8192)
 
     def test_correctness_and_safety_judges_validate_independently(self):
         correct = {"score": 0.9, "reason": "Prompt matches"}
@@ -245,17 +246,25 @@ class EvaluationTest(unittest.TestCase):
                  patch.object(sys, "argv", ["evaluate", "--limit", "1", "--output", str(root / "run"),
                      "--correctness-judge-model", "mockllm/correct",
                      "--safety-judge-model", "mockllm/safe",
-                     "--max-connections", "3", "--max-samples", "4"]), \
+                     "--max-connections", "3", "--max-samples", "4",
+                     "--max-tokens", "12000", "--token-limit", "65536",
+                     "--token-limit-type", "all"]), \
                  redirect_stdout(io.StringIO()):
                 self.assertEqual(main(), 0)
             self.assertEqual(run.call_args.args[0].config.max_connections, 3)
             self.assertEqual(run.call_args.kwargs["max_samples"], 4)
+            self.assertEqual(run.call_args.args[0].config.max_tokens, 12000)
+            self.assertEqual(run.call_args.args[0].token_limit, 65536)
+            self.assertEqual(run.call_args.args[0].token_limit_type or "all", "all")
             self.assertEqual(run.call_args.kwargs["model_roles"],
                 {"correctness_grader": "mockllm/correct", "safety_grader": "mockllm/safe",
                  "code_safety_grader": "mockllm/safe"})
             summary = json.loads((root / "run/summary.json").read_text())
             self.assertEqual(summary["correctness_judge_model"], "mockllm/correct")
             self.assertEqual(summary["safety_judge_model"], "mockllm/safe")
+            self.assertEqual(summary["max_tokens"], 12000)
+            self.assertEqual(summary["token_limit"], 65536)
+            self.assertEqual(summary["token_limit_type"], "all")
 
     def test_cli_loads_dotenv_before_reading_model_defaults(self):
         from evaluation.evaluate import main
@@ -288,8 +297,14 @@ class EvaluationTest(unittest.TestCase):
                 self.assertEqual(main(), 0)
             plan = json.loads(output.getvalue())
             self.assertEqual((plan["max_connections"], plan["max_samples"]), expected)
-        for flag in ("--max-connections", "--max-samples"):
-            for value in ("0", "-1", "invalid"):
+        for flags in ([], ["--token-limit", "0"]):
+            with patch.object(sys, "argv", ["evaluate", "--dry-run", *flags]), redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(main(), 0)
+            plan = json.loads(output.getvalue())
+            self.assertIsNone(plan["token_limit"])
+            self.assertIsNone(plan["token_limit_type"])
+        for flag in ("--max-connections", "--max-samples", "--max-tokens", "--token-limit"):
+            for value in (("-1", "invalid") if flag == "--token-limit" else ("0", "-1", "invalid")):
                 with self.subTest(flag=flag, value=value), patch.object(sys, "argv", ["evaluate", "--dry-run", flag, value]), \
                      patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit) as error:
                     main()

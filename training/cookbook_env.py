@@ -19,7 +19,7 @@ from uuid import uuid4
 
 from PIL import Image
 
-from drawing.config import IMAGE_SIZE, MODEL_ID
+from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_CONTEXT_WINDOW
 from drawing.agent_contract import drawing_system_prompt
 from drawing.judges import JUDGE_MAX_TOKENS, correctness_judge_prompt, parse_correctness_judgment
 from training.data import ROOT
@@ -52,7 +52,7 @@ async def _docker(argv: list[str], *, stdin: bytes | None = None, timeout: float
 @lru_cache(maxsize=1)
 def encoder():
     # Cached per process; weights live on Tinker, not on this machine.
-    return create_encoder(MODEL_ID, 32768)
+    return create_encoder(MODEL_ID, MODEL_CONTEXT_WINDOW)
 
 
 @lru_cache(maxsize=1)
@@ -70,7 +70,7 @@ def initial_messages(spec: dict, tool_specs: list[dict]) -> list[dict]:
               f'python /opt/artsy/render.py --seed {spec["seed"]} '
               '--output /workspace/preview --preview < /workspace/program.py')
     return [*prefix, {"role": "user",
-                      "content": f"System instructions:\n{drawing_system_prompt()}\n\nTask:\n{prompt}"}]
+                      "content": f"System instructions:\n{drawing_system_prompt(token_limit=None)}\n\nTask:\n{prompt}"}]
 
 
 def _preview_observation(stdout: bytes, stderr: bytes, returncode: int) -> tuple[list[dict] | str, dict | None]:
@@ -314,10 +314,8 @@ class ArtsyGroupBuilder:
                 encoder().renderer, agent, failed_parse_reward=0.0,
                 terminate_on_parse_error=True, terminate_on_length=True,
                 max_trajectory_tokens=self.max_length,
-                # Reserve a full action budget before asking Tinker to sample.
-                # A prompt that fits alone might otherwise overflow once the
-                # next model response is added.
-                max_generation_tokens=self.max_tokens,
+                # Runner clips each response to remaining context space.
+                max_generation_tokens=None,
                 context_overflow_reward=0.0,
                 rollout_limits=RolloutLimits(
                     max_turns=agent_settings()["agent"]["step_limit"],

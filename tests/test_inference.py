@@ -33,6 +33,46 @@ def inline_image(size=(32, 32), mode="RGB", patterned=False):
 
 
 class ToolProtocolTest(unittest.TestCase):
+    def test_extended_context_selector_is_preserved_when_loading_saved_weights(self):
+        from drawing.config import IMAGE_SIZE, MODEL_REVISION, TINKER_SAMPLING_MODEL_ID
+        from inference.tinker_backend import TinkerBackend
+
+        with patch("tinker.ServiceClient") as service, \
+             patch("transformers.AutoTokenizer.from_pretrained"), \
+             patch("transformers.AutoImageProcessor.from_pretrained"), \
+             patch("tinker_cookbook.renderers.get_renderer"):
+            backend = TinkerBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE,
+                                   sampling_model_id=TINKER_SAMPLING_MODEL_ID)
+            service.return_value.create_sampling_client.assert_called_once_with(
+                base_model="Qwen/Qwen3.5-4B:peft:262144")
+            backend.with_model_path("tinker://saved/checkpoint")
+            service.return_value.create_sampling_client.assert_called_with(
+                base_model="Qwen/Qwen3.5-4B:peft:262144", model_path="tinker://saved/checkpoint")
+            TinkerBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE, "tinker://saved/checkpoint",
+                          sampling_model_id=TINKER_SAMPLING_MODEL_ID)
+            service.return_value.create_sampling_client.assert_called_with(
+                base_model="Qwen/Qwen3.5-4B:peft:262144", model_path="tinker://saved/checkpoint")
+
+    def test_output_budget_uses_remaining_context_and_rejects_a_full_prompt(self):
+        from inference.tinker_backend import TinkerBackend
+
+        backend = TinkerBackend.__new__(TinkerBackend)
+        backend.render = Mock(return_value=SimpleNamespace(length=24))
+        backend.renderer = Mock()
+        backend.renderer.get_stop_sequences.return_value = ["stop"]
+        backend.client = Mock()
+        backend.client.sample.return_value.result.return_value = SimpleNamespace(
+            sequences=[SimpleNamespace(tokens=list(range(8)))])
+        backend.tokenizer = Mock()
+        backend.tokenizer.decode.return_value = "done"
+        self.assertEqual(backend.generate([], None, 16, 32), ("done", 24, 8))
+        self.assertEqual(backend.client.sample.call_args.kwargs["sampling_params"].max_tokens, 8)
+        backend.client.sample.reset_mock()
+        backend.render.return_value = SimpleNamespace(length=32)
+        with self.assertRaisesRegex(ValueError, "Context exceeds"):
+            backend.generate([], None, 16, 32)
+        backend.client.sample.assert_not_called()
+
     def test_native_tinker_renderer_receives_flat_tool_specs_and_preview_pixels(self):
         from inference.tinker_backend import TinkerBackend
         from tinker_cookbook.renderers import ToolCall
@@ -278,6 +318,32 @@ class CompletionTest(unittest.TestCase):
         with self.assertRaises(HTTPException) as error:
             complete(self.body)
         self.assertEqual(error.exception.status_code, 400)
+
+    def test_context_clipped_completion_reports_length(self):
+        app.state.tinker.generate.return_value = ("partial answer", CONTEXT_WINDOW - 5, 5)
+        result = complete({**self.body, "max_tokens": 8192})
+        self.assertEqual(result["choices"][0]["finish_reason"], "length")
+
+    def test_native_context_accepts_history_above_the_old_bridge_limit(self):
+        from inference.tinker_backend import TinkerBackend
+
+        backend = TinkerBackend.__new__(TinkerBackend)
+        prompt_length = 262144 - 8192
+        backend.render = Mock(return_value=SimpleNamespace(length=prompt_length))
+        backend.renderer = Mock()
+        backend.renderer.get_stop_sequences.return_value = ["stop"]
+        backend.client = Mock()
+        backend.client.sample.return_value.result.return_value = SimpleNamespace(
+            sequences=[SimpleNamespace(tokens=[1])])
+        backend.tokenizer = Mock()
+        backend.tokenizer.decode.return_value = "done"
+        app.state.tinker.generate.side_effect = backend.generate
+
+        result = complete({**self.body, "max_tokens": 8192})
+
+        self.assertEqual(result["usage"]["prompt_tokens"], prompt_length)
+        self.assertEqual(backend.client.sample.call_args.kwargs["sampling_params"].max_tokens, 8192)
+        self.assertEqual(health()["context_window"], 262144)
 
     def test_image_input_is_passed_to_model_generation(self):
         response = complete({**self.body, "messages": [{"role": "user", "content": [inline_image(), {"type": "text", "text": "Describe"}]}]})

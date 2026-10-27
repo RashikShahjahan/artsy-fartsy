@@ -19,7 +19,7 @@ model:
     {% if output.exception_info %}{{output.exception_info}}{% endif %}
   model_kwargs:
     drop_params: true
-    max_tokens: 4096
+    max_tokens: 8192
     temperature: 0
     timeout: 120
     num_retries: 0

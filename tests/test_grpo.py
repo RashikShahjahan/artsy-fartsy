@@ -175,8 +175,8 @@ class ConfigurationTests(unittest.TestCase):
         args = parser().parse_args([])
         self.assertEqual(args.group_size, 4)
         self.assertEqual(args.max_samples, 4)
-        self.assertEqual(args.max_tokens, 4096)
-        self.assertEqual(args.max_length, 32768)
+        self.assertEqual(args.max_tokens, 8192)
+        self.assertEqual(args.max_length, 262144)
 
     @unittest.skipUnless(importlib.util.find_spec("tinker_cookbook"),
                          "Install the pinned training dependencies")
@@ -194,8 +194,48 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.loss_fn_config["clip_high_threshold"], 1.1)
         self.assertEqual(config.load_checkpoint_path, "tinker://initial")
         self.assertEqual(config.kl_reference_config.load_checkpoint_path, "tinker://reference")
-        self.assertEqual(config.max_tokens, 32768)
+        self.assertEqual(config.max_tokens, 8192)
         self.assertTrue(config.termination.zero_reward_on_limit)
+
+
+class NativeContextTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_cookbook_runner_accepts_long_prompt_and_clips_near_context(self):
+        import tinker
+        from tinker_cookbook.completers import TokensWithLogprobs
+        from tinker_cookbook.rl.rollouts import do_single_rollout
+        from drawing.config import MODEL_CONTEXT_WINDOW
+        for length, expected in ((40000, 8192), (MODEL_CONTEXT_WINDOW - 13, 13)):
+            renderer = MagicMock()
+            renderer.get_stop_sequences.return_value = [2]
+            renderer.build_generation_prompt.return_value = tinker.ModelInput.from_ints([1] * length)
+            builder = ArtsyGroupBuilder({'id': 'x', 'prompt': 'disk', 'seed': 1},
+                                       1, 1, Path('/tmp'), MagicMock(),
+                                       8192, MODEL_CONTEXT_WINDOW, False)
+            calls = []
+
+            async def policy(observation, stop, *, max_tokens=None):
+                calls.append((observation.length, max_tokens))
+                return TokensWithLogprobs([1] * max_tokens, [0.] * max_tokens, 'length')
+
+            with patch('training.cookbook_env.encoder', return_value=SimpleNamespace(renderer=renderer)), \
+                 patch('training.cookbook_env.initial_messages', return_value=[]):
+                env, = await builder.make_envs()
+                self.assertIsNone(env.max_generation_tokens)
+                self.assertIsNone(env.rollout_limits.max_sampled_tokens)
+                await do_single_rollout(policy, env)
+            self.assertEqual(calls, [(length, expected)])
+
+
+class RolloutPromptTests(unittest.TestCase):
+    def test_initial_messages_describe_turn_limit_without_aggregate_token_limit(self):
+        from training.cookbook_env import initial_messages
+        renderer = SimpleNamespace(create_conversation_prefix_with_tools=lambda *a, **k: [])
+        with patch('training.cookbook_env.encoder', return_value=SimpleNamespace(renderer=renderer)):
+            messages = initial_messages({'prompt': 'Draw a disk', 'seed': 1}, [])
+        content = messages[-1]['content']
+        self.assertIn('sixteen model turns', content)
+        self.assertNotIn('32768', content)
+        self.assertNotIn('total input and output', content)
 
 
 if __name__ == "__main__":

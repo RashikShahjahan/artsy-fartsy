@@ -94,8 +94,17 @@ through the host to the native Tinker bridge (or another configured endpoint).
 Inspect and its OpenAI SDK run in the host environment; Mini SWE and LiteLLM run
 in the container, keeping their SDK dependency requirements separate.
 `evaluation/mini.yaml` sets sixteen model turns, ten-second command timeouts,
-8,192 tokens per response, and disabled local-model cost lookup. Inspect also sets
-a 32,768-token output budget and a five-minute sample limit. The container has
+8,192 tokens per response, and disabled local-model cost lookup. Inspect sets
+a 1,000-second sample limit and no aggregate token budget by default.
+Use `--max-tokens` to change the per-response output cap. `--token-limit N`
+optionally adds a per-sample generated-output budget; `--token-limit 0`
+explicitly disables it. `--token-limit-type all` counts cumulative input plus
+output when a budget is supplied. The native bridge explicitly selects
+`Qwen/Qwen3.5-4B:peft:262144` for base sampling and when loading saved SFT/RL
+weights; Tinker's unsuffixed model ID otherwise defaults to 65,536 tokens.
+It uses a 262,144-token context window per request and clips the response
+budget to the space remaining in that window. Its `/health` response reports
+the selected hosted model, context window, and per-response output ceiling. The container has
 2 GiB memory and two CPUs. Fresh scoring renders bound logs, source and PNG sizes,
 kill the render process group on timeout, and clean their temporary directories.
 
@@ -709,7 +718,12 @@ Defaults: two prompt groups per batch, four trajectories per group,
 temperature 1.0, PPO clipping ±0.2, and reference-KL coefficient 0.01
 against the initial SFT sampler. `--max-samples` limits concurrent Docker
 episodes. `--max-tokens` is the per-turn token cap; `--max-length`
-limits trajectory context. Rewards are centered per prompt group, and
+limits the context for each request, including history and preview images.
+New runs match the eval limits: 8,192 generated tokens per turn, the model's
+native 262,144-token context window, and no separate aggregate token budget.
+Responses are clipped to the remaining context instead of reserving a full
+response before each turn. The sixteen-turn limit still matches evaluation.
+Rewards are centered per prompt group, and
 `--normalize-rewards` additionally scales by within-group standard
 deviation. Budget-limited episodes cannot earn positive final reward.
 
@@ -731,14 +745,20 @@ KL reference, use a new output directory and an explicit update budget:
 
 ```sh
 .venv/bin/python -m training.grpo \
-  --continue-from checkpoints/grpo-qwen38-v1 --additional-steps 25 \
-  --output-dir checkpoints/grpo-qwen38-v1-step125 --dry-run
+  --continue-from checkpoints/grpo-qwen38-v1-step125 --additional-steps 25 \
+  --match-eval-limits --output-dir checkpoints/grpo-qwen38-v1-step150 --dry-run
 ```
 
 Remove `--dry-run` to train; repeat the same command after interruption.
-Training and judge settings are inherited from the completed run. See
+Training and judge settings are inherited from the completed run, with the
+explicit rollout-limit migration shown above. See
 [continuation and checkpoint selection](docs/grpo-continuation.md) for the
 resume semantics and a proposed development-evaluation stopping policy.
+
+To apply the current eval limits when continuing a checkpoint trained with the
+old 32,768-token context and 4,096-token responses, add `--match-eval-limits`.
+This records the changed rollout policy in a new run while preserving optimizer
+state and the original SFT KL reference.
 
 All commands run directly as Python modules; no Node.js or compilation step is required.
 The Makefile provides `serve`, `draw`, `render`, `dataset`, and

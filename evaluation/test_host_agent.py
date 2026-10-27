@@ -18,6 +18,7 @@ from inspect_ai.model import (
     GenerateInput, ModelOutput, ModelUsage, get_model,
 )
 from inspect_ai.tool import ToolCall
+from inspect_ai.util import TokenLimit
 from PIL import Image
 
 from evaluation.host_agent import SUBMIT, drawing_agent
@@ -113,6 +114,29 @@ class HostAgentTests(unittest.TestCase):
         self.assertEqual(samples[0].limit.type, "token")
         self.assertEqual(callback.await_count, 1)
         sbox.exec.assert_not_awaited()
+
+    def test_output_budget_allows_repeated_input_history_and_reaches_submission(self):
+        outputs = [reply("write program"), reply(SUBMIT)]
+        for output in outputs:
+            output.usage = ModelUsage(input_tokens=1000, output_tokens=10, total_tokens=1010)
+        samples, sbox = self.run_agent(outputs, lambda *a, **k: SimpleNamespace(
+            stdout="", stderr="", returncode=0, success=True),
+            token_limit=TokenLimit(tokens=50, type="output"))
+        self.assertIsNone(samples[0].error)
+        self.assertIsNone(samples[0].limit)
+        self.assertEqual(sbox.exec.await_count, 2)
+        self.assertEqual(sum(u.output_tokens for u in samples[0].model_usage.values()), 20)
+
+    def test_no_aggregate_budget_allows_output_beyond_the_previous_cap(self):
+        outputs = [reply(f"write part {i}") for i in range(8)] + [reply(SUBMIT)]
+        for output in outputs:
+            output.usage = ModelUsage(input_tokens=10000, output_tokens=4000, total_tokens=14000)
+        samples, sbox = self.run_agent(outputs, lambda *a, **k: SimpleNamespace(
+            stdout="", stderr="", returncode=0, success=True), token_limit=None)
+        self.assertIsNone(samples[0].error)
+        self.assertIsNone(samples[0].limit)
+        self.assertEqual(sbox.exec.await_count, 9)
+        self.assertEqual(sum(u.output_tokens for u in samples[0].model_usage.values()), 36000)
 
     def test_turn_budget_stops_repeated_text_answers(self):
         samples, sbox = self.run_agent([reply() for _ in range(17)], None)

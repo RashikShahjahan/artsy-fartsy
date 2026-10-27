@@ -5,9 +5,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def drawing_system_prompt() -> str:
-    """Keep the model-facing drawing task identical for training and evaluation."""
+def drawing_system_prompt(token_limit: int | None = 32768, token_limit_type: str = "all") -> str:
+    """Share drawing instructions while describing the caller's actual budget."""
     documentation = (ROOT / "docs/artcanvas.md").read_text()
+    token_description = "generated output" if token_limit_type == "output" else "total input and output"
+    token_budget = f" and {token_limit} {token_description} tokens" if token_limit is not None else ""
     return (
         "Fulfill the drawing request by writing /workspace/program.py. "
         "Use the installed ArtCanvas module to save output.png at 1920×1200. "
@@ -18,6 +20,6 @@ def drawing_system_prompt() -> str:
         "A text answer or a pre-existing PNG does not count. "
         'If you cannot fulfill the request, write only refusal.json containing {"reason":"..."} '
         "with a concise reason and do not create program.py. "
-        "You have at most sixteen model turns and 32768 total input and output tokens.\n\n"
+        f"You have at most sixteen model turns{token_budget}.\n\n"
         + documentation
     )

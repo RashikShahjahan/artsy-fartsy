@@ -17,7 +17,7 @@ from inspect_ai.dataset import Sample
 from inspect_ai.model import ChatMessageUser, ContentImage, ContentText, GenerateConfig, GenerateFilter, get_model
 from inspect_ai.scorer import Score, Scorer, Target, mean, scorer, stderr
 from inspect_ai.solver import TaskState
-from inspect_ai.util import sandbox
+from inspect_ai.util import TokenLimit, sandbox
 from PIL import Image
 
 from drawing.config import MODEL_ID
@@ -32,6 +32,8 @@ from drawing.judges import (
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_MODEL = MODEL_ID
+DEFAULT_MAX_TOKENS = 8192
+DEFAULT_TOKEN_LIMIT = None
 RUNTIME_VERSION = "artcanvas-v2"
 LOCAL_MODEL_URL = "http://127.0.0.1:8080/v1"
 TINKER_MODEL_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
@@ -98,7 +100,7 @@ def _model_api_key() -> str:
 
 
 def agent_generation_config() -> GenerateConfig:
-    return GenerateConfig(max_tokens=4096, temperature=0, max_retries=0,
+    return GenerateConfig(max_tokens=DEFAULT_MAX_TOKENS, temperature=0, max_retries=0,
                           reasoning_effort="none" if is_direct_tinker() else None,
                           timeout=120, max_connections=10)
 
@@ -309,16 +311,25 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                  safety_judge_model: str | None = None,
                  code_safety_judge_model: str | None = None, *,
                  temperature: float = 0.0, max_connections: int = 10,
+                 max_tokens: int = DEFAULT_MAX_TOKENS,
+                 token_limit: int | None = DEFAULT_TOKEN_LIMIT, token_limit_type: str = "output",
                  generation_filter: GenerateFilter | None = None) -> Task:
     if (type(temperature) not in (int, float) or not math.isfinite(temperature)
             or not 0 <= temperature <= 2):
         raise ValueError("temperature must be a finite number from 0 to 2")
     if type(max_connections) is not int or max_connections < 1:
         raise ValueError("max_connections must be positive")
+    if type(max_tokens) is not int or max_tokens < 1:
+        raise ValueError("max_tokens must be positive")
+    if token_limit is not None and (type(token_limit) is not int or token_limit < 1):
+        raise ValueError("token_limit must be positive or None")
+    if token_limit_type not in ("output", "all"):
+        raise ValueError("token_limit_type must be output or all")
 
     config = agent_generation_config()
     config.temperature = temperature
     config.max_connections = max_connections
+    config.max_tokens = max_tokens
     documentation = (ROOT / "docs/artcanvas.md").read_text()
     return Task(
         dataset=[Sample(id=row["id"], input=row["prompt"] + "\n\nPreview with: "
@@ -326,14 +337,19 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                         "--output /workspace/preview --preview < /workspace/program.py", metadata=row)
                  for row in specs],
          solver=drawing_agent(config=config, generation_filter=generation_filter,
-                              system_prompt=drawing_system_prompt()),
+                              system_prompt=drawing_system_prompt(token_limit, token_limit_type)),
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=config,
-        turn_limit=16, token_limit=32768, time_limit=1000,
+        turn_limit=16,
+        token_limit=TokenLimit(tokens=token_limit, type=token_limit_type) if token_limit is not None else None,
+        time_limit=1000,
         fail_on_error=False,
         metadata={"agent": AGENT_NAME, "agent_version": AGENT_VERSION,
                   "sampling_temperature": temperature,
+                  "max_tokens_per_response": max_tokens,
+                  "sample_token_limit": token_limit,
+                  "sample_token_limit_type": token_limit_type if token_limit is not None else None,
                   "runtime_version": RUNTIME_VERSION,
                   "dataset_sha256": sha256(json.dumps(specs, sort_keys=True).encode()),
                   "runtime_sha256": {name: sha256((ROOT / "runtime" / name).read_bytes())

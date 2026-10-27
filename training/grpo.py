@@ -19,7 +19,7 @@ from pathlib import Path
 import subprocess
 import sys
 
-from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
+from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
 from training.data import ROOT, digest
 from training.sft import RENDERER, batches
@@ -66,7 +66,7 @@ def load_run(args):
         "learning_rate": args.learning_rate, "clip_epsilon": args.clip_epsilon,
         "kl_coef": args.kl_coef, "normalize_rewards": args.normalize_rewards,
         "temperature": args.temperature, "max_tokens": args.max_tokens,
-        "max_length": args.max_length, "max_samples": args.max_samples,
+        "max_length": args.max_length, "max_sampled_tokens": None, "max_samples": args.max_samples,
         "seed": args.seed, "epochs": args.epochs, "max_steps": args.max_steps,
         "correctness_judge_model": os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL"),
         "correctness_judge_url": os.getenv("ARTSY_CORRECTNESS_JUDGE_URL"),
@@ -114,9 +114,17 @@ def load_continuation(args):
         raise ValueError("Continuation source must be a completed compatible Cookbook run")
     current_hashes = {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES}
     old_hashes = previous["source_sha256"]
+    migration = None
+    if args.match_eval_limits:
+        registry = json.loads((ROOT / "training/rollout_limit_migration.json").read_text())
+        migration = registry["files"]
     if set(old_hashes) != set(current_hashes) or any(
             old_hashes[p] != h for p, h in current_hashes.items()
-            if not (p == "training/grpo.py" and old_hashes[p] == LEGACY_GRPO_SHA256)):
+            if not ((p == "training/grpo.py" and old_hashes[p] == LEGACY_GRPO_SHA256
+                     and not args.match_eval_limits)
+                    or (migration is not None and p in migration
+                        and old_hashes[p] in migration[p]["from"]
+                        and h == migration[p]["to"]))):
         raise ValueError("Continuation source runtime or training dependencies changed")
     if (previous["model"] != MODEL_ID or previous["tokenizer_revision"] != MODEL_REVISION
             or previous["renderer"] != RENDERER or previous["image_size"] != IMAGE_SIZE
@@ -129,6 +137,8 @@ def load_continuation(args):
         raise ValueError("Continuation prompt selection changed")
     for key in INHERITED_PARAMETERS:
         setattr(args, key, previous[key])
+    if args.match_eval_limits:
+        args.max_tokens, args.max_length = 8192, MODEL_CONTEXT_WINDOW
     total = start + args.additional_steps
     args.epochs = math.ceil(total / math.ceil(len(specs) / args.batch_size))
     args.max_steps = total
@@ -139,6 +149,16 @@ def load_continuation(args):
                                "state_path": final["state_path"],
                                "sampler_path": final["sampler_path"],
                                "source_sha256": old_hashes}}
+    if args.match_eval_limits:
+        config.update(max_tokens=args.max_tokens, max_length=args.max_length,
+                      max_sampled_tokens=None)
+        config["continuation"]["limit_migration"] = {
+            "policy": "match-eval-limits-v1",
+            "registry_sha256": digest((ROOT / "training/rollout_limit_migration.json").read_bytes()),
+            "previous_limits": {k: previous.get(k) for k in
+                                ("max_tokens", "max_length", "max_sampled_tokens")},
+            "changed_sources": {p: {"from": old_hashes[p], "to": h}
+                                for p, h in current_hashes.items() if old_hashes[p] != h}}
     return specs, config, total
 
 
@@ -183,9 +203,8 @@ def make_cookbook_config(args, specs, plan, total):
             judge_max_tokens=plan.get("correctness_judge_max_tokens", 16384),
         ),
         learning_rate=args.learning_rate,
-        # The Cookbook rollout cap is cumulative; RolloutLimits separately
-        # enforces the per-turn max_tokens and context-size max_length.
-        max_tokens=args.max_length,
+        # Cookbook max_tokens is a per-call cap; no aggregate sampled cap.
+        max_tokens=args.max_tokens,
         temperature=args.temperature,
         loss_fn="ppo",
         loss_fn_config={"clip_low_threshold": 1 - args.clip_epsilon,
@@ -258,6 +277,8 @@ def parser():
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v1")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
+    p.add_argument("--match-eval-limits", action="store_true",
+                   help="Explicitly migrate a completed legacy run to reviewed eval rollout limits")
     p.add_argument("--additional-steps", type=int, help="Positive number of extra updates")
     p.add_argument("--finalize-only", action="store_true",
                    help="Recover final.json from a completed Cookbook run without training")
@@ -273,8 +294,8 @@ def parser():
     p.add_argument("--clip-epsilon", type=float, default=0.2)
     p.add_argument("--kl-coef", type=float, default=0.01)
     p.add_argument("--normalize-rewards", action="store_true")
-    p.add_argument("--max-tokens", type=int, default=4096, help="Maximum generated tokens per turn")
-    p.add_argument("--max-length", type=int, default=32768, help="Maximum trajectory context tokens")
+    p.add_argument("--max-tokens", type=int, default=8192, help="Maximum generated tokens per turn")
+    p.add_argument("--max-length", type=int, default=MODEL_CONTEXT_WINDOW, help="Maximum trajectory context tokens")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--save-every", type=int, default=1)
     return p
@@ -286,6 +307,8 @@ def main(argv=None):
     p = parser()
     arguments = list(sys.argv[1:] if argv is None else argv)
     args = p.parse_args(arguments)
+    if args.match_eval_limits and args.continue_from is None:
+        p.error("--match-eval-limits requires --continue-from")
     if args.continue_from is not None:
         forbidden = {"--" + k.replace("_", "-") for k in INHERITED_PARAMETERS}
         forbidden.update({"--epochs", "--max-steps", "--limit", "--init-checkpoint"})
@@ -311,7 +334,7 @@ def main(argv=None):
                                    args.save_every, args.max_tokens, args.max_length))
             or args.group_size < 2 or args.max_steps == 0 or args.max_steps < -1
             or (args.limit is not None and args.limit < 1)
-            or not 0 <= args.seed <= 2**32 - 1 or args.max_length > 32768
+            or not 0 <= args.seed <= 2**32 - 1 or args.max_length > MODEL_CONTEXT_WINDOW
             or args.max_tokens > args.max_length
             or any(not math.isfinite(v) for v in
                    (args.learning_rate, args.temperature, args.clip_epsilon, args.kl_coef))

@@ -169,3 +169,40 @@ class ContinuationTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             grpo.main(['--continue-from', str(self.origin), '--additional-steps', '4',
                        '--learn', '0.1', '--dry-run'])
+
+    def test_reviewed_limit_migration_preserves_state_and_rejects_unrelated_drift(self):
+        registry = json.loads((grpo.ROOT / 'training/rollout_limit_migration.json').read_text())
+        self.config.update(max_tokens=4096, max_length=32768)
+        for path, entry in registry['files'].items():
+            self.config['source_sha256'][path] = entry['from'][0]
+        self.write_source()
+        with self.assertRaisesRegex(ValueError, 'dependencies changed'):
+            grpo.load_continuation(self.args)
+        self.args.match_eval_limits = True
+        _, plan, _ = grpo.load_continuation(self.args)
+        self.assertEqual((plan['max_tokens'], plan['max_length']), (8192, 262144))
+        self.assertIsNone(plan['max_sampled_tokens'])
+        self.assertEqual(plan['reference_sampler_path'], self.config['reference_sampler_path'])
+        self.assertEqual(plan['continuation']['state_path'], self.record['state_path'])
+        self.assertEqual(plan['continuation']['limit_migration']['previous_limits']['max_length'], 32768)
+        for path in ('runtime/artcanvas.py', 'drawing/judges.py', 'training/cookbook_dataset.py'):
+            original = self.config['source_sha256'][path]
+            self.config['source_sha256'][path] = 'unreviewed'
+            self.write_source()
+            with self.assertRaisesRegex(ValueError, 'dependencies changed'):
+                grpo.load_continuation(self.args)
+            self.config['source_sha256'][path] = original
+
+    def test_actual_completed_run_migration_dry_run_is_read_only(self):
+        origin = grpo.ROOT / 'checkpoints/grpo-qwen38-v1-step125'
+        if not origin.exists():
+            self.skipTest('Local completed run unavailable')
+        before = {p.name: p.read_bytes() for p in origin.iterdir() if p.is_file()}
+        with patch.object(grpo, '_build_sandbox_image') as docker, patch.object(grpo, 'train') as train:
+            self.assertEqual(grpo.main(['--continue-from', str(origin), '--additional-steps', '1',
+                                       '--match-eval-limits', '--dry-run',
+                                       '--output-dir', str(self.root / 'actual')]), 0)
+        docker.assert_not_called()
+        train.assert_not_called()
+        self.assertFalse((self.root / 'actual').exists())
+        self.assertEqual(before, {p.name: p.read_bytes() for p in origin.iterdir() if p.is_file()})
