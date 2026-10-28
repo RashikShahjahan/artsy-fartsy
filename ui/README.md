@@ -39,11 +39,11 @@ Only clicking Generate or Run starts sampling; switching prompt source, model,
 or workspace does not. Dataset runs preserve canonical prompt text, seed,
 dataset hash, and prompt ID. Saved runs are scoped to the dataset revision.
 
-Generate launches the existing `evaluation.draw` CLI. Model calls use credits. No generated code is executed by the web server: the drawing CLI retains its Docker execution boundary. Only one UI job runs at a time. The Studio model dropdown contains Qwen3.5 4B, Inkling, and Inkling Small.
-Qwen uses the local native sampling bridge; Inkling models use Tinker's
-OpenAI-compatible endpoint with `TINKER_API_KEY` and 256K context model IDs.
-All three use the same Docker drawing harness. The Inkling models do not require
-the local bridge. Removed models are not restored to the dropdown by saved runs.
+Generate launches the existing `evaluation.draw` CLI. Model calls use credits. No generated code is executed by the web server: the drawing CLI retains its Docker execution boundary. Only one UI job runs at a time. The Studio model dropdown contains Qwen3.5 4B and GPT-6 Luna.
+Qwen uses the local native Tinker sampling bridge. GPT-6 Luna uses OpenRouter's
+OpenAI-compatible endpoint with `OPENROUTER_API_KEY` from the environment or `.env`.
+Both use the same Docker drawing harness. GPT-6 Luna does not require the local bridge.
+Removed models are not restored to the dropdown by saved runs.
 
 
 Runs are stored in `episodes/ui/<id>/`. The UI shows process output while running. After the CLI finishes, it exports the full Inspect logs with resolved attachments to `output/trace.json`. The completed-run timeline pairs each command with its recorded tool results, shows failed renders and inline previews, and distinguishes submission requests from final render validation. Source rewrites show a line diff against the previous successful write, with full commands and source available to expand. Model response timing and token counts appear when recorded. The Transcript view preserves all messages; the Events view searches full event data and loads raw records when expanded. Failed actions open automatically. Downloads include the final PNG, Python source, result JSON, and full trace when present. Refusals and failures are displayed without substituting artwork. Reloading the same browser tab resumes polling its last run. Run URLs include `#run=<id>` so a saved run can be reopened directly.

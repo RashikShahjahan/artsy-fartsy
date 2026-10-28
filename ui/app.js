@@ -269,7 +269,7 @@ let directModels = new Set();
 function updateModelAvailability() {
   const direct = directModels.has($('#model').value);
   const unavailable = !direct && (bridgeModels === null || !bridgeModels.includes($('#model').value));
-  $('#model-note').textContent = direct ? 'Tinker API · same Docker drawing harness and PNG previews.' : bridgeModels === null ? 'Native Tinker bridge is offline. Start make serve, then reload.'
+  $('#model-note').textContent = direct ? 'OpenRouter · GPT-6 Luna · Docker drawing harness and PNG previews.' : bridgeModels === null ? 'Native Tinker bridge is offline. Start make serve, then reload.'
     : unavailable ? 'This model is unavailable on the running bridge. Restart make serve, then reload.'
     : 'Native Tinker sampling · same Docker drawing harness and PNG previews.';
   $('#generate').disabled = Boolean(active) || unavailable || (drawingOnly && (!selectedDrawing || !drawingData));

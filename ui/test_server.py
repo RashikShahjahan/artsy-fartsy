@@ -183,16 +183,19 @@ class JobTests(unittest.TestCase):
 
     def test_studio_models_and_direct_routing(self):
         self.assertEqual([model['label'] for model in server.model_catalog()],
-                         ['Qwen3.5 · 4B', 'Inkling', 'Inkling Small'])
-        for model in server.INKLING_MODELS:
+                         ['Qwen3.5 · 4B', 'GPT-6 Luna'])
+        for model in server.DIRECT_MODELS:
             with tempfile.TemporaryDirectory() as temp, patch.object(server.subprocess, 'run') as run:
                 run.return_value.returncode = 0
                 server.run_job(Path(temp), {'prompt': 'circle', 'seed': 42, 'model': model['id']})
                 env = run.call_args.kwargs['env']
-                self.assertEqual(env['ARTSY_MODEL_URL'], server.TINKER_MODEL_URL)
+                self.assertEqual(env['ARTSY_MODEL_URL'], server.OPENROUTER_MODEL_URL)
                 self.assertNotIn('ARTSY_MODEL_API_KEY', env)
         with self.assertRaisesRegex(ValueError, 'available Studio model'):
             server.generation_request({'prompt': 'circle', 'seed': 42, 'model': 'artsy/retired'})
+        for retired in ('thinkingmachines/Inkling:peft:262144', 'thinkingmachines/Inkling-Small:peft:262144'):
+            with self.assertRaisesRegex(ValueError, 'available Studio model'):
+                server.generation_request({'prompt': 'circle', 'seed': 42, 'model': retired})
 
     def test_failure_is_recorded(self):
         with tempfile.TemporaryDirectory() as temp:

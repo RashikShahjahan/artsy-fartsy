@@ -14,16 +14,15 @@ from ui.shell import navigation, review_page, empty_page
 from urllib.request import urlopen
 
 from drawing.config import MODEL_ID
-from drawing.dataset_client import TINKER_MODEL_URL
+from drawing.dataset_client import OPENROUTER_MODEL_URL
 
-INKLING_MODELS = [
-    {"id": "thinkingmachines/Inkling:peft:262144", "label": "Inkling", "direct": True},
-    {"id": "thinkingmachines/Inkling-Small:peft:262144", "label": "Inkling Small", "direct": True},
+DIRECT_MODELS = [
+    {"id": "openai/gpt-6-luna", "label": "GPT-6 Luna", "direct": True},
 ]
 
 def model_catalog():
     return [{"id": MODEL_ID, "label": "Qwen3.5 · 4B", "model_path": None},
-            *[dict(model) for model in INKLING_MODELS]]
+            *[dict(model) for model in DIRECT_MODELS]]
 
 from drawing.dataset_specs import validate_specs
 
@@ -123,8 +122,8 @@ def run_job(directory, request):
     try:
         with (directory / 'console.txt').open('w') as output:
             environment = os.environ.copy()
-            direct = request['model'] in {model['id'] for model in INKLING_MODELS}
-            environment['ARTSY_MODEL_URL'] = TINKER_MODEL_URL if direct else 'http://127.0.0.1:8080/v1'
+            direct = request['model'] in {model['id'] for model in DIRECT_MODELS}
+            environment['ARTSY_MODEL_URL'] = OPENROUTER_MODEL_URL if direct else 'http://127.0.0.1:8080/v1'
             if direct:
                 environment.pop('ARTSY_MODEL_API_KEY', None)
             else:

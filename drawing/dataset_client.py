@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 TINKER_MODEL_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
+OPENROUTER_MODEL_URL = "https://openrouter.ai/api/v1"
 DEFAULT_DATA_MODEL = "thinkingmachines/Inkling:peft:262144"
 
 
@@ -23,7 +24,7 @@ def supports_image_input(model: str, base_url: str) -> bool:
 
 def endpoint_api_key(base_url: str, configured_key: str | None = None) -> str | None:
     """Resolve provider credentials only for their matching endpoint."""
-    if base_url.rstrip("/") == "https://openrouter.ai/api/v1":
+    if base_url.rstrip("/") == OPENROUTER_MODEL_URL:
         key = configured_key or os.getenv("OPENROUTER_API_KEY")
         if not key:
             raise ValueError("OpenRouter inference requires OPENROUTER_API_KEY")

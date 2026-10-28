@@ -9,7 +9,7 @@ __NAVIGATION__
 <p id="dataset-label" class="note">Loading prompts…</p><label for="drawing-search">Search drawing prompts</label><input id="drawing-search" type="search" placeholder="Search prompt or skill…"><label for="drawing-select">Choose a prompt</label><select id="drawing-select" size="6" aria-label="Drawing prompts"></select><p id="drawing-meta" class="note"></p></section>
 <form id="generation-form">
 <label for="prompt">Prompt</label><textarea id="prompt" maxlength="4000" placeholder="Describe what to draw…" required></textarea>
-<label for="model">Model</label><select id="model" required><option value="Qwen/Qwen3.5-4B">Qwen3.5 · 4B</option></select><p class="note" id="model-note">Choose Qwen3.5 4B, Inkling, or Inkling Small.</p>
+<label for="model">Model</label><select id="model" required><option value="Qwen/Qwen3.5-4B">Qwen3.5 · 4B</option></select><p class="note" id="model-note">Choose Qwen3.5 4B or GPT-6 Luna.</p>
 <div class="settings"><div><span class="field-label">Canvas</span><div class="fixed-field">1920 × 1200</div></div></div>
 <button class="primary" id="generate" type="submit">Generate</button><p class="note">Runs the drawing agent. Uses model credits.</p><p id="form-status" role="status"></p>
 </form><section id="drawing-history" class="drawing-history" hidden><h2>Runs for this prompt</h2><div id="drawing-runs"></div></section></section>

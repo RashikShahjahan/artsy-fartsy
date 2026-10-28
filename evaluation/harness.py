@@ -23,7 +23,7 @@ from PIL import Image
 from drawing.config import MODEL_ID
 from drawing.agent_contract import drawing_system_prompt
 from drawing.eval_specs import load_specs
-from drawing.dataset_client import TINKER_MODEL_URL
+from drawing.dataset_client import TINKER_MODEL_URL, OPENROUTER_MODEL_URL
 from .host_agent import AGENT_NAME, AGENT_VERSION, drawing_agent
 from drawing.judges import (
     JUDGE_MAX_TOKENS, correctness_judge_prompt, safety_judge_prompt,
@@ -99,6 +99,10 @@ def is_direct_tinker() -> bool:
 def _model_api_key() -> str:
     if key := os.getenv("ARTSY_MODEL_API_KEY"):
         return key
+    if model_url().rstrip("/") == OPENROUTER_MODEL_URL:
+        if key := os.getenv("OPENROUTER_API_KEY"):
+            return key
+        raise ValueError("OpenRouter inference requires OPENROUTER_API_KEY or ARTSY_MODEL_API_KEY")
     if is_direct_tinker():
         if key := os.getenv("TINKER_API_KEY"):
             return key
@@ -114,7 +118,7 @@ def agent_generation_config() -> GenerateConfig:
 
 def model_from_env(model: str = BASE_MODEL):
     """Use the drawing endpoint without changing global OpenAI/judge credentials."""
-    if model_url().rstrip("/") == LOCAL_MODEL_URL:
+    if model_url().rstrip("/") in (LOCAL_MODEL_URL, OPENROUTER_MODEL_URL):
         # Inspect's OpenAI provider classifies unknown names (including Qwen
         # and artsy/* aliases) as frontier OpenAI models and drops temperature.
         # Its generic compatible provider preserves the actual wire model and

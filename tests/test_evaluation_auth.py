@@ -4,10 +4,27 @@ import os
 import unittest
 from unittest.mock import patch
 
-from evaluation.harness import TINKER_MODEL_URL, drawing_task, model_from_env
+from evaluation.harness import TINKER_MODEL_URL, OPENROUTER_MODEL_URL, drawing_task, model_from_env
 
 
 class HostModelAuthTests(unittest.TestCase):
+    def test_openrouter_luna_uses_provider_key_and_preserves_wire_model(self):
+        with patch.dict(os.environ, {
+            'ARTSY_MODEL_URL': OPENROUTER_MODEL_URL,
+            'OPENROUTER_API_KEY': 'test-router-key',
+            'OPENAI_API_KEY': 'independent-judge-key',
+        }, clear=True):
+            before = dict(os.environ)
+            model = model_from_env('openai/gpt-6-luna')
+            self.assertEqual(model.api.api_key, 'test-router-key')
+            self.assertEqual(model.api.base_url, OPENROUTER_MODEL_URL)
+            self.assertEqual(model.api.service_model_name(), 'openai/gpt-6-luna')
+            self.assertFalse(model.model_args['responses_api'])
+            self.assertEqual(dict(os.environ), before)
+        with patch.dict(os.environ, {'ARTSY_MODEL_URL': OPENROUTER_MODEL_URL}, clear=True):
+            with self.assertRaisesRegex(ValueError, 'OPENROUTER_API_KEY'):
+                model_from_env('openai/gpt-6-luna')
+
     def test_local_model_initializes_without_openai_credentials(self):
         with patch.dict(os.environ, {
             "ARTSY_MODEL_API_KEY": "",
