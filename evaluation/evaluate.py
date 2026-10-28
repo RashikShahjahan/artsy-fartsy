@@ -318,8 +318,9 @@ def main() -> int:
             roles[f"{role}_grader"] = get_model(
                 ("openai-api/tinker/" if tinker_endpoint else "openai/") + model.removeprefix("openai/"),
                 base_url=url, api_key=endpoint_api_key(url, key) or "local-no-auth",
-                config=GenerateConfig(reasoning_effort="low") if tinker_endpoint else GenerateConfig(),
-                responses_api=False, **({"stream": False, "extra_body": {"separate_reasoning": True}} if tinker_endpoint else {}))
+                config=GenerateConfig(reasoning_effort="low", extra_body={"separate_reasoning": True})
+                       if tinker_endpoint else GenerateConfig(),
+                responses_api=False, **({"stream": False} if tinker_endpoint else {}))
         else:
             roles[f"{role}_grader"] = get_model(model)
     logs = eval(

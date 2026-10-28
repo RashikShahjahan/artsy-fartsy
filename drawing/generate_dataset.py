@@ -293,7 +293,7 @@ async def main(argv: list[str] | None = None) -> int:
     code_safety_model = args.code_safety_judge_model or os.getenv("ARTSY_CODE_SAFETY_JUDGE_MODEL") or safety_model
     code_safety_url = args.code_safety_judge_url or os.getenv("ARTSY_CODE_SAFETY_JUDGE_URL") or safety_url
     # Judges use separate calls and role prompts; the same hosted model may
-    # serve teaching and judging (for example GLM on Tinker).
+    # serve teaching and judging (for example Inkling Small on Tinker).
     teacher_key = os.getenv("ARTSY_TEACHER_API_KEY") or os.getenv("TEACHER_API_KEY")
     timeout_ms = int(args.timeout_ms)
     if timeout_ms < 1 or timeout_ms > 300_000:

@@ -8,8 +8,9 @@ import json
 from PIL import Image
 
 from drawing.tinker_client import TinkerChatClient
+from drawing.dataset_client import DEFAULT_DATA_MODEL, TINKER_MODEL_URL, chat_client
 
-DEFAULT_MODEL = "Qwen/Qwen3.5-9B"
+DEFAULT_MODEL = DEFAULT_DATA_MODEL
 PROMPT = (
     "Compare artworks A and B on visual aesthetics only: composition, coherence, "
     "color, balance, craftsmanship and expressive appeal. Do not grade instruction "
@@ -109,6 +110,11 @@ class TinkerPairwiseJudge:
                  max_tokens: int = 2048, timeout_ms: int = 300_000):
         if max_tokens < 1:
             raise ValueError("max_tokens must be positive")
+        if model.startswith("thinkingmachines/Inkling"):
+            self.client = chat_client({"model": sampler_path or model, "baseUrl": TINKER_MODEL_URL,
+                                       "timeoutMs": timeout_ms})
+            self.max_tokens = max_tokens
+            return
         if renderer is None:
             from tinker_cookbook.model_info import get_recommended_renderer_name
             renderer = get_recommended_renderer_name(model)

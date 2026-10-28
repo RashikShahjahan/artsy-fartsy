@@ -6,7 +6,7 @@ import math
 import random
 
 from .data import load_pairs
-from .judge import DEFAULT_MODEL
+DEFAULT_MODEL = "Qwen/Qwen3.5-9B"
 
 
 def train(args) -> None:

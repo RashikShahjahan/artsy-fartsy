@@ -206,11 +206,11 @@ calibrated benchmark or a claim of template-family separation from training.
 .eval-venv/bin/python -m evaluation.evaluate --execution-only --limit 1 --output eval-results/base-smoke
 
 # Full evaluations use two independent Inspect grader roles:
-export ARTSY_CORRECTNESS_JUDGE_MODEL=your-correctness-vision-model
-export ARTSY_SAFETY_JUDGE_MODEL=your-safety-vision-model
+export ARTSY_CORRECTNESS_JUDGE_MODEL=thinkingmachines/Inkling-Small:peft:262144
+export ARTSY_SAFETY_JUDGE_MODEL=thinkingmachines/Inkling-Small:peft:262144
 # For separately hosted OpenAI-compatible endpoints, also set:
-export ARTSY_CORRECTNESS_JUDGE_URL=http://127.0.0.1:9001/v1
-export ARTSY_SAFETY_JUDGE_URL=http://127.0.0.1:9002/v1
+export ARTSY_CORRECTNESS_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
+export ARTSY_SAFETY_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
 # Set ARTSY_CORRECTNESS_JUDGE_API_KEY and ARTSY_SAFETY_JUDGE_API_KEY if needed.
 
 # Run all checks; repeat with --epochs 3 to measure variability:
@@ -345,10 +345,19 @@ supply slice counts (for example, `--harmful-count` or
 
 **Generate evaluation prompts balanced across difficulty levels:**
 
+Dataset authors and all evaluation judges use Inkling Small on Tinker:
+`thinkingmachines/Inkling-Small:peft:262144` at
+`https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1`.
+Copy `.env.example` to `.env` for a new setup and supply `TINKER_API_KEY`.
+Prompt writing/review, teaching with PNG repair observations, correctness,
+image safety, code safety, and the default pairwise preference evaluator all
+use this model. The client separates reasoning from the final answer and uses
+low reasoning effort. Judge roles make separate calls with their own prompts.
+
 ```sh
 # Choose a capable prompt-writing model, with an OpenAI-compatible endpoint.
-export ARTSY_PROMPT_MODEL=your-prompt-writer
-export ARTSY_PROMPT_URL=http://127.0.0.1:9000/v1
+export ARTSY_PROMPT_MODEL=thinkingmachines/Inkling-Small:peft:262144
+export ARTSY_PROMPT_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
 # Set ARTSY_PROMPT_API_KEY if the endpoint requires authentication.
 
 .venv/bin/python -m drawing.generate_dataset --prompts-only --count 20 --difficulty mixed --seed 42 --output datasets/validation-v9
@@ -455,8 +464,8 @@ success separately under `refusal_by_category` for each unsafe class.
 **Generate training programs using a stronger teacher:**
 
 ```sh
-export ARTSY_TEACHER_MODEL=your-teacher-model
-export ARTSY_TEACHER_URL=http://127.0.0.1:9000/v1
+export ARTSY_TEACHER_MODEL=thinkingmachines/Inkling-Small:peft:262144
+export ARTSY_TEACHER_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
 # Set ARTSY_TEACHER_API_KEY if needed.
 # ARTSY_PROMPT_MODEL/URL are optional here; they default to the teacher.
 .venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --repairs 2 --output datasets/llm-pilot
@@ -535,11 +544,11 @@ Teacher-authored refusals have no rendered drawing and are not automatically
 converted into SFT demonstrations.
 
 ```sh
-export ARTSY_CORRECTNESS_JUDGE_MODEL=your-correctness-vision-model
-export ARTSY_SAFETY_JUDGE_MODEL=your-safety-vision-model
+export ARTSY_CORRECTNESS_JUDGE_MODEL=thinkingmachines/Inkling-Small:peft:262144
+export ARTSY_SAFETY_JUDGE_MODEL=thinkingmachines/Inkling-Small:peft:262144
 # Set these only when using separately hosted OpenAI-compatible endpoints:
-export ARTSY_CORRECTNESS_JUDGE_URL=http://127.0.0.1:9001/v1
-export ARTSY_SAFETY_JUDGE_URL=http://127.0.0.1:9002/v1
+export ARTSY_CORRECTNESS_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
+export ARTSY_SAFETY_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
 # Set ARTSY_CORRECTNESS_JUDGE_API_KEY and ARTSY_SAFETY_JUDGE_API_KEY if needed.
 .venv/bin/python -m drawing.generate_dataset --count 20 --output datasets/llm-graded
 ```
@@ -826,21 +835,17 @@ Docker, and configure the following environment variables or local `.env` values
 
 ```dotenv
 TINKER_API_KEY=your-tinker-api-key
-ARTSY_CORRECTNESS_JUDGE_MODEL=Qwen/Qwen3.8-27B
-ARTSY_CORRECTNESS_JUDGE_URL=tinker://native
-ARTSY_CORRECTNESS_JUDGE_RENDERER=qwen3_8_medium_reasoning
+ARTSY_CORRECTNESS_JUDGE_MODEL=thinkingmachines/Inkling-Small:peft:262144
+ARTSY_CORRECTNESS_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
 ARTSY_CORRECTNESS_JUDGE_MAX_TOKENS=16384
-# Optional pinned tokenizer/processor metadata:
-# ARTSY_CORRECTNESS_JUDGE_REVISION=<model-repository-commit>
-
-ARTSY_SAFETY_JUDGE_MODEL=your-content-safety-model
-ARTSY_SAFETY_JUDGE_URL=https://your-provider.example/v1
-ARTSY_CODE_SAFETY_JUDGE_MODEL=your-code-safety-model
-ARTSY_CODE_SAFETY_JUDGE_URL=https://your-provider.example/v1
+ARTSY_SAFETY_JUDGE_MODEL=thinkingmachines/Inkling-Small:peft:262144
+ARTSY_SAFETY_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
+ARTSY_CODE_SAFETY_JUDGE_MODEL=thinkingmachines/Inkling-Small:peft:262144
+ARTSY_CODE_SAFETY_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
 ```
 
-Set corresponding `ARTSY_*_JUDGE_API_KEY` variables when a provider requires
-credentials. Safety roles must each be explicitly configured. Native Tinker
+The Tinker endpoint uses `TINKER_API_KEY` for every role. Other providers may
+use corresponding `ARTSY_*_JUDGE_API_KEY` variables. Safety roles must each be explicitly configured. Native Tinker
 judges use `tinker://native` and a renderer appropriate to their model. HTTP
 OpenAI-compatible judges are also supported. See [DPO and RL
 setup](docs/preference-rlhf.md) and the [reward architecture](docs/rlhf-architecture.md).

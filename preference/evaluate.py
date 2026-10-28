@@ -4,6 +4,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 from .data import load_pairs
 from .judge import DEFAULT_MODEL, TinkerPairwiseJudge
@@ -39,6 +42,7 @@ async def evaluate(args) -> None:
 
 
 def main() -> None:
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", required=True)
     parser.add_argument("--split", choices=("validation", "test"), default="validation")

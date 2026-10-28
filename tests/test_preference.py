@@ -51,7 +51,7 @@ class PreferenceTests(unittest.TestCase):
         self.assertEqual(images[1].getpixel((0, 0)), (0, 0, 255))
 
     def test_compare_mock(self):
-        judge = TinkerPairwiseJudge(renderer="mock", sampler_path="tinker://saved")
+        judge = TinkerPairwiseJudge(model="Qwen/Qwen3.5-9B", renderer="mock", sampler_path="tinker://saved")
         self.assertEqual(judge.client.sampler_path, "tinker://saved")
         judge.client.complete = AsyncMock(return_value={"text": '{"winner":"B"}'})
         self.assertEqual(asyncio.run(judge.compare(png("red"), png("blue"))), "B")
@@ -59,6 +59,17 @@ class PreferenceTests(unittest.TestCase):
         judge.client.complete = AsyncMock(return_value={"text": "malformed"})
         with self.assertRaises(ValueError):
             asyncio.run(judge.compare(png("red"), png("blue")))
+
+    def test_default_judge_uses_inkling_http_with_two_images(self):
+        from drawing.dataset_client import DEFAULT_DATA_MODEL, TINKER_MODEL_URL
+        with patch.dict("os.environ", {"TINKER_API_KEY": "test-tinker-key"}):
+            judge = TinkerPairwiseJudge()
+        self.assertEqual(judge.client.model, DEFAULT_DATA_MODEL)
+        self.assertEqual(judge.client.baseUrl, TINKER_MODEL_URL)
+        judge.client.complete = AsyncMock(return_value={"text": '{"winner":"A"}'})
+        self.assertEqual(asyncio.run(judge.compare(png("red"), png("blue"))), "A")
+        messages = judge.client.complete.call_args.args[0]
+        self.assertEqual(sum(part["type"] == "image_url" for part in messages[0]["content"]), 2)
 
     def test_dataset_validation_and_reverse(self):
         with tempfile.TemporaryDirectory() as directory:

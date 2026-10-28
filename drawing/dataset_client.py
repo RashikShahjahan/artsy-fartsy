@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 TINKER_MODEL_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
-GLM_MODEL = "zai-org/GLM-5.3-Flash:peft:262144"
+DEFAULT_DATA_MODEL = "thinkingmachines/Inkling-Small:peft:262144"
 
 
 def supports_image_input(model: str, base_url: str) -> bool:
@@ -49,6 +49,7 @@ class ChatClient:
     baseUrl: str
     api_key: str | None = field(default=None, repr=False)
     timeout_ms: int = 60_000
+    max_tokens: int = 2048
 
     async def complete(self, messages: list[Message], max_tokens: int, *, temperature: float | None = None) -> Completion:
         try:
@@ -71,7 +72,7 @@ class ChatClient:
             request_body["temperature"] = temperature
         if self.baseUrl == TINKER_MODEL_URL:
             request_body["separate_reasoning"] = True
-            if self.model.startswith("zai-org/GLM-5.3"):
+            if self.model.startswith(("thinkingmachines/Inkling", "zai-org/GLM-5.3")):
                 request_body["reasoning_effort"] = "low"
         payload = json.dumps(request_body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         headers = {"Content-Type": "application/json"}
@@ -157,9 +158,12 @@ def chat_client(options: dict[str, Any]):
     timeout = options.get("timeoutMs", 60_000)
     if type(timeout) is not int or timeout < 1:
         raise ValueError("timeoutMs must be a positive integer")
+    budget = options.get("maxTokens", 2048)
+    if type(budget) is not int or budget < 1:
+        raise ValueError("maxTokens must be a positive integer")
     key = options.get("apiKey")
     return ChatClient(model=model, baseUrl=base, api_key=endpoint_api_key(base, key if isinstance(key, str) else None),
-                      timeout_ms=timeout)
+                      timeout_ms=timeout, max_tokens=budget)
 
 
 def parse_json_reply(text: str) -> Any:
