@@ -19,7 +19,8 @@ HELP = """Python dataset generation
   --seed N              Taxonomy/slot seed (default: 42; prompt text is model-generated)
   --input FILE          Custom JSONL specs instead of the built-in curriculum
   --drafts-from DIR     Reuse unmodified model drafts (repeatable)
-  --image-observations  Inspect actual PNGs and include them in visual repairs
+  --image-observations     Include PNGs in visual repairs (default with vision judges)
+  --no-image-observations  Disable PNG observations for teacher repairs
   --candidates N        Programs per prompt (default: 2)
   --workers N           Independent prompts processed concurrently, 1–8
   --repairs N           Repairs per candidate, 0–2 (default: 2)
@@ -91,7 +92,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--input")
     parser.add_argument("--workers")
     parser.add_argument("--drafts-from", action="append")
-    parser.add_argument("--image-observations", action="store_true", default=None)
+    parser.add_argument("--image-observations", dest="image_observations", action="store_true")
+    parser.add_argument("--no-image-observations", dest="image_observations", action="store_false")
+    parser.set_defaults(image_observations=None)
     parser.add_argument("--candidates")
     parser.add_argument("--repairs", default="2")
     parser.add_argument("--max-tokens")
@@ -252,11 +255,14 @@ async def main(argv: list[str] | None = None) -> int:
         return 0
     if not model and any(spec.get("kind") != "refusal" for spec in specs):
         raise ValueError("Set --teacher-model or ARTSY_TEACHER_MODEL for drawing solutions")
-    image_observations = bool(args.image_observations)
     correctness_model = args.correctness_judge_model or os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL")
     safety_model = args.safety_judge_model or os.getenv("ARTSY_SAFETY_JUDGE_MODEL")
     if bool(correctness_model) != bool(safety_model):
         raise ValueError("Set both correctness and safety judge models, or neither")
+    # A judged generation run should let the teacher see the rendered preview
+    # when repairing a visual failure. Judge-free review runs remain supported.
+    image_observations = (bool(correctness_model) if args.image_observations is None
+                          else args.image_observations)
     if image_observations and not correctness_model:
         raise ValueError("--image-observations requires both vision judges")
     correctness_url = args.correctness_judge_url or os.getenv("ARTSY_CORRECTNESS_JUDGE_URL") or base_url

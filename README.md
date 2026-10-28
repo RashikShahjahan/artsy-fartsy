@@ -556,6 +556,10 @@ successful one-shot drawings and naturally occurring repairs. A dataset is resum
 within its output directory. Use higher `--difficulty` settings to stress repair behavior;
 there is no dedicated repair-prompt quota or warmup selection workflow.
 
+When both vision judges are configured, generated PNG previews are shown to the
+teacher by default during visual repairs. Use `--no-image-observations` to turn
+this off. Runs without vision judges continue to work without image feedback;
+SFT export separately preserves every successful preview as a tool observation.
 
 ## Supervised fine-tuning with Tinker
 
