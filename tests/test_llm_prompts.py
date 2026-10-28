@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from drawing.dataset_specs import SKILL_TAXONOMY, validate_specs
 from drawing.generate_dataset import main as cli_main
-from drawing.llm_prompts import _parse_batch, _slots, generate_llm_prompts
+from drawing.llm_prompts import WORD_RANGES, _parse_batch, _slots, generate_llm_prompts
 
 
 async def main(argv):
@@ -183,7 +183,13 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
                 self.assertLessEqual(max(counts.values()) - min(counts.values()), 1)
                 themes = Counter(x['contentTheme'] for x in rows)
                 self.assertLessEqual(max(themes.values()), (len(rows)+27)//28)
-                self.assertTrue(all(8 <= x['wordRange'][0] <= x['wordRange'][1] <= 150 for x in rows))
+                lengths = Counter(tuple(x['wordRange']) for x in rows)
+                self.assertEqual(set(lengths), set(WORD_RANGES))
+                self.assertLessEqual(max(lengths.values()) - min(lengths.values()), 1)
+                for key in ('requestStructure', 'detailLevel'):
+                    counts = Counter(x[key] for x in rows)
+                    self.assertGreater(len(counts), 1)
+                    self.assertLessEqual(max(counts.values()) - min(counts.values()), 1)
                 self.assertGreater(len({x['artStyle'] for x in rows}), 1)
                 self.assertGreater(len({x['voice'] for x in rows}), 1)
             harmful = [x['unsafeIntent'] for x in plan if x.get('safetyCategory') == 'harmful_image']
@@ -192,6 +198,9 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
         for family in {x['family'] for x in plan}:
             self.assertEqual({x['difficulty'] for x in plan if x['family']==family},
                              {'easy','medium','hard','very-hard'})
+        for difficulty in ('easy', 'medium', 'hard', 'very-hard'):
+            plan = _slots(48, 42, difficulty=difficulty)
+            self.assertEqual({tuple(x['wordRange']) for x in plan}, set(WORD_RANGES))
 
     def test_requested_benchmark_mix_has_generated_boundaries(self):
         from collections import Counter

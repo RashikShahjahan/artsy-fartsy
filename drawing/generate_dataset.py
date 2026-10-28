@@ -22,15 +22,15 @@ HELP = """Python dataset generation
   --candidates N        Programs per prompt (default: 2)
   --workers N           Independent prompts processed concurrently, 1–8
   --repairs N           Repairs per candidate, 0–2 (default: 2)
-  --max-tokens N        Teacher tokens per request (default: 4096; repair: 8192)
+  --max-tokens N        Optional teacher output-token limit (default: no limit)
   --prompt-model ID     Prompt-writing LLM (defaults to teacher model)
   --prompt-url URL      Prompt-writing endpoint (defaults to teacher URL)
   --prompt-batch-size N Concurrent single-prompt LLM requests, 1–8 (default: 8)
-  --prompt-max-tokens N Prompt-writer output tokens per request (default: 4096)
+  --prompt-max-tokens N Optional prompt-writer output-token limit (default: no limit)
   --prompt-retries N    Attempts per individual prompt, 1–5 (default: 5)
   --teacher-model ID    Required for rendering, or set ARTSY_TEACHER_MODEL
   --teacher-url URL     Chat base URL (default: http://127.0.0.1:8080/v1)
-  --timeout-ms N        Per-request deadline (default: 60000)
+  --timeout-ms N        Per-request deadline (default: 300000)
   --prompts-only        Generate/save prompts with resumable audit; no rendering
   --dry-run             Alias for --prompts-only (calls LLMs and saves files)
   --retry-errors        Retry checkpointed infrastructure failures on resume
@@ -90,11 +90,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-model")
     parser.add_argument("--prompt-url")
     parser.add_argument("--prompt-batch-size", default="8")
-    parser.add_argument("--prompt-max-tokens", default="4096")
+    parser.add_argument("--prompt-max-tokens")
     parser.add_argument("--prompt-retries", default="5")
     parser.add_argument("--teacher-model")
     parser.add_argument("--teacher-url")
-    parser.add_argument("--timeout-ms", default="60000")
+    parser.add_argument("--timeout-ms", default="300000")
     parser.add_argument("--dry-run", "--prompts-only", dest="prompts_only", action="store_true")
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--help", "-h", action="store_true")
@@ -150,7 +150,7 @@ async def main(argv: list[str] | None = None) -> int:
         "count": count, "harmfulCount": harmful_count, "maliciousCodeCount": malicious_code_count,
         "difficulty": args.difficulty, "benignBoundaryCount": benign_boundary_count,
         "seed": seed, "model": prompt_model, "baseUrl": prompt_url,
-        "batchSize": int(args.prompt_batch_size), "maxTokens": int(args.prompt_max_tokens),
+        "batchSize": int(args.prompt_batch_size), "maxTokens": int(args.prompt_max_tokens) if args.prompt_max_tokens is not None else None,
         "retries": int(args.prompt_retries),
         "authorInstructionsHash": sha256(AUTHOR_SYSTEM),
     }
@@ -166,7 +166,13 @@ async def main(argv: list[str] | None = None) -> int:
         if plan_path.exists():
             saved = json.loads(plan_path.read_text(encoding="utf-8"))
             if saved.get("config") != prompt_config:
-                raise ValueError("Prompt generator configuration changed; use a new output directory")
+                # Reuse prior prompts when the only difference is removal of the
+                # optional output-token cap. Keep their original config as provenance.
+                saved_config = saved.get("config")
+                uncapped_config = {**saved_config, "maxTokens": None} if isinstance(saved_config, dict) else None
+                if uncapped_config != prompt_config:
+                    raise ValueError("Prompt generator configuration changed; use a new output directory")
+                prompt_config = saved_config
             specs = validate_specs(saved["specs"])
             if len(specs) != count or sha256(compact_json(specs)) != saved.get("specsHash"):
                 raise ValueError("Stored prompt plan was modified; use a new output directory")
@@ -223,7 +229,7 @@ async def main(argv: list[str] | None = None) -> int:
                     difficulty=args.difficulty, harmful_count=harmful_count,
                     malicious_code_count=malicious_code_count, benign_boundary_count=benign_boundary_count,
                     batch_size=prompt_config["batchSize"],
-                    max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"],
+                    max_tokens=(int(args.prompt_max_tokens) if args.prompt_max_tokens is not None else None), retries=prompt_config["retries"],
                     completed=completed, on_record=on_record, on_attempt=save_attempt)
                 specs = generated["specs"]
                 _write_json(plan_path, {"config": prompt_config, "specs": specs,
@@ -250,7 +256,7 @@ async def main(argv: list[str] | None = None) -> int:
         raise ValueError("timeout-ms must be an integer from 1 to 300000")
     teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms}) if model else None
     options = {"output": output, "candidates": int(args.candidates or 2),
-        "repairs": int(args.repairs), "maxTokens": int(args.max_tokens or 4096),
+        "repairs": int(args.repairs), "maxTokens": int(args.max_tokens) if args.max_tokens is not None else None,
         "workers": int(args.workers or 1),
         "retryErrors": args.retry_errors,
         "draftsFrom": args.drafts_from, "teacher": teacher,

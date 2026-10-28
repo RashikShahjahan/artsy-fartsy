@@ -22,7 +22,12 @@ def supports_image_input(model: str, base_url: str) -> bool:
 
 
 def endpoint_api_key(base_url: str, configured_key: str | None = None) -> str | None:
-    """Use Tinker credentials only for the Tinker endpoint."""
+    """Resolve provider credentials only for their matching endpoint."""
+    if base_url.rstrip("/") == "https://openrouter.ai/api/v1":
+        key = configured_key or os.getenv("OPENROUTER_API_KEY")
+        if not key:
+            raise ValueError("OpenRouter inference requires OPENROUTER_API_KEY")
+        return key
     if base_url.rstrip("/") == TINKER_MODEL_URL:
         key = configured_key or os.getenv("TINKER_API_KEY")
         if not key:
@@ -51,13 +56,13 @@ class ChatClient:
     timeout_ms: int = 60_000
     max_tokens: int = 2048
 
-    async def complete(self, messages: list[Message], max_tokens: int, *, temperature: float | None = None) -> Completion:
+    async def complete(self, messages: list[Message], max_tokens: int | None = None, *, temperature: float | None = None) -> Completion:
         try:
             return await asyncio.wait_for(asyncio.to_thread(self._complete, messages, max_tokens, temperature), self.timeout_ms / 1000)
         except asyncio.TimeoutError:
             raise RuntimeError("Chat endpoint request timed out") from None
 
-    def _complete(self, messages: list[Message], max_tokens: int, temperature: float | None = None) -> Completion:
+    def _complete(self, messages: list[Message], max_tokens: int | None, temperature: float | None = None) -> Completion:
         if not supports_image_input(self.model, self.baseUrl) and any(
                 part.get("type") == "image_url" for message in messages
                 if isinstance(message["content"], list) for part in message["content"]):
@@ -65,9 +70,10 @@ class ChatClient:
         request_body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": max_tokens,
             "stream": False,
         }
+        if max_tokens is not None:
+            request_body["max_tokens"] = max_tokens
         if temperature is not None:
             request_body["temperature"] = temperature
         if self.baseUrl == TINKER_MODEL_URL:

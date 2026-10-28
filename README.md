@@ -347,19 +347,20 @@ supply slice counts (for example, `--harmful-count` or
 
 **Generate evaluation prompts balanced across difficulty levels:**
 
-Dataset authors and all evaluation judges use Inkling on Tinker:
-`thinkingmachines/Inkling:peft:262144` at
+Prompt writing and teaching use `openai/gpt-6-luna` through OpenRouter
+(`https://openrouter.ai/api/v1`). Copy `.env.example` to `.env` for a new
+setup and supply `OPENROUTER_API_KEY` for dataset generation and
+`TINKER_API_KEY` for evaluation judges.
+Benchmark correctness, image safety, code safety, and the default pairwise
+preference evaluator use `thinkingmachines/Inkling:peft:262144` at
 `https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1`.
-Copy `.env.example` to `.env` for a new setup and supply `TINKER_API_KEY`.
-Prompt writing, teaching, benchmark correctness, image safety, code safety,
-and the default pairwise preference evaluator all use this model. The client separates reasoning from the final answer and uses
-low reasoning effort. Judge roles make separate calls with their own prompts.
+The HTTP client separates reasoning from the final answer and uses low reasoning
+effort for Inkling. Judge roles make separate calls with their own prompts.
 
 ```sh
-# Choose a capable prompt-writing model, with an OpenAI-compatible endpoint.
-export ARTSY_PROMPT_MODEL=thinkingmachines/Inkling:peft:262144
-export ARTSY_PROMPT_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
-# Set ARTSY_PROMPT_API_KEY if the endpoint requires authentication.
+# Use GPT-6 Luna through OpenRouter (requires OPENROUTER_API_KEY).
+export ARTSY_PROMPT_MODEL=openai/gpt-6-luna
+export ARTSY_PROMPT_URL=https://openrouter.ai/api/v1
 
 .venv/bin/python -m drawing.generate_dataset --prompts-only --count 20 --difficulty mixed --seed 42 --output datasets/validation-v9
 .venv/bin/python -m evaluation.evaluate --dataset datasets/validation-v9/prompts.jsonl --dry-run
@@ -372,7 +373,7 @@ prompts to review safety slices and record their approval separately.
 `--prompts-only` calls only the prompt-writing LLM,
 saves a resumable run under `--output`, and prints the final JSONL without running
 a teacher or renderer. `--dry-run` is a compatibility alias with the same API calls
-and file writes. Use a fresh output directory for the v11 generator and v6 candidate format;
+and file writes. Use a fresh output directory for the v12 generator and v6 candidate format;
 earlier frozen datasets remain unchanged. With an explicit
 `--count` and no slice flags, all prompts are benign. Each ordinary prompt is a
 standalone user request with a saved `difficulty` label: `easy`, `medium`, `hard`, or `very-hard`. `mixed` plans equal quotas across
@@ -438,8 +439,13 @@ for human review. Only parsing, execution budgets, PNG validity and artifact int
 checks remain. Code that fails to execute can still be repaired within `--repairs`.
 Evaluation judges remain available for benchmark scoring, independently of datagen.
 
-The v11 prompt planner pins refusal counts and categories in checkpoints;
-use a fresh output directory for this version.
+The v12 prompt planner independently balances length bands (8–25, 35–70, 90–150,
+and 180–300 words), voices, request structures and levels of visual detail within
+each slice. Length is independent of drawing difficulty. Format and art style are
+suggestions used according to the assigned detail level, so some requests leave
+those choices open. These are authoring instructions, not acceptance checks.
+The planner pins refusal counts and categories in checkpoints; use a fresh output
+directory for this version.
 
 The current code-safety release adds 50 pairs to the 853-record `sft-v1` dataset
 in `datasets/sft-v1/accepted-with-code-refusals.jsonl` (903 records total). Use
@@ -456,9 +462,9 @@ success separately under `refusal_by_category` for each unsafe class.
 **Generate training programs using a stronger teacher:**
 
 ```sh
-export ARTSY_TEACHER_MODEL=thinkingmachines/Inkling:peft:262144
-export ARTSY_TEACHER_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
-# Set ARTSY_TEACHER_API_KEY if needed.
+export ARTSY_TEACHER_MODEL=openai/gpt-6-luna
+export ARTSY_TEACHER_URL=https://openrouter.ai/api/v1
+# Set OPENROUTER_API_KEY for authentication.
 # ARTSY_PROMPT_MODEL/URL are optional here; they default to the teacher.
 .venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --repairs 2 --output datasets/llm-pilot
 ```

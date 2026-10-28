@@ -133,8 +133,8 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
             record["trace"].append(trace)
             messages.append({"role": "assistant", "content": completion["text"]})
             if not completion.get("usage"):
-                trace["error"] = "Token usage unavailable; charged maximum requested tokens"
-            charged = await env.charge_tokens(completion.get("usage", {}).get("completion_tokens", options.get("maxTokens", 4096)))
+                trace["error"] = "Token usage unavailable; completion tokens could not be charged"
+            charged = await env.charge_tokens(completion.get("usage", {}).get("completion_tokens", 0))
             if not charged.get("ok"):
                 record["reason"] = "Episode token budget exhausted"; break
             try:
@@ -190,7 +190,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     max_tokens, workers = options.get("maxTokens", 4096), options.get("workers", 1)
     if type(workers) is not int or not 1 <= workers <= 8: raise ValueError("workers must be an integer from 1 to 8")
     if type(candidates) is not int or candidates < 1: raise ValueError("candidates must be a positive integer")
-    if type(max_tokens) is not int or max_tokens < 1: raise ValueError("maxTokens must be a positive integer")
+    if max_tokens is not None and (type(max_tokens) is not int or max_tokens < 1): raise ValueError("maxTokens must be positive when supplied")
     if type(repairs) is not int or not 0 <= repairs <= 2: raise ValueError("repairs must be 0, 1, or 2 (the environment permits three previews)")
     output.mkdir(parents=True, exist_ok=True)
     lock_path = output / ".generation.lock"
@@ -221,7 +221,12 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         manifest_path = output / "manifest.json"
         if manifest_path.exists():
             previous = json.loads(manifest_path.read_text(encoding="utf-8"))
-            if previous != manifest: raise ValueError("Dataset configuration changed; use a new output directory")
+            if previous != manifest:
+                uncapped_previous = {**previous, "maxTokens": None} if isinstance(previous, dict) else None
+                if manifest["maxTokens"] is None and uncapped_previous == manifest:
+                    _write_json(manifest_path, manifest)
+                else:
+                    raise ValueError("Dataset configuration changed; use a new output directory")
         else: _write_json(manifest_path, manifest)
         (output / "prompts.jsonl").write_text("".join(compact_json(s) + "\n" for s in specs), encoding="utf-8")
         records_path = output / "records"; records_path.mkdir(parents=True, exist_ok=True)
