@@ -44,7 +44,7 @@ def train(args) -> None:
             if model_input.length > args.max_length:
                 raise ValueError(f"{pair.pair_id} exceeds max_length; no truncation permitted")
             datums.append(conversation_to_datum(
-                conversation, renderer, train_on_what=TrainOnWhat.ALL_ASSISTANT_MESSAGES))
+                conversation, renderer, args.max_length, TrainOnWhat.ALL_ASSISTANT_MESSAGES))
 
     service = tinker.ServiceClient()
     client = service.create_lora_training_client(base_model=args.model, rank=args.rank)
