@@ -66,6 +66,11 @@ class TinkerJudgeTests(unittest.IsolatedAsyncioTestCase):
                               "apiKey": "old-provider-secret", "revision": "pinned"})
         self.assertIsInstance(client, TinkerChatClient)
         self.assertEqual(client.revision, "pinned")
+        self.assertEqual(client.timeout_ms, 600_000)
+        self.assertEqual(TinkerChatClient(model=client.model).timeout_ms, 600_000)
+        override = chat_client({"model": client.model, "baseUrl": client.baseUrl,
+                                "timeoutMs": 123_000})
+        self.assertEqual(override.timeout_ms, 123_000)
         self.assertNotIn("old-provider-secret", repr(client))
         with self.assertRaisesRegex(ValueError, "token budget"):
             chat_client({"model": client.model, "baseUrl": client.baseUrl, "maxTokens": 65536})

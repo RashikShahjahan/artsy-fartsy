@@ -10,9 +10,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from inspect_ai.model import GenerateConfig
 from evaluation.sample_grpo import score_outputs, select_prompts, summarize_rewards
 from evaluation.harness import drawing_task, sha256
+from evaluation.host_agent import drawing_agent
 
 
 class PilotTests(unittest.TestCase):
@@ -25,16 +25,21 @@ class PilotTests(unittest.TestCase):
         self.assertTrue(row["has_learning_signal"])
         self.assertFalse(summarize_rewards([1.0] * 4)["has_learning_signal"])
 
-    def test_mini_swe_temperature_override_at_bridge_boundary(self):
-        with patch("evaluation.harness.mini_swe_agent") as mini:
-            drawing_task([{"id": "x", "prompt": "Draw a disk", "seed": 1}],
-                         "/tmp/artsy-pilot-test", temperature=0.8)
-        callback = mini.call_args.kwargs["filter"]
-        self.assertEqual(mini.call_args.kwargs["env"]["MSWEA_MODEL_NAME"], "openai/inspect")
-        original = GenerateConfig(temperature=0)
-        result = asyncio.run(callback(None, [], [], None, original))
-        self.assertEqual(result.config.temperature, 0.8)
-        self.assertEqual(original.temperature, 0)
+    def test_sampling_settings_reach_the_host_agent(self):
+        async def generation_filter(*args):
+            raise AssertionError("Constructing a task must not call the model")
+
+        with patch("evaluation.harness.drawing_agent", wraps=drawing_agent) as agent:
+            task = drawing_task([{"id": "x", "prompt": "Draw a disk", "seed": 1}],
+                                "/tmp/artsy-pilot-test", temperature=0.8,
+                                max_tokens=4096, max_connections=2,
+                                generation_filter=generation_filter)
+        config = agent.call_args.kwargs["config"]
+        self.assertEqual(config.temperature, 0.8)
+        self.assertEqual(config.max_tokens, 4096)
+        self.assertEqual(config.max_connections, 2)
+        self.assertEqual(task.config, config)
+        self.assertIs(agent.call_args.kwargs["generation_filter"], generation_filter)
 
 
 class ConcurrentJudgingTests(unittest.IsolatedAsyncioTestCase):
