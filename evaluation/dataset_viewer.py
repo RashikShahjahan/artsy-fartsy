@@ -32,7 +32,16 @@ def validate_review(value, manifest, items, require_approval=False):
 
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--port',type=int,default=8766);p.add_argument('--output',type=Path,default=ROOT/'eval-results/dataset-review/approval.json');a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--port',type=int,default=8766)
+    p.add_argument('--output',type=Path)
+    p.add_argument('--dataset',type=Path,help='Full SFT candidates.jsonl for manual inspection')
+    p.add_argument('--accepted-output',type=Path,help='SFT export path (default: DATASET/accepted.jsonl)')
+    a=p.parse_args()
+    if a.dataset:
+        from drawing.manual_inspector import serve
+        return serve(a.dataset, a.port, a.output, a.accepted_output)
+    a.output = a.output or ROOT/'eval-results/dataset-review/approval.json'
     manifest,items=suite();a.output.parent.mkdir(parents=True,exist_ok=True)
     class Handler(BaseHTTPRequestHandler):
         def respond(self,code,body,kind='application/json'):

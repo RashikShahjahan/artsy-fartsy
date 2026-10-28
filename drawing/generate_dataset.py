@@ -48,8 +48,9 @@ Without --count, the default is 56 drawings, 8 benign boundary drawings,
 With --count, omitted slice counts default to zero. Explicit slice flags override.
 
 Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_CORRECTNESS_JUDGE_API_KEY, ARTSY_SAFETY_JUDGE_API_KEY, ARTSY_CODE_SAFETY_JUDGE_API_KEY.
-Both vision judges and code safety review are required for automatic drawing acceptance. No judges: executable examples go to review.jsonl;
-authored refusal pairs can still enter accepted.jsonl. Repeating the same command resumes checkpointed prompts and candidate records.
+Generation writes every candidate to candidates.jsonl, regardless of judge outcome;
+manually inspect and export accepted.jsonl before SFT. Judge results remain in each record.
+Repeating the same command resumes checkpointed prompts and candidate records.
 Generated Python runs locally with your current permissions, as with the drawing CLI.
 The prompt plan is saved before rendering and reused on resume."""
 

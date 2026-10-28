@@ -368,9 +368,9 @@ prompts (default 8 with the no-count mix, otherwise 0). Harmful slots ask the pr
 drawing request plus a concise refusal target. They are marked
 `kind="refusal"`, `family="safety_refusal"`, and include a `refusal` field.
 The full run stores exactly **one** authored refusal record per harmful prompt
-in `accepted.jsonl`, without asking the teacher to render unsafe content. These
-pairs are accepted as synthetic supervised targets; they are **not independently
-safety-validated**, so review them before fine-tuning. Ordinary drawing prompts
+in the unfiltered `candidates.jsonl`, without asking the teacher to render unsafe
+content. These are synthetic supervised targets; they are **not independently
+safety-validated**, so approve them manually before fine-tuning. Ordinary drawing prompts
 retain the usual candidate/render/judge process.
 
 Dry-run emits the same `prompt` and `refusal` pair as JSONL without execution.
@@ -447,8 +447,9 @@ Repeating the same command resumes only missing prompts; once all are ready,
 `prompt-plan.json` freezes the complete ordered plan **before rendering**.
 Changing the prompt configuration requires a new output directory. Neither API
 keys nor credentials are persisted. `--dry-run` prints JSONL and does not
-checkpoint. Dataset generation does not assign train, validation, or test splits;
-all accepted records go into `accepted.jsonl`.
+checkpoint. Dataset generation does not assign train, validation, or test splits
+and does not filter candidates into training exports. All outcomes remain in
+`candidates.jsonl`.
 
 For higher-difficulty training data, use `--difficulty hard` or
 `--difficulty very-hard` with a fresh output directory. Full generation saves the teacher's
@@ -458,13 +459,15 @@ per-candidate retry budget, not a quota of repair prompts. The historical
 `--curriculum repair` and `--warmup-from` have been removed.
 
 Use the **same independent correctness and safety vision judges as Inspect** to
-automatically accept generated drawings. Both are required for grading, and both
+evaluate and repair generated drawings. Both are required for grading, and both
 receive the rendered PNG and original drawing request. They use the exact same
 prompts, JSON parsers, temperature (0), and 1,024-token limits as Inspect.
 Correctness returns a `score` and `reason`; safety returns a `harmful` boolean
-and `reason`. Acceptance requires `score >= 0.85` and `harmful == false` after
-a successful fresh render. Refusals are rejected because Inspect scores them
-as having no valid final image.
+and `reason`. A passing evaluation requires `score >= 0.85` and
+`harmful == false` after a successful fresh render. These outcomes are retained
+as diagnostics; they do not remove candidates from the inspection dataset.
+Teacher-authored refusals have no rendered drawing and are not automatically
+converted into SFT demonstrations.
 
 ```sh
 export ARTSY_CORRECTNESS_JUDGE_MODEL=your-correctness-vision-model
@@ -485,11 +488,12 @@ settings are no longer used.
 The teacher endpoint must support non-streaming OpenAI-compatible
 `POST /chat/completions`. Candidate replies are either a JSON object with
 `code` or `refusal`. The execution and evaluation loops, repair budget
-(maximum two retries), source/pixel deduplication, and checkpoint semantics
-are otherwise unchanged. Without both judges, ordinary executable drawings
-remain in `review.jsonl`; authored refusal pairs can still be accepted into
-`accepted.jsonl`. Judge results are recorded
-separately for correctness and safety, subject to separate human audit.
+(maximum two retries), and checkpoint semantics are unchanged. There is no
+post-generation source/pixel deduplication or automatic accepted/review/rejected
+export: every candidate is preserved in `candidates.jsonl`, including duplicates,
+failed attempts, and review-needed records. Pre-execution code safety checks still
+block malicious programs. Judge results are recorded separately for correctness
+and safety, subject to human audit.
 
 Custom prompt files still bypass the planner:
 
@@ -507,14 +511,31 @@ refusal pairs). `skills` and `difficulty` are optional metadata. Shared schema
 validation and taxonomy definitions live
 in `drawing/dataset_specs.py`; the old fixed-template generator has been removed.
 
-Each dataset directory also includes `manifest.json`, `prompts.jsonl`,
+Each dataset directory includes `manifest.json`, `prompts.jsonl`,
 `records/*.json` for candidate checkpoints, `artifacts/episode-*/` for
-executed code and PNGs, `candidates.jsonl`, `accepted.jsonl`,
-`review.jsonl`, `rejected.jsonl`, and `summary.json`. Use `accepted.jsonl` as
-the combined dataset for training. Resume with the original command;
-`--retry-errors` retries infrastructure failures. Outputs are Git-ignored.
-Generated Python runs locally with the permissions of the drawing CLI;
-review synthetic prompts and code before using them in sensitive contexts.
+executed code and PNGs, the complete `candidates.jsonl`, and `summary.json`.
+The automatic outcome counts in the summary are diagnostic, not a selection
+filter. To inspect all SFT candidates, their attempts, source, previews, judge
+feedback, and converted tool-call conversations, run:
+
+```sh
+.venv/bin/python -m evaluation.dataset_viewer --dataset datasets/llm-graded/candidates.jsonl
+```
+
+The local-only inspector runs at `http://127.0.0.1:8766`. Manually Approve,
+Reject, or leave Pending each candidate, enter your reviewer name, and save
+decisions to `manual-review.json`. **Export approved SFT** writes
+`accepted.jsonl` containing only approved, structurally valid demonstrations.
+It refuses missing artifacts, unsafe code-safety results, and incomplete episodes;
+the original candidate data remains intact. Then pass `accepted.jsonl` to
+`training.sft --dataset`. The original benchmark prompt reviewer still runs
+without `--dataset`.
+
+Resume generation with the original command; `--retry-errors` retries
+infrastructure failures. The changed output protocol is `artsy-dataset-v5`:
+start a new output directory instead of resuming a v4 manifest. Outputs are
+Git-ignored. Generated Python runs locally with the permissions of the drawing
+CLI; inspect synthetic prompts and code before using them in sensitive contexts.
 
 Existing datasets with split metadata can be migrated without regenerating
 prompts, code, or images:

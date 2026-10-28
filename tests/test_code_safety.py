@@ -58,7 +58,8 @@ class CodeSafetyTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             summary = await generate_dataset({"output": folder, "specs": [spec], "teacher": None})
-            row = json.loads((root / "accepted.jsonl").read_text())
+            row = json.loads((root / "candidates.jsonl").read_text())
+            self.assertFalse((root / "accepted.jsonl").exists())
             example = convert_record(row, root)
             self.assertEqual(summary["maliciousCodeRefusalPairs"], 1)
             self.assertEqual(summary["requests"], 0)
