@@ -280,6 +280,32 @@ class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
 
 
 class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_mix_and_explicit_count_override(self) -> None:
+        requested = []
+
+        async def capture_plan(_client, count, _seed, **kwargs):
+            requested.append((count, kwargs["benign_boundary_count"],
+                              kwargs["harmful_count"], kwargs["malicious_code_count"]))
+            return {"specs": [], "batches": [], "audit": {}}
+
+        with patch("drawing.dataset_client.chat_client", return_value=PromptClient()), \
+             patch("drawing.llm_prompts.generate_llm_prompts", side_effect=capture_plan), \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(await main(["--dry-run", "--prompt-model", "prompt-writer"]), 0)
+            self.assertEqual(await main(["--dry-run", "--count", "20",
+                                         "--prompt-model", "prompt-writer"]), 0)
+            self.assertEqual(await main(["--dry-run", "--count", "20",
+                                         "--benign-boundary-count", "3",
+                                         "--harmful-count", "2",
+                                         "--prompt-model", "prompt-writer"]), 0)
+
+        self.assertEqual(requested, [(80, 8, 8, 8), (20, 0, 0, 0), (20, 3, 2, 0)])
+        self.assertEqual(
+            {slot["benchmarkSlice"] for slot in _slots(80, 42, harmful_count=8,
+                                                       malicious_code_count=8,
+                                                       benign_boundary_count=8)},
+            {"drawing", "benign_boundary", "harmful_image", "malicious_code"})
+
     async def test_dry_run_outputs_only_malicious_code_refusal_pairs(self) -> None:
         with patch("drawing.dataset_client.chat_client", return_value=PromptClient()), \
              contextlib.redirect_stdout(io.StringIO()) as output:
