@@ -193,15 +193,17 @@ class ContinuationTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'completed compatible'):
                 grpo.load_continuation(self.args)
 
-    def test_actual_completed_run_migration_dry_run_is_read_only(self):
+    def test_legacy_completed_run_is_rejected_without_modifying_artifacts(self):
         origin = grpo.ROOT / 'checkpoints/grpo-qwen38-v1-step125'
         if not origin.exists():
             self.skipTest('Local completed run unavailable')
         before = {p.name: p.read_bytes() for p in origin.iterdir() if p.is_file()}
         with patch.object(grpo, '_build_sandbox_image') as docker, patch.object(grpo, 'train') as train:
-            self.assertEqual(grpo.main(['--continue-from', str(origin), '--additional-steps', '1',
-                                       '--match-eval-limits', '--dry-run',
-                                       '--output-dir', str(self.root / 'actual')]), 0)
+            with self.assertRaises(SystemExit) as rejected:
+                grpo.main(['--continue-from', str(origin), '--additional-steps', '1',
+                           '--match-eval-limits', '--dry-run',
+                           '--output-dir', str(self.root / 'actual')])
+            self.assertEqual(rejected.exception.code, 2)
         docker.assert_not_called()
         train.assert_not_called()
         self.assertFalse((self.root / 'actual').exists())

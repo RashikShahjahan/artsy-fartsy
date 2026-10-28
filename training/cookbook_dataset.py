@@ -60,7 +60,7 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
     async def __call__(self):
         judge = chat_client({"model": self.judge_model, "baseUrl": self.judge_url,
                              "apiKey": os.getenv("ARTSY_CORRECTNESS_JUDGE_API_KEY"),
-                             "timeoutMs": 300000 if self.judge_url == "tinker://native" else 120000,
+                             "timeoutMs": 600000 if self.judge_url == "tinker://native" else 120000,
                              "renderer": self.judge_renderer,
                              "revision": self.judge_revision,
                              "maxTokens": self.judge_max_tokens})

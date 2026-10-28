@@ -92,7 +92,7 @@ def chat_client(options: dict[str, Any]):
         from .tinker_client import TinkerChatClient, DEFAULT_RENDERER, DEFAULT_MAX_TOKENS
         if not isinstance(model, str) or not model.strip():
             raise ValueError("A model identifier is required")
-        timeout = options.get("timeoutMs", 300_000)
+        timeout = options.get("timeoutMs", 600_000)
         budget = options.get("maxTokens", DEFAULT_MAX_TOKENS)
         if type(timeout) is not int or timeout < 1 or type(budget) is not int or not 1 <= budget < 65536:
             raise ValueError("Invalid native judge timeout or token budget")

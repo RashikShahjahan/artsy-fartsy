@@ -14,7 +14,7 @@ from unittest.mock import patch
 from PIL import Image
 
 from drawing.dataset import generate_dataset
-from drawing.judges import parse_correctness_judgment, parse_safety_judgment, correctness_judge_prompt, safety_judge_prompt
+from drawing.judges import JUDGE_MAX_TOKENS, parse_correctness_judgment, parse_safety_judgment, correctness_judge_prompt, safety_judge_prompt
 from drawing.dataset_client import chat_client, parse_json_reply
 from drawing.dataset_specs import compact_json, sha256, validate_specs
 from drawing.remove_splits import remove_splits
@@ -228,8 +228,8 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
             async def complete(inner, messages: list[dict[str, Any]], max_tokens: int, *,
                                temperature: float | None = None) -> dict[str, Any]:
                 nonlocal active
-                self.assertEqual(temperature, 0)
-                self.assertEqual(max_tokens, 1024)
+                self.assertIsNone(temperature)
+                self.assertEqual(max_tokens, JUDGE_MAX_TOKENS)
                 self.assertEqual(messages[0]["content"][0]["text"],
                                  correctness_judge_prompt("Draw a circle") if inner.role == "correctness"
                                  else safety_judge_prompt("Draw a circle"))
@@ -261,8 +261,8 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(record["runtimeVersion"], "artcanvas-v2"); self.assertTrue(record["sourceHash"])
         self.assertEqual(record["evaluator"]["correctness"]["model"], "correctness")
         self.assertEqual(record["evaluator"]["safety"]["model"], "safety")
-        self.assertEqual(correctness.temperatures, [0, 0])
-        self.assertEqual(safety.temperatures, [0, 0])
+        self.assertEqual(correctness.temperatures, [None, None])
+        self.assertEqual(safety.temperatures, [None, None])
         self.assertEqual(correctness.messages[0][0]["content"][0]["text"], correctness_judge_prompt(spec["prompt"]))
         self.assertEqual(safety.messages[0][0]["content"][0]["text"], safety_judge_prompt(spec["prompt"]))
         self.assertNotIn("requirements", json.dumps(correctness.messages))
@@ -410,8 +410,8 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
             model, baseUrl = "vision-correct", "http://judge/v1"
             async def complete(inner, messages: list[dict[str, Any]], max_tokens: int, *,
                                temperature: float | None = None) -> dict[str, Any]:
-                self.assertEqual(temperature, 0)
-                self.assertEqual(max_tokens, 1024)
+                self.assertIsNone(temperature)
+                self.assertEqual(max_tokens, JUDGE_MAX_TOKENS)
                 parts = messages[0]["content"]
                 image_part = next((p for p in parts if p["type"] == "image_url"), None)
                 if image_part:

@@ -23,7 +23,7 @@ class TinkerChatClient:
     renderer_name: str = DEFAULT_RENDERER
     revision: str | None = None
     max_tokens: int = DEFAULT_MAX_TOKENS
-    timeout_ms: int = 300_000
+    timeout_ms: int = 600_000
     _ready: bool = field(default=False, init=False, repr=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
 
