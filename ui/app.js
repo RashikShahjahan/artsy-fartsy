@@ -1,6 +1,84 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let active = null, expanded = false;
+let drawingOnly = false;
+const sessionKey = 'artsy-active-run';
+let drawingData = null, selectedDrawing = null, displayedRun = null, freeformDraft = '';
+let datasetSelection = null;
+function setSource(source, reset=true) {
+  if(active && reset)return;
+  if(reset && !drawingOnly)freeformDraft=$('#prompt').value;
+  if(drawingOnly && selectedDrawing)datasetSelection=selectedDrawing;
+  drawingOnly=source==='dataset';
+  $('#drawing-library').hidden=!drawingOnly;
+  $('#drawing-history').hidden=!drawingOnly;
+  $('#prompt').readOnly=drawingOnly;
+  $('#prompt').placeholder=drawingOnly?'Choose a drawing prompt above':'Describe what to draw…';
+  $('#generate').textContent=drawingOnly?'Run this prompt':'Generate';
+  document.querySelectorAll('[data-source]').forEach(button=>button.setAttribute('aria-pressed', String((button.dataset.source==='dataset')===drawingOnly)));
+  if(reset) {
+    if(drawingOnly && drawingData) {filterDrawings(datasetSelection?.id);showDrawing(selectedDrawing);}
+    else showDrawing(null);
+    if(!drawingOnly)$('#prompt').value=freeformDraft;
+  }
+  updateModelAvailability();
+}
+document.querySelectorAll('[data-source]').forEach(button=>button.onclick=()=>setSource(button.dataset.source));
+function runHash(id) {
+  const params = new URLSearchParams();
+  if (drawingOnly && selectedDrawing) params.set('prompt', selectedDrawing.id);
+  params.set('run', id); return params.toString();
+}
+function renderDrawingRuns() {
+  if (!drawingOnly) return;
+  const runs = (drawingData?.runs || []).filter(run => run.prompt_id === selectedDrawing?.id);
+  $('#drawing-runs').replaceChildren();
+  if (!runs.length) {const p=document.createElement('p');p.className='note';p.textContent='No runs yet.';$('#drawing-runs').append(p);}
+  for (const run of runs) {
+    const button=document.createElement('button');button.type='button';
+    button.textContent=`${run.model} · ${run.state} · ${run.id.slice(0,8)}`;
+    button.disabled=Boolean(active);
+    button.onclick=()=>{active=run.id;displayedRun=null;location.hash=runHash(active);updateModelAvailability();poll(active);};
+    $('#drawing-runs').append(button);
+  }
+}
+function showDrawing(spec, reset=true) {
+  selectedDrawing=spec;
+  $('#prompt').value=spec?.prompt || '';
+  $('#drawing-meta').textContent=spec ? `${spec.difficulty || 'Unlabeled'} · ${(spec.skills || []).join(', ')} · Seed ${spec.seed}` : 'No matching drawings.';
+  if(spec) $('#drawing-select').value=spec.id;
+  if(reset) {
+    displayedRun=null;traceSamples=[];expanded=false;$('#expand').textContent='Expand all';$('#trace-toolbar').hidden=true;$('#event-controls').hidden=true;$('#trace-stats').textContent='';
+    $('#trace').innerHTML='<p class="empty">No run selected.</p>';$('#downloads').replaceChildren();
+    $('#output').innerHTML='<p>Run this prompt to see its drawing.</p>';$('#run-status').textContent='Not started';
+    $('#console').textContent='No process output.';$('#form-status').textContent='';
+    location.hash=spec ? `prompt=${encodeURIComponent(spec.id)}` : '';
+    try {sessionStorage.removeItem(sessionKey);} catch {}
+  }
+  renderDrawingRuns();updateModelAvailability();
+}
+function filterDrawings(preferred) {
+  const query=$('#drawing-search').value.toLowerCase();
+  const items=drawingData.items.filter(row=>JSON.stringify(row).toLowerCase().includes(query));
+  $('#drawing-select').replaceChildren(...items.map(row=>new Option(`${row.difficulty || '—'} · ${row.prompt.slice(0,110)}`,row.id)));
+  const selected=items.find(row=>row.id===(preferred || selectedDrawing?.id)) || items[0] || null;
+  if(drawingOnly) showDrawing(selected, Boolean(selectedDrawing && selectedDrawing.id!==selected?.id));
+  else selectedDrawing=selected;
+}
+async function loadDrawings() {
+  const response=await fetch('/api/drawing-prompts',{cache:'no-store'});
+  const data=await response.json();if(!response.ok)throw new Error(data.error || 'Could not load drawings.');
+  drawingData=data;$('#dataset-label').textContent=`${data.items.length} ordinary drawing prompts · ${data.label}`;
+  filterDrawings(new URLSearchParams(location.hash.slice(1)).get('prompt'));
+  $('#drawing-search').oninput=()=>filterDrawings();
+  $('#drawing-select').onchange=()=>showDrawing(data.items.find(row=>row.id===$('#drawing-select').value));
+}
+async function refreshDrawingRuns() {
+  if(!drawingOnly)return;
+  try {const response=await fetch('/api/drawing-prompts',{cache:'no-store'});if(!response.ok)return;
+    const data=await response.json();if(data.sha256===drawingData.sha256){drawingData.runs=data.runs;renderDrawingRuns();}
+  } catch {}
+}
 function contentHTML(content) {
   if (typeof content === 'string') return `<pre>${esc(content)}</pre>`;
   if (!Array.isArray(content)) return `<pre>${esc(JSON.stringify(content,null,2))}</pre>`;
@@ -141,10 +219,15 @@ async function poll(id) {
     const response=await fetch(`/api/runs/${id}`,{cache:'no-store'});
     if(!response.ok) throw new Error('Could not read the run. Reload to retry.');
     const run=await response.json();
-    if(active===id && !$('#prompt').value) { $('#prompt').value=run.prompt;
+    if(run.prompt_id && run.dataset_sha256!==drawingData?.sha256) {
+      active=null;try{sessionStorage.removeItem(sessionKey);}catch{}
+      $('#form-status').textContent='This saved run belongs to another dataset revision. Select a drawing from this dataset.';
+      updateModelAvailability();return;
+    }
+    if(active===id && displayedRun!==id) { setSource(run.prompt_id?'dataset':'freeform',false); displayedRun=id; if(drawingOnly){const spec=drawingData?.items.find(row=>row.id===run.prompt_id);if(spec)showDrawing(spec,false);displayedRun=id;} $('#prompt').value=run.prompt;
       if (![...$('#model').options].some(option => option.value === run.model)) $('#model').add(new Option(run.model, run.model));
       $('#model').value=run.model; }
-    $('#run-status').textContent=run.result?.outcome || run.state;
+    $('#run-status').textContent=(run.result?.outcome || run.state) + (drawingOnly ? ` · ${run.model}` : '');
     $('#console').textContent=run.console || 'Waiting for process output…';
     $('#downloads').innerHTML=(run.artifacts || []).map(name=>`<a href="/api/runs/${id}/${name}" download="${name}">${esc(name)}</a>`).join('');
     if(run.artifacts.includes('image.png')) $('#output').innerHTML=`<img src="/api/runs/${id}/image.png" alt="Generated image">`;
@@ -152,7 +235,7 @@ async function poll(id) {
       $('#trace-note').textContent='Process output updates during generation. The complete recorded agent trace appears when the run ends.';
       setTimeout(()=>poll(id),1500);return;
     }
-    active=null;updateModelAvailability();
+    active=null;updateModelAvailability();refreshDrawingRuns();
     $('#trace-note').textContent='Commands, results, and previews in order. Expand any action for its full record.';
     if(run.trace) renderTrace(run.trace);
     else $('#trace').innerHTML='<p class="empty">No agent trace was produced. See process output below.</p>';
@@ -168,24 +251,29 @@ async function poll(id) {
   }
 }
 $('#generation-form').onsubmit=async e=>{
-  e.preventDefault();if(active)return;
+  e.preventDefault();if(active || (drawingOnly && !selectedDrawing))return;
   const prompt=$('#prompt').value.trim();if(!prompt){$('#form-status').textContent='Enter a prompt.';return;}
   $('#generate').disabled=true;$('#form-status').textContent='';
   try {
-    const response=await fetch('/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,seed:42,model:$('#model').value.trim()})});
+    const response=await fetch('/api/runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(drawingOnly ? {prompt_id:selectedDrawing.id,dataset_sha256:drawingData.sha256,model:$('#model').value.trim()} : {prompt,seed:42,model:$('#model').value.trim()})});
     const data=await response.json();if(!response.ok)throw new Error(data.error || 'Could not start generation.');
-    active=data.id;location.hash=`run=${active}`;try{sessionStorage.setItem('artsy-active-run',active);}catch{}
+    active=data.id;location.hash=runHash(active);try{sessionStorage.setItem(sessionKey,active);}catch{}
+    updateModelAvailability();displayedRun=null;
     traceSamples=[]; expanded=false; $('#expand').textContent='Expand all'; $('#trace-toolbar').hidden=true; $('#trace-stats').innerHTML=''; $('#event-controls').hidden=true;
     $('#output').innerHTML='<p>Generating…</p>';$('#downloads').innerHTML='';$('#trace').innerHTML='';$('#console').textContent='Starting…';$('#run-status').textContent='Starting';
     poll(active);
-  } catch(error) {$('#form-status').textContent=error.message;$('#generate').disabled=false;}
+  } catch(error) {$('#form-status').textContent=error.message;updateModelAvailability();}
 };
 $('#expand').onclick=()=>{expanded=!expanded;document.querySelectorAll('#trace details').forEach(d=>d.open=expanded);hydrateRecords();$('#expand').textContent=expanded?'Collapse all':'Expand all';};
 let bridgeModels = null;
 function updateModelAvailability() {
-  const unavailable = $('#model').value.startsWith('artsy/') && bridgeModels !== null && !bridgeModels.includes($('#model').value);
-  $('#model-note').textContent = unavailable ? 'Restart the inference bridge with make serve to use this fine-tune, then reload.' : 'Choose base weights or a completed fine-tune.';
-  $('#generate').disabled = Boolean(active) || unavailable;
+  const unavailable = bridgeModels === null || !bridgeModels.includes($('#model').value);
+  $('#model-note').textContent = bridgeModels === null ? 'Native Tinker bridge is offline. Start make serve, then reload.'
+    : unavailable ? 'This model is unavailable on the running bridge. Restart make serve, then reload.'
+    : 'Native Tinker sampling · same Docker drawing harness and PNG previews.';
+  $('#generate').disabled = Boolean(active) || unavailable || (drawingOnly && (!selectedDrawing || !drawingData));
+  $('#drawing-select').disabled=Boolean(active);$('#drawing-search').disabled=Boolean(active);
+  document.querySelectorAll('[data-source]').forEach(button=>button.disabled=Boolean(active));
 }
 $('#model').onchange = updateModelAvailability;
 async function loadModels() {
@@ -201,5 +289,14 @@ async function loadModels() {
     updateModelAvailability();
   } catch { $('#model-note').textContent = 'Could not load fine-tunes. Restart the UI server and reload.'; }
 }
-loadModels();
-try{const id=location.hash.match(/^#run=([a-f0-9]{32})$/)?.[1] || sessionStorage.getItem('artsy-active-run');if(id&&/^[a-f0-9]{32}$/.test(id)){active=id;$('#generate').disabled=true;poll(id);}}catch{}
+async function initialize() {
+  await loadModels();
+  try {
+    const params=new URLSearchParams(location.hash.slice(1));
+    setSource(params.has('prompt') || location.pathname.startsWith('/drawings')?'dataset':'freeform',false);
+    try {await loadDrawings();} catch(error) {$('#dataset-label').textContent=error.message;}
+    const id=new URLSearchParams(location.hash.slice(1)).get('run') || sessionStorage.getItem(sessionKey);
+    if(id&&/^[a-f0-9]{32}$/.test(id)){active=id;updateModelAvailability();poll(id);}
+  } catch(error) {$('#form-status').textContent=error.message;updateModelAvailability();}
+}
+initialize();

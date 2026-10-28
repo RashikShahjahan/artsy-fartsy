@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
-from inference.server import CONTEXT_WINDOW, MAX_TOKENS, MODEL_ID, app, complete, health, image_content, models, parse_tools, template_messages
+from inference.server import CONTEXT_WINDOW, MAX_TOKENS, MODEL_ID, app, complete, health, image_content, models, native_message, parse_tools, template_messages
 
 
 TOOLS = [{"type": "function", "function": {"name": "write_code", "parameters": {
@@ -33,6 +33,32 @@ def inline_image(size=(32, 32), mode="RGB", patterned=False):
 
 
 class ToolProtocolTest(unittest.TestCase):
+    def test_native_tool_parser_retains_json_strings_and_omits_reasoning(self):
+        from tinker_cookbook.renderers import ToolCall
+        arguments = json.dumps({'command': "printf '001\\n'\npython program.py"})
+        message = {'content': [{'type': 'thinking', 'thinking': 'hidden'}, {'type': 'text', 'text': 'Previewing.'}],
+                   'tool_calls': [ToolCall(id='functions.bash:0', function={'name': 'bash', 'arguments': arguments})]}
+        text, calls = native_message(message)
+        self.assertEqual(text, 'Previewing.')
+        self.assertEqual(calls[0]['function']['arguments'], arguments)
+        with self.assertRaises(ValueError):
+            native_message({'tool_calls': [{'function': {'name': 'bash', 'arguments': '[1,2]'}}]})
+
+    def test_native_backend_uses_renderer_response_parser(self):
+        from inference.tinker_backend import TinkerBackend
+        backend = TinkerBackend.__new__(TinkerBackend)
+        backend.native_tools = True
+        backend.render = Mock(return_value=SimpleNamespace(length=12))
+        backend.renderer = Mock()
+        backend.renderer.get_stop_sequences.return_value = ['stop']
+        message = {'role': 'assistant', 'content': 'done'}
+        backend.renderer.parse_response.return_value = (message, SimpleNamespace(is_clean=True))
+        backend.client = Mock()
+        backend.client.sample.return_value.result.return_value = SimpleNamespace(
+            sequences=[SimpleNamespace(tokens=[1, 2])])
+        self.assertEqual(backend.generate([], None, 8, 100), (message, 12, 2))
+        backend.renderer.parse_response.assert_called_once_with([1, 2])
+
     def test_extended_context_selector_is_preserved_when_loading_saved_weights(self):
         from drawing.config import IMAGE_SIZE, MODEL_REVISION, TINKER_SAMPLING_MODEL_ID
         from inference.tinker_backend import TinkerBackend
@@ -89,6 +115,7 @@ class ToolProtocolTest(unittest.TestCase):
             {"role": "assistant", "content": None, "tool_calls": [{
                 "id": "call_1", "type": "function", "function": {
                     "name": "bash", "arguments": '{"command":"pwd"}'}}]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "/workspace"},
         ])
         tools = [{"type": "function", "function": {
             "name": "bash", "description": "Run a command",
@@ -105,6 +132,7 @@ class ToolProtocolTest(unittest.TestCase):
         self.assertEqual(native[1]["content"][0]["image"].size, (28, 28))
         self.assertEqual(native[1]["content"][0]["image"].getpixel((0, 0)), (0, 0, 255))
         self.assertIsInstance(native[2]["tool_calls"][0], ToolCall)
+        self.assertEqual(native[3]['name'], 'bash')
         self.assertEqual(messages[1]["content"][0]["image"].size, (32, 32))
 
     def test_developer_instructions_are_compatible_with_qwen_system_role(self):
@@ -181,6 +209,35 @@ class ToolProtocolTest(unittest.TestCase):
 
 
 class CompletionTest(unittest.TestCase):
+    def test_larger_base_loads_its_own_processors_renderer_and_sampler(self):
+        from drawing.config import IMAGE_SIZE
+        from inference.model_catalog import LARGE_MODEL_ID, HOSTED_MODEL_PROFILES
+        profile = HOSTED_MODEL_PROFILES[LARGE_MODEL_ID]
+        app.state.samplers = {}
+        with patch('inference.tinker_backend.TinkerBackend') as backend_class:
+            backend = backend_class.return_value
+            backend.generate.return_value = (self.raw, 3, 2)
+            for _ in range(2):
+                result = complete({**self.body, 'model': LARGE_MODEL_ID})
+                self.assertEqual(result['model'], LARGE_MODEL_ID)
+            backend_class.assert_called_once_with(LARGE_MODEL_ID, profile['revision'], IMAGE_SIZE,
+                sampling_model_id=profile['sampling_model'], renderer_name=profile['renderer'])
+            self.assertEqual(backend.generate.call_args.args[3], profile['context_window'])
+            app.state.tinker.generate.assert_not_called()
+            app.state.tinker.with_model_path.assert_not_called()
+
+    def test_frontier_model_uses_native_tool_calls_and_its_context_limit(self):
+        from inference.model_catalog import FRONTIER_MODEL_ID, HOSTED_MODEL_PROFILES
+        app.state.samplers = {}
+        with patch('inference.tinker_backend.TinkerBackend') as backend_class:
+            backend = backend_class.return_value
+            backend.generate.return_value = ({'content': 'Preview', 'tool_calls': [
+                {'id': 'functions.bash:0', 'function': {'name': 'bash', 'arguments': '{"command":"echo READY"}'}}]}, 30, 20)
+            result = complete({**self.body, 'model': FRONTIER_MODEL_ID})
+            self.assertEqual(result['choices'][0]['finish_reason'], 'tool_calls')
+            self.assertEqual(result['choices'][0]['message']['tool_calls'][0]['function']['name'], 'bash')
+            self.assertEqual(backend.generate.call_args.args[3], HOSTED_MODEL_PROFILES[FRONTIER_MODEL_ID]['context_window'])
+
     def setUp(self):
         self.raw = tool_call("submit") + "<|im_end|>"
         self.state_patch = patch.object(app, "state")

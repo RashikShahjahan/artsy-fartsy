@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from drawing.config import MODEL_ID, MODEL_REVISION
-from inference.model_catalog import ModelCatalogCache, model_catalog
+from inference.model_catalog import FRONTIER_MODEL_ID, LARGE_MODEL_ID, ModelCatalogCache, model_catalog
 
 
 class ModelCatalogTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class ModelCatalogTests(unittest.TestCase):
             unfinished.mkdir()
             (unfinished / 'checkpoint-000001.json').write_text(json.dumps(valid))
             catalog = model_catalog(root)
-            self.assertEqual([entry['id'] for entry in catalog], [MODEL_ID, 'artsy/trained'])
+            self.assertEqual([entry['id'] for entry in catalog], [MODEL_ID, 'artsy/trained', LARGE_MODEL_ID, FRONTIER_MODEL_ID])
             self.assertEqual(catalog[1]['model_path'], valid['sampler_path'])
             self.assertIn('step 29', catalog[1]['label'])
 

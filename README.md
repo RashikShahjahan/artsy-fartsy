@@ -5,6 +5,20 @@ Qwen/Qwen3.5-4B → Mini SWE Agent → Python/ArtCanvas → PNG + editable sourc
 Includes the Qwen model adapter, a versioned drawing API, a model-independent
 episode environment, an Inspect SWE write → run → fix → submit loop, and a base-model evaluation script.
 
+## Unified UI
+
+Launch Studio, prompt and safety review, and SFT candidate inspection in one app:
+
+```sh
+python3 -m ui.server --dataset datasets/validation-v8-50-2026-10-28/prompts.jsonl \
+  --candidates datasets/sft-v1/candidates.jsonl
+```
+
+Open http://127.0.0.1:4173. Studio shares one generation workspace for freeform
+and dataset prompts; Prompt review and SFT candidates use the same navigation.
+See [UI setup and review outputs](ui/README.md). Docker and `make serve` are needed
+for generation; browsing and review work independently.
+
 ## Setup
 
 Requires Python 3.14 and `uv`.
@@ -306,18 +320,19 @@ Use `--dataset path/to/prompts.jsonl` for custom drawing test specs with `id`,
 ## Generate a dataset
 
 The default prompt planner uses an LLM, rather than parameterized drawing templates.
-It assigns a scene family and a primary skill from a 14-drawing-skill taxonomy (plus refusal), then asks
+It assigns a scene family, a primary skill from a 14-drawing-skill taxonomy (plus refusal),
+an art style, and a request voice, then asks
 a prompt-writing model for original, natural-language drawing requests. Prompts
 can have multiple `skills` labels (e.g. `symmetry`, `relative_geometry`,
 `constraint_following`). These labels are for curriculum balancing and
 per-skill analysis; the correctness evaluator judges **only the original prompt
 and rendered output**, not a hidden `requirements` or `expectedOutcome` field.
 
-**Default training mix (80 prompts):**
+**Default training mix (50 prompts):**
 
-Without count flags, data generation plans 56 ordinary drawings, 8 benign
-safety-adjacent requests that test over-refusal, 8 harmful-image refusal
-requests, and 8 malicious-code refusal requests. The three 8-item slices are
+Without count flags, data generation plans 35 ordinary drawings, 5 benign
+safety-adjacent requests that test over-refusal, 5 harmful-image refusal
+requests, and 5 malicious-code refusal requests. The three 5-item slices are
 disjoint subsets of the total.
 
 ```sh
@@ -336,17 +351,29 @@ export ARTSY_PROMPT_MODEL=your-prompt-writer
 export ARTSY_PROMPT_URL=http://127.0.0.1:9000/v1
 # Set ARTSY_PROMPT_API_KEY if the endpoint requires authentication.
 
-.venv/bin/python -m drawing.generate_dataset --dry-run --count 20 --difficulty mixed --seed 42 > evaluation/generated-20.jsonl
-.eval-venv/bin/python -m evaluation.evaluate --dataset evaluation/generated-20.jsonl --dry-run
+.venv/bin/python -m drawing.generate_dataset --prompts-only --count 20 --difficulty mixed --seed 42 --output datasets/validation-v9
+.venv/bin/python -m evaluation.evaluate --dataset datasets/validation-v9/prompts.jsonl --dry-run
+.venv/bin/python -m evaluation.dataset_viewer --prompts datasets/validation-v9/prompts.jsonl
 ```
 
-`--dry-run` calls the prompt-writing LLM, but does not run a teacher or
-renderer. With an explicit `--count` and no slice flags, all prompts are
-benign. Each ordinary prompt is a standalone user request with a saved `difficulty`
-label: `easy`, `medium`, `hard`, or `very-hard`. `mixed` cycles evenly
-through the four levels; select a single level with `--difficulty hard` (or
-another level). Difficulty describes intended task complexity, not whether a
-repair must happen. The Inspect agent may preview and fix any task.
+The manual prompt inspector shows only benign boundary, harmful-image, and
+malicious-code slices by default. Existing ordinary-drawing decisions stay saved.
+Safety approval is recorded separately from full-dataset approval; use
+`--include-drawings` when explicitly reviewing and approving the entire dataset.
+
+`--prompts-only` calls the prompt-writing LLM and separate safety and quality review passes,
+saves a resumable run under `--output`, and prints the final JSONL without running
+a teacher or renderer. `--dry-run` is a compatibility alias with the same API calls
+and file writes. Use a fresh output directory for the v10 generator; earlier plans cannot
+be resumed under the changed safety policy and review schema. With an explicit
+`--count` and no slice flags, all prompts are benign. Each ordinary prompt is a
+standalone user request with a saved `difficulty` label: `easy`, `medium`, `hard`, or `very-hard`. `mixed` plans equal quotas across
+these levels; select a target level with `--difficulty hard` (or another level).
+The reviewer independently assesses the actual difficulty. Exports use that observed
+label and retain the target in `plannedDifficulty`; the audit reports both distributions,
+so requested quotas are not presented as achieved quotas. Unsupported secondary skill
+labels are removed; missing primary skills trigger a rewrite. Difficulty describes task
+complexity, not whether a repair must happen. The Inspect agent may preview and fix any task.
 For a frozen comparison, keep the resulting JSONL under version control or in
 a benchmark dataset; rerunning with the same seed alone cannot reproduce
 model-authored wording exactly. Keep evaluated tasks out of SFT training.
@@ -355,8 +382,8 @@ model-authored wording exactly. Keep evaluated tasks out of SFT training.
 
 ```sh
 # Five refusal pairs within twenty total examples, for inspection or evaluation.
-uv run python -m drawing.generate_dataset --dry-run \
-  --count 20 --harmful-count 5 > evaluation/mixed-safety.jsonl
+uv run python -m drawing.generate_dataset --prompts-only \
+  --count 20 --harmful-count 5 --output datasets/mixed-safety-prompts
 
 # Full training dataset: 80 drawing prompts and 20 refusal pairs.
 uv run python -m drawing.generate_dataset \
@@ -364,13 +391,14 @@ uv run python -m drawing.generate_dataset \
 ```
 
 `--harmful-count` is a subset of `--count`, not an extra number of
-prompts (default 8 with the no-count mix, otherwise 0). Harmful slots ask the prompt writer for a clearly disallowed
+prompts (default 5 with the no-count mix, otherwise 0). Harmful slots ask the prompt writer for a clearly disallowed
 drawing request plus a concise refusal target. They are marked
 `kind="refusal"`, `family="safety_refusal"`, and include a `refusal` field.
 The full run stores exactly **one** authored refusal record per harmful prompt
 in the unfiltered `candidates.jsonl`, without asking the teacher to render unsafe
-content. These are synthetic supervised targets; they are **not independently
-safety-validated**, so approve them manually before fine-tuning. Ordinary drawing prompts
+content. These are synthetic supervised targets with a separate prompt-quality assessment;
+that automated assessment is not a calibrated safety guarantee. Approve them
+manually before fine-tuning. Ordinary drawing prompts
 retain the usual candidate/render/judge process.
 
 Dry-run emits the same `prompt` and `refusal` pair as JSONL without execution.
@@ -384,8 +412,8 @@ while rendering the harmful request does not. Such samples have
 
 ```sh
 # 80 drawing tasks, 10 harmful-image refusals, and 10 malicious-code refusals.
-.venv/bin/python -m drawing.generate_dataset --dry-run --count 100 \
-  --harmful-count 10 --malicious-code-count 10 > evaluation/mixed-code-safety.jsonl
+.venv/bin/python -m drawing.generate_dataset --prompts-only --count 100 \
+  --harmful-count 10 --malicious-code-count 10 --output datasets/mixed-code-safety-prompts
 
 # Refusal-only training data: no teacher programs or rendering.
 .venv/bin/python -m drawing.generate_dataset --count 50 \
@@ -440,14 +468,51 @@ concurrency, separate from `--workers` for teacher/render processing. A failed
 prompt is retried on its own (up to five attempts by default), without
 regenerating valid prompts. API errors are also retried with short backoff.
 
-During full generation, each validated prompt is atomically checkpointed in
-`prompt-records/000000.json` (and subsequent numbered files), with its raw
-completion and attempt count. `prompt-progress.json` pins the configuration.
+Every draft must pass structural checks, cue/placeholder checks, and a separate
+LLM quality review before acceptance. The reviewer assesses actual difficulty,
+exercised skills, concrete intent, internal consistency, geometric feasibility,
+safety category, boundary relevance, and repetition. Refusal difficulty measures
+recognition difficulty rather than picture complexity. Rejected drafts receive
+specific feedback on their next attempt. The review uses the prompt-writing model
+by default in a separate call; set `--prompt-review-model` / `--prompt-review-url`
+or `ARTSY_PROMPT_REVIEW_MODEL` / `ARTSY_PROMPT_REVIEW_URL` to use another model.
+`ARTSY_PROMPT_REVIEW_API_KEY` selects its credentials; the writer key is reused only
+when endpoints match. A complete attempt uses three model calls: author, safety extraction, and quality review.
+The two review calls do not see each other’s conclusions; both must pass. Automated
+review still needs human calibration and can miss semantic defects.
+
+Art styles and request voices are balanced independently of subjects. Word ranges
+vary by voice and difficulty (8–150 words overall), so short user requests coexist
+with detailed briefs. Benign boundary slots pair a specific refusal trigger with
+permitted context; general safety branding is insufficient. Code-refusal requests
+specify the operation, affected asset/data and observable intended effect without
+self-incriminating permission declarations. Fictional framing is assessed in context,
+never rejected by keyword alone. Synthetic names and reserved `.invalid` destinations are retained.
+Hate-safety cases must establish an actual protected characteristic rather than
+invent a fantasy population. Permitted fictional props remain valid benign-boundary
+cases. Every quality assessment saves a `safetyReason` explaining the classification;
+vague code effects and unsupported refusal labels cause a rewrite. The safety gate
+requires exact prompt quotes for the operation, asset, modification, and intended
+effect in code cases; hate cases need an explicit protected characteristic. Missing
+or invented evidence and disagreements between reviewers fail the attempt.
+Local regression fixtures in `tests/fixtures/safety_review_regressions.json` preserve
+the two rejected cases, two approved controls, and minimal framing variants.
+These validate the gate contract; live model agreement must be measured separately.
+
+During both prompt-only and full generation, each reviewed prompt is atomically
+checkpointed in `prompt-records/000000.json` (and subsequent numbered files), with
+its raw author, safety, and quality completions, assessments, context, and attempt count.
+`prompt-attempts.jsonl` retains rejected attempts and their feedback as well.
+`prompt-progress.json` pins the configuration, including hashes of all three instruction
+sets; the final plan also saves the instruction text.
 Repeating the same command resumes only missing prompts; once all are ready,
 `prompt-plan.json` freezes the complete ordered plan **before rendering**.
 Changing the prompt configuration requires a new output directory. Neither API
-keys nor credentials are persisted. `--dry-run` prints JSONL and does not
-checkpoint. Dataset generation does not assign train, validation, or test splits
+keys nor credentials are persisted. Prompt-only runs also save `prompts.jsonl`.
+Exports retain slice, subject theme, format, primary skill, style, voice, and
+generator version. IDs include normalized prompt text and slot provenance, so
+regenerating different text changes its ID. The seed alone does not freeze text.
+Dataset generation does not assign train, validation, or test splits
 and does not filter candidates into training exports. All outcomes remain in
 `candidates.jsonl`.
 

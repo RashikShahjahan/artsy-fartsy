@@ -1,15 +1,19 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Artsy</title><link rel="stylesheet" href="style.css"></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Artsy</title><link rel="stylesheet" href="/style.css"></head>
 <body>
-<header class="app-header"><a class="brand" href="./">Artsy</a><span>Generate</span><span class="prototype">Qwen / ArtCanvas</span></header>
-<main><h1>Generate an image</h1><div class="studio">
-<section class="controls" aria-label="Generation settings"><form id="generation-form">
+__NAVIGATION__
+<main><div class="page-heading"><div><p class="eyebrow">CREATE & EXPLORE</p><h1>Drawing studio</h1></div><p class="page-description">From a prompt to a drawing, with every step in view.</p></div><div class="studio">
+<section class="controls" aria-label="Generation settings">
+<div class="source-switch" role="group" aria-label="Prompt source"><button type="button" data-source="freeform" aria-pressed="true">Write a prompt</button><button type="button" data-source="dataset" aria-pressed="false">From dataset</button></div>
+<section id="drawing-library" class="drawing-library" aria-label="Drawing prompt browser" hidden>
+<p id="dataset-label" class="note">Loading prompts…</p><label for="drawing-search">Search drawing prompts</label><input id="drawing-search" type="search" placeholder="Search prompt or skill…"><label for="drawing-select">Choose a prompt</label><select id="drawing-select" size="6" aria-label="Drawing prompts"></select><p id="drawing-meta" class="note"></p></section>
+<form id="generation-form">
 <label for="prompt">Prompt</label><textarea id="prompt" maxlength="4000" placeholder="Describe what to draw…" required></textarea>
 <label for="model">Model</label><select id="model" required><option value="Qwen/Qwen3.5-4B">Qwen3.5 · 4B</option></select><p class="note" id="model-note">Choose base weights or a completed fine-tune.</p>
 <div class="settings"><div><span class="field-label">Canvas</span><div class="fixed-field">1920 × 1200</div></div></div>
 <button class="primary" id="generate" type="submit">Generate</button><p class="note">Runs the drawing agent. Uses model credits.</p><p id="form-status" role="status"></p>
-</form></section>
+</form><section id="drawing-history" class="drawing-history" hidden><h2>Runs for this prompt</h2><div id="drawing-runs"></div></section></section>
 <section class="results" aria-label="Generation run"><div class="results-heading"><h2>Output</h2><span id="run-status" role="status">Not started</span></div>
 <div class="output" id="output"><p>Your image will appear here.</p></div><div id="downloads"></div>
 <section class="trace"><div class="results-heading"><h2>Run timeline</h2><button id="expand" type="button">Expand all</button></div><p class="note" id="trace-note">The run’s messages, code, tool calls, previews, and errors.</p><div id="trace-stats" class="trace-stats" aria-live="polite"></div><div id="trace-toolbar" class="trace-toolbar" role="group" aria-label="Trace view" hidden><button type="button" data-trace-view="actions" aria-pressed="true">Actions</button><button type="button" data-trace-view="transcript" aria-pressed="false">Transcript</button><button type="button" data-trace-view="events" aria-pressed="false">Events</button></div><div id="event-controls" hidden><label for="event-search">Search events</label><input id="event-search" type="search" placeholder="Search commands, errors, event types…"></div><div id="trace"><p class="empty">No run yet.</p></div><details id="console-panel"><summary>Process output</summary><pre id="console">No process output.</pre></details></section>
-</section></div></main><script src="trace.js"></script><script src="app.js"></script></body></html>
+</section></div></main><script src="/trace.js"></script><script src="/app.js"></script></body></html>

@@ -86,6 +86,10 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
             if difficulty not in DIFFICULTIES:
                 raise ValueError(f"difficulty must be one of {DIFFICULTIES}")
             normalized_row["difficulty"] = difficulty
+        if "plannedDifficulty" in row:
+            if row["plannedDifficulty"] not in DIFFICULTIES:
+                raise ValueError("Invalid planned difficulty")
+            normalized_row["plannedDifficulty"] = row["plannedDifficulty"]
         kind = row.get("kind")
         if kind is not None:
             if kind != "refusal" or row["family"] != "safety_refusal":
@@ -106,5 +110,22 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
             raise ValueError("Refusal target requires kind=refusal")
         elif "safetyCategory" in row:
             raise ValueError("safetyCategory requires kind=refusal")
+        # Preserve prompt planning provenance through normalization and exports.
+        # It is analysis metadata, never a hidden drawing requirement.
+        for key in ("benchmarkSlice", "contentTheme", "format", "primarySkill",
+                    "artStyle", "voice", "generatorVersion"):
+            if key in row:
+                if not isinstance(row[key], str) or not row[key].strip() or len(row[key]) > 300:
+                    raise ValueError(f"Invalid prompt metadata: {key}")
+                normalized_row[key] = row[key]
+        if "primarySkill" in row and (row["primarySkill"] not in SKILL_TAXONOMY
+                                      or row["primarySkill"] not in (skills or [])):
+            raise ValueError("Primary skill must be one of the prompt's skill labels")
+        if "benchmarkSlice" in row:
+            expected = row.get("safetyCategory", "harmful_image") if kind == "refusal" else None
+            if (expected and row["benchmarkSlice"] != expected) or (
+                not expected and row["benchmarkSlice"] not in ("drawing", "benign_boundary")
+            ):
+                raise ValueError("Benchmark slice does not match the prompt kind/category")
         result.append(normalized_row)
     return result

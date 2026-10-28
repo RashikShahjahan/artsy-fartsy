@@ -73,6 +73,13 @@ def check_native_bridge(model: str = BASE_MODEL) -> None:
             f"Fine-tune {model} is not available on the running bridge. "
             "Restart `make serve` to enable saved fine-tune selection."
         )
+    from inference.model_catalog import HOSTED_MODEL_PROFILES, model_catalog
+    if model in HOSTED_MODEL_PROFILES:
+        expected = next(item for item in model_catalog() if item['id'] == model)
+        if (isinstance(status, dict) and status.get('backend') == 'tinker'
+                and 'image' in (status.get('input') or []) and expected in status.get('models', [])):
+            return
+        raise RuntimeError(f"Native Tinker model {model} is unavailable. Restart `make serve` to enable it.")
     if (not isinstance(status, dict) or status.get("backend") != "tinker"
             or status.get("model") != model
             or status.get("model_path") != (os.getenv("ARTSY_TINKER_MODEL_PATH") or None)

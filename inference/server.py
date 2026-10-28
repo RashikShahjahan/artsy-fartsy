@@ -17,13 +17,32 @@ from jinja2 import TemplateError
 
 from drawing.config import (IMAGE_SIZE, MODEL_CONTEXT_WINDOW, MODEL_ID, MODEL_REVISION,
                             TINKER_SAMPLING_MODEL_ID)
-from .model_catalog import ModelCatalogCache, model_catalog
+from .model_catalog import HOSTED_MODEL_PROFILES, ModelCatalogCache, model_catalog
 
 SAMPLER_LOCK = threading.Lock()
 
 CONTEXT_WINDOW = MODEL_CONTEXT_WINDOW
 MAX_TOKENS = 16000
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def native_message(message):
+    """Translate the renderer's parsed tool calls without applying Qwen syntax."""
+    content = message.get('content') or ''
+    text = content if isinstance(content, str) else ''.join(
+        part.get('text', '') for part in content if part.get('type') == 'text')
+    calls = []
+    for original in message.get('tool_calls', []):
+        call = original.model_dump() if hasattr(original, 'model_dump') else original
+        function = call['function']
+        arguments = function['arguments']
+        if isinstance(arguments, dict):
+            arguments = json.dumps(arguments)
+        if not isinstance(json.loads(arguments), dict):
+            raise ValueError('Tool arguments must be a JSON object')
+        calls.append({'id': call.get('id') or 'call_' + uuid.uuid4().hex, 'type': 'function',
+                      'function': {'name': function['name'], 'arguments': arguments}})
+    return text, calls
 
 
 def parse_tools(text, tools=None):
@@ -172,35 +191,44 @@ def complete(body: dict):
     if not selected:
         raise HTTPException(400, "Unknown model. Choose a model from /v1/models.")
     backend = app.state.tinker
+    context_window = CONTEXT_WINDOW
     if model_id != MODEL_ID:
         # Keep a small cache; every request retains its own backend reference.
         with SAMPLER_LOCK:
             samplers = getattr(app.state, 'samplers', {})
             app.state.samplers = samplers
-            path = selected['model_path']
-            if path not in samplers:
-                candidate = backend.with_model_path(path)
+            profile = HOSTED_MODEL_PROFILES.get(model_id)
+            key = model_id if profile else selected['model_path']
+            if key not in samplers:
+                if profile:
+                    from .tinker_backend import TinkerBackend
+                    candidate = TinkerBackend(model_id, profile['revision'], IMAGE_SIZE,
+                        sampling_model_id=profile['sampling_model'], renderer_name=profile['renderer'])
+                else:
+                    candidate = backend.with_model_path(selected['model_path'])
                 if len(samplers) >= 3:
                     samplers.pop(next(iter(samplers)))
-                samplers[path] = candidate
-            backend = samplers[path]
+                samplers[key] = candidate
+            backend = samplers[key]
+            if profile:
+                context_window = profile['context_window']
     requested_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
     budget = max(1, min(int(requested_tokens or MAX_TOKENS), MAX_TOKENS))
     try:
         messages = template_messages(body["messages"], backend.prepare_image)
         raw, count, generated = backend.generate(
-            messages, body.get("tools"), budget, CONTEXT_WINDOW, temperature=temperature)
+            messages, body.get("tools"), budget, context_window, temperature=temperature)
     except (ValueError, TemplateError) as error:
         raise HTTPException(400, str(error)) from error
     try:
-        text, calls = parse_tools(raw, body.get("tools"))
-    except (ValueError, SyntaxError):
+        text, calls = native_message(raw) if isinstance(raw, dict) else parse_tools(raw, body.get("tools"))
+    except (ValueError, SyntaxError, KeyError, TypeError):
         # Preserve malformed output for the harness to ask the model to correct.
-        text, calls = raw, []
+        text, calls = (raw if isinstance(raw, str) else json.dumps(raw, default=str)), []
     message = {"role": "assistant", "content": text or None}
     if calls:
         message["tool_calls"] = calls
-    effective_budget = min(budget, CONTEXT_WINDOW - count)
+    effective_budget = min(budget, context_window - count)
     finish = "tool_calls" if calls else "length" if generated >= effective_budget else "stop"
     common = {"id": "chatcmpl-" + uuid.uuid4().hex, "created": int(time.time()), "model": model_id}
     usage = {"prompt_tokens": count, "completion_tokens": generated, "total_tokens": count + generated}

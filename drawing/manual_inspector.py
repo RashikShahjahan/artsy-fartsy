@@ -51,6 +51,7 @@ button.primary{background:#276b51;color:white}small{color:#63786d}
 const data = __DATA__, reviews = data.review.decisions || {};
 const $ = id => document.getElementById(id);
 let current = null, changed = false;
+window.addEventListener('beforeunload', event => {if(changed){event.preventDefault();event.returnValue='';}});
 $('reviewer').value = data.review.reviewer || '';
 function node(tag, text, cls) { const x = document.createElement(tag); if(text!==undefined)x.textContent=text; if(cls)x.className=cls; return x; }
 function count(kind) { return data.items.filter(x => (reviews[x.id] || {}).decision === kind).length; }
@@ -224,8 +225,8 @@ def image_paths(record: dict, root: Path) -> list[tuple[str, Path]]:
     return images
 
 
-def serve(path: Path, port: int = 8767, review_path: Path | None = None,
-          accepted_output: Path | None = None) -> None:
+def make_handler(path: Path, port: int = 8767, review_path: Path | None = None,
+                 accepted_output: Path | None = None, *, base_path="", page_transform=None):
     path = path.resolve()
     root = path.parent
     records, sha = load_candidates(path)
@@ -274,6 +275,10 @@ def serve(path: Path, port: int = 8767, review_path: Path | None = None,
             if target.path == "/":
                 payload = {"items": summaries, "review": review, "sha256": sha, "reviewPath": str(review_path)}
                 page = PAGE.replace("__DATA__", json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c"))
+                if base_path:
+                    page = page.replace("'/api/", "'" + base_path + "/api/")
+                if page_transform:
+                    page = page_transform(page)
                 return self.respond(200, page.encode("utf-8"), "text/html; charset=utf-8")
             if target.path == "/api/record":
                 rid = parse_qs(target.query).get("id", [""])[0]
@@ -281,7 +286,7 @@ def serve(path: Path, port: int = 8767, review_path: Path | None = None,
                 if record is None:
                     return self.json_response(404, {"error": "Unknown candidate ID"})
                 pairs = image_paths(record, root)
-                images = [{"label": label, "url": "/image/" + rid + "/" + str(i)}
+                images = [{"label": label, "url": base_path + "/image/" + rid + "/" + str(i)}
                           for i, (label, _) in enumerate(pairs)]
                 try:
                     example = convert_record(approved_record(record, "inspection", {}), root)
@@ -328,7 +333,13 @@ def serve(path: Path, port: int = 8767, review_path: Path | None = None,
             except (ValueError, TypeError, OSError, KeyError) as exc:
                 return self.json_response(400, {"error": str(exc)})
 
-    print(f"Full SFT inspector: http://127.0.0.1:{port} ({len(records)} candidates)", flush=True)
+    return Handler
+
+
+def serve(path: Path, port: int = 8767, review_path: Path | None = None,
+          accepted_output: Path | None = None) -> None:
+    Handler = make_handler(path, port, review_path, accepted_output)
+    print(f"Full SFT inspector: http://127.0.0.1:{port}", flush=True)
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 

@@ -13,6 +13,16 @@ from evaluation.harness import (BASE_MODEL, LOCAL_MODEL_URL, TINKER_MODEL_URL,
 
 
 class TinkerPreflightTests(unittest.TestCase):
+    def test_larger_model_requires_matching_native_profile(self):
+        from inference.model_catalog import LARGE_MODEL_ID, model_catalog
+        entry = next(row for row in model_catalog() if row['id'] == LARGE_MODEL_ID)
+        status = {'backend': 'tinker', 'model': BASE_MODEL, 'input': ['text', 'image'], 'models': [entry]}
+        with patch.dict(os.environ, {'ARTSY_MODEL_URL': ''}), patch('evaluation.harness.httpx.get') as request:
+            request.return_value.json.return_value = status
+            check_native_bridge(LARGE_MODEL_ID)
+            request.return_value.json.return_value = {**status, 'models': []}
+            with self.assertRaisesRegex(RuntimeError, 'Restart `make serve`'):
+                check_native_bridge(LARGE_MODEL_ID)
     def test_default_endpoint_requires_running_native_image_bridge(self):
         status = {"backend": "tinker", "model": BASE_MODEL, "model_path": None,
                   "input": ["text", "image"]}

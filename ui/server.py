@@ -1,4 +1,6 @@
 """Loopback-only UI and drawing job service. Run: python3 -m ui.server."""
+import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -7,15 +9,74 @@ import subprocess
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
+from urllib.parse import urlsplit, parse_qs
+from ui.shell import navigation, review_page, empty_page
 from urllib.request import urlopen
 
 from inference.model_catalog import model_catalog
+from drawing.dataset_specs import validate_specs
 
 ROOT = Path(__file__).resolve().parents[1]
 JOBS = ROOT / 'episodes' / 'ui'
 LOCK = threading.Lock()
 ACTIVE = None
 PORT = int(os.getenv('ARTSY_UI_PORT', '4173'))
+DRAWING_DATASET = os.getenv('ARTSY_DRAWING_DATASET')
+CANDIDATE_DATASET = os.getenv('ARTSY_CANDIDATE_DATASET')
+PROMPT_REVIEW_OUTPUT = None
+CANDIDATE_REVIEW_OUTPUT = None
+ACCEPTED_OUTPUT = None
+REVIEW_LOCK = threading.RLock()
+MOUNTED_HANDLERS = {}
+
+
+def drawing_dataset():
+    path = Path(DRAWING_DATASET).resolve() if DRAWING_DATASET else ROOT / 'evaluation/benchmark-v1/prompts.jsonl'
+    raw = path.read_bytes()
+    rows = validate_specs([json.loads(line) for line in raw.splitlines() if line.strip()])
+    drawings = [row for row in rows if row.get('kind') != 'refusal'
+                and row.get('benchmarkSlice', 'drawing') == 'drawing']
+    return {'path': str(path), 'label': path.parent.name, 'sha256': hashlib.sha256(raw).hexdigest(),
+            'items': drawings}
+
+
+def drawing_runs(dataset):
+    result = []
+    for file in sorted(JOBS.glob('*/job.json'), key=lambda file: file.stat().st_mtime, reverse=True):
+        try:
+            run = json.loads(file.read_text())
+            if run.get('dataset_sha256') == dataset['sha256']:
+                result.append({'id': file.parent.name, **{key: run.get(key) for key in
+                               ('prompt_id', 'model', 'state', 'seed')}})
+        except (OSError, ValueError, AttributeError):
+            continue
+    return result
+
+
+def generation_request(body):
+    if not isinstance(body, dict):
+        raise ValueError('Invalid request.')
+    prompt, seed, model = body.get('prompt'), body.get('seed'), body.get('model')
+    origin = {}
+    if 'prompt_id' in body:
+        dataset = drawing_dataset()
+        if body.get('dataset_sha256') != dataset['sha256']:
+            raise ValueError('The prompt dataset changed. Reload the drawing view before running.')
+        spec = next((row for row in dataset['items'] if row['id'] == body['prompt_id']), None)
+        if not spec:
+            raise ValueError('Drawing prompt not found in this dataset.')
+        prompt, seed = spec['prompt'], spec['seed']
+        if model not in {item['id'] for item in model_catalog()}:
+            raise ValueError('Choose an available native Tinker model.')
+        origin = {'prompt_id': spec['id'], 'dataset_sha256': dataset['sha256'],
+                  'dataset_path': dataset['path']}
+    if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
+        raise ValueError('Enter a prompt of 1–4000 characters.')
+    if type(seed) is not int or not 0 <= seed <= 2**53 - 1:
+        raise ValueError('Seed must be a nonnegative safe integer.')
+    if not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9_./:-]{1,200}', model):
+        raise ValueError('Enter a valid model ID.')
+    return {'prompt': prompt.strip(), 'seed': seed, 'model': model, **origin}
 
 
 def bridge_model_catalog():
@@ -48,10 +109,14 @@ def run_job(directory, request):
     initial.replace(directory / 'job.json')
     try:
         with (directory / 'console.txt').open('w') as output:
+            environment = os.environ.copy()
+            if request.get('prompt_id'):
+                environment.update(ARTSY_MODEL_URL='http://127.0.0.1:8080/v1',
+                                   ARTSY_MODEL_API_KEY='local-no-auth')
             process = subprocess.run(
                 [interpreter(), '-u', '-m', 'ui.worker', str(directory), request['prompt'],
                  str(request['seed']), request['model']], cwd=ROOT, stdout=output,
-                stderr=subprocess.STDOUT, check=False,
+                stderr=subprocess.STDOUT, check=False, env=environment,
             )
         status['state'] = 'completed' if process.returncode == 0 else 'failed'
         status['exit_code'] = process.returncode
@@ -82,10 +147,76 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def serve_workspace(self):
+        target = urlsplit(self.path)
+        mount = next((name for name in ('review', 'candidates')
+                      if target.path == '/' + name or target.path.startswith('/' + name + '/')), None)
+        if mount is None:
+            return False
+        try:
+            with REVIEW_LOCK:
+                safety_only = mount == 'review' and parse_qs(target.query).get('scope') == ['safety']
+                key = (mount, safety_only, DRAWING_DATASET, CANDIDATE_DATASET, PROMPT_REVIEW_OUTPUT,
+                       CANDIDATE_REVIEW_OUTPUT, ACCEPTED_OUTPUT)
+                if key not in MOUNTED_HANDLERS:
+                    def transform(page):
+                        rendered = review_page(page, mount)
+                        if mount == 'review':
+                            switch = '<div class="review-scope" aria-label="Review scope">'
+                            for url, label, selected in [('/review', 'All prompts', not safety_only),
+                                    ('/review?scope=safety', 'Safety prompts', safety_only)]:
+                                switch += f'<a href="{url}"' + (' aria-current="true"' if selected else '') + f'>{label}</a>'
+                            rendered = rendered.replace('<h1>', switch + '</div><h1>', 1)
+                        return rendered
+                    if mount == 'review':
+                        from evaluation.dataset_viewer import make_handler
+                        handler_type = make_handler(Path(DRAWING_DATASET) if DRAWING_DATASET else None,
+                            PROMPT_REVIEW_OUTPUT, not safety_only, PORT, base_path='/review', page_transform=transform)
+                    elif CANDIDATE_DATASET:
+                        from drawing.manual_inspector import make_handler
+                        handler_type = make_handler(Path(CANDIDATE_DATASET), PORT,
+                            CANDIDATE_REVIEW_OUTPUT, ACCEPTED_OUTPUT,
+                            base_path='/candidates', page_transform=transform)
+                    else:
+                        handler_type = None
+                    MOUNTED_HANDLERS[key] = handler_type
+                handler_type = MOUNTED_HANDLERS[key]
+                if handler_type is None:
+                    if self.command == 'GET' and target.path in ('/candidates', '/candidates/'):
+                        self.send_page(empty_page(mount, 'SFT candidates',
+                            'To inspect and curate generated trajectories, start this app with '
+                            '--candidates datasets/YOUR-RUN/candidates.jsonl.'))
+                    else:
+                        self.send_json({'error': 'No candidate dataset configured.'}, 404)
+                    return True
+                handler = object.__new__(handler_type)
+                handler.__dict__.update(self.__dict__)
+                handler.path = target.path[len('/' + mount):] or '/'
+                if target.query and mount != 'review':
+                    handler.path += '?' + target.query
+                getattr(handler, 'do_' + self.command)()
+        except (OSError, ValueError, TypeError) as error:
+            if self.command == 'GET' and target.path in ('/' + mount, '/' + mount + '/'):
+                self.send_page(empty_page(mount, 'Workspace unavailable', str(error)))
+            else:
+                self.send_json({'error': str(error)}, 400)
+        return True
+
+    def send_page(self, page):
+        content = page.encode('utf-8')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
+
     def do_POST(self):
         global ACTIVE
         if not self.trusted():
             return self.send_json({'error': 'Local requests only.'}, 403)
+        if self.serve_workspace():
+            return
         if self.path != '/api/runs':
             return self.send_json({'error': 'Not found.'}, 404)
         try:
@@ -93,17 +224,8 @@ class Handler(SimpleHTTPRequestHandler):
             if not 0 < size <= 20000:
                 raise ValueError('Invalid request size.')
             body = json.loads(self.rfile.read(size))
-            if not isinstance(body, dict):
-                raise ValueError('Invalid request.')
-            prompt, seed, model = body.get('prompt'), body.get('seed'), body.get('model')
-            if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
-                raise ValueError('Enter a prompt of 1–4000 characters.')
-            if type(seed) is not int or not 0 <= seed <= 2**53 - 1:
-                raise ValueError('Seed must be a nonnegative safe integer.')
-            if not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9_./:-]{1,200}', model):
-                raise ValueError('Enter a valid model ID.')
-            request = {'prompt': prompt.strip(), 'seed': seed, 'model': model}
-        except (ValueError, TypeError) as error:
+            request = generation_request(body)
+        except (OSError, ValueError, TypeError) as error:
             return self.send_json({'error': str(error)}, 400)
         with LOCK:
             if ACTIVE:
@@ -119,6 +241,14 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if not self.trusted():
             return self.send_json({'error': 'Local requests only.'}, 403)
+        if self.serve_workspace():
+            return
+        if self.path == '/api/drawing-prompts':
+            try:
+                dataset = drawing_dataset()
+                return self.send_json({**dataset, 'runs': drawing_runs(dataset)})
+            except (OSError, ValueError, TypeError) as error:
+                return self.send_json({'error': str(error)}, 400)
         if self.path == '/api/models':
             served = bridge_model_catalog()
             catalog = {item['id']: item for item in model_catalog()}
@@ -156,11 +286,27 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(status)
         if self.path.startswith('/api/'):
             return self.send_json({'error': 'Not found.'}, 404)
-        if self.path not in ('/', '/index.html', '/app.js', '/trace.js', '/style.css'):
+        if urlsplit(self.path).path in ('/', '/index.html', '/drawings', '/drawings.html'):
+            page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
+            return self.send_page(page)
+        if self.path not in ('/app.js', '/trace.js', '/style.css'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--dataset', type=Path, help='Prompt JSONL for Studio and prompt review (defaults to the frozen benchmark)')
+    parser.add_argument('--candidates', type=Path, help='Candidate JSONL for SFT inspection and export')
+    parser.add_argument('--review-output', type=Path, help='Prompt review output JSON')
+    parser.add_argument('--candidate-review', type=Path, help='Candidate review output JSON')
+    parser.add_argument('--accepted-output', type=Path, help='Approved SFT export JSONL')
+    args = parser.parse_args()
+    CANDIDATE_DATASET = str(args.candidates.resolve()) if args.candidates else CANDIDATE_DATASET
+    PROMPT_REVIEW_OUTPUT = args.review_output
+    CANDIDATE_REVIEW_OUTPUT = args.candidate_review
+    ACCEPTED_OUTPUT = args.accepted_output
+    if args.dataset:
+        DRAWING_DATASET = str(args.dataset.resolve())
     print(f'Artsy: http://127.0.0.1:{PORT}', flush=True)
     ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()

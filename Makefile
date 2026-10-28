@@ -2,7 +2,10 @@ PYTHON ?= .venv/bin/python
 EVAL_PYTHON ?= .eval-venv/bin/python
 ARGS ?=
 
-.PHONY: serve render draw eval eval-base dataset dpo grpo test test-eval check
+.PHONY: ui serve render draw eval eval-base dataset dpo grpo test test-eval check
+ui:
+	$(PYTHON) -m ui.server $(ARGS)
+
 serve:
 	$(PYTHON) -m uvicorn inference.server:app --host 127.0.0.1 --port 8080 $(ARGS)
 render:
