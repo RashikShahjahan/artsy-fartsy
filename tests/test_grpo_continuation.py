@@ -28,11 +28,10 @@ class ContinuationTests(unittest.TestCase):
                            prompt_ids=[s['id'] for s in self.specs],
                            source_sha256={p: grpo.digest((grpo.ROOT / p).read_bytes())
                                           for p in grpo.PROVENANCE_FILES},
-                           reference_sampler_path='tinker://original-sft-reference',
-                           initial_state_path='tinker://original-sft-state',
+                           reference_sampler_path='tinker://original-dpo-reference',
+                           initial_state_path='tinker://original-dpo-state',
                            correctness_judge_model='saved-judge', correctness_judge_url='saved-url')
-        self.config.update(visual_sampler_path='tinker://frozen-visual-judge',
-                           safety_config={'model': 'safety', 'baseUrl': 'saved-url'},
+        self.config.update(safety_config={'model': 'safety', 'baseUrl': 'saved-url'},
                            code_safety_config={'model': 'code-safety', 'baseUrl': 'saved-url'})
         self.record = dict(name='final', batch=3, state_path='tinker://rl-state',
                            sampler_path='tinker://rl-sampler')
@@ -53,8 +52,8 @@ class ContinuationTests(unittest.TestCase):
         specs, plan, total = grpo.load_continuation(self.args)
         self.assertEqual(total, 7)
         self.assertEqual(self.args.epochs, 3)
-        self.assertEqual(plan['reference_sampler_path'], 'tinker://original-sft-reference')
-        self.assertEqual(plan['initial_state_path'], 'tinker://original-sft-state')
+        self.assertEqual(plan['reference_sampler_path'], 'tinker://original-dpo-reference')
+        self.assertEqual(plan['initial_state_path'], 'tinker://original-dpo-state')
         self.assertEqual(plan['correctness_judge_model'], 'saved-judge')
         original = list(batches(specs, 2, 1, 42))
         extended = list(batches(specs, 2, self.args.epochs, self.args.seed))
@@ -132,7 +131,7 @@ class ContinuationTests(unittest.TestCase):
         first = list(batches(specs, 2, 3, 42))
         next_run = list(batches(specs, 2, self.args.epochs, 42))
         self.assertEqual(first[7:9], next_run[7:9])
-        self.assertEqual(chained['reference_sampler_path'], 'tinker://original-sft-reference')
+        self.assertEqual(chained['reference_sampler_path'], 'tinker://original-dpo-reference')
 
     def test_main_persists_plan_and_resumes_without_replacing_checkpoint(self):
         command = ['--continue-from', str(self.origin), '--additional-steps', '4',

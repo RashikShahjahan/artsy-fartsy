@@ -5,7 +5,7 @@ python -m training.grpo --max-steps 1 --output-dir checkpoints/grpo-pilot
 
 The Cookbook owns rollout sampling, grouped advantages, PPO updates and
 checkpointing. Artsy's Docker tool environment supplies image observations
-and independent frozen visual, adherence, content-safety and code-safety rewards. Inspect is used for evaluation.
+and independent adherence, content-safety and code-safety rewards. Inspect is used for evaluation.
 """
 
 from __future__ import annotations
@@ -23,8 +23,9 @@ from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION, MODEL_CONTEXT_W
 from drawing.eval_specs import load_specs
 from training.data import ROOT, digest
 from training.sft import RENDERER, batches
+from training.dpo import ALGORITHM as DPO_ALGORITHM
 
-ALGORITHM = "tinker-cookbook-rlhf-v1"
+ALGORITHM = "tinker-cookbook-rlhf-v2"
 PROVENANCE_FILES = (
     "docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
     "drawing/agent_contract.py", "drawing/eval_specs.py",
@@ -34,7 +35,7 @@ PROVENANCE_FILES = (
     "evaluation/requirements.txt", "training/cookbook_env.py",
     "training/cookbook_dataset.py", "training/score_rl.py", "training/grpo.py",
     "training/sft.py", "training/requirements.txt", "training/requirements-grpo.txt",
-    "drawing/dataset_client.py", "drawing/tinker_client.py", "preference/judge.py",
+    "drawing/dataset_client.py", "drawing/tinker_client.py",
 )
 
 
@@ -52,13 +53,14 @@ def load_run(args):
         specs = specs[:args.limit]
     initial = json.loads(args.init_checkpoint.read_text())
     source = initial.get("config", {})
-    if (source.get("model") != MODEL_ID or source.get("tokenizer_revision") != MODEL_REVISION
+    if (source.get("algorithm") != DPO_ALGORITHM or source.get("model") != MODEL_ID
+            or source.get("tokenizer_revision") != MODEL_REVISION
             or source.get("renderer") != RENDERER or type(source.get("lora_rank")) is not int
             or source["lora_rank"] < 1
             or source.get("api_doc_sha256") != digest((ROOT / "docs/artcanvas.md").read_bytes())
             or any(not isinstance(initial.get(key), str) or not initial[key].startswith("tinker://")
                    for key in ("state_path", "sampler_path"))):
-        raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
+        raise ValueError("Initial checkpoint must contain compatible DPO weights and sampler paths")
     config = {
         "algorithm": ALGORITHM, "model": MODEL_ID, "tokenizer_revision": MODEL_REVISION,
         "renderer": RENDERER, "image_size": IMAGE_SIZE, "lora_rank": source["lora_rank"],
@@ -79,13 +81,8 @@ def load_run(args):
         "correctness_judge_renderer": os.getenv("ARTSY_CORRECTNESS_JUDGE_RENDERER", "qwen3_8_medium_reasoning"),
         "correctness_judge_revision": os.getenv("ARTSY_CORRECTNESS_JUDGE_REVISION"),
         "correctness_judge_max_tokens": int(os.getenv("ARTSY_CORRECTNESS_JUDGE_MAX_TOKENS", "16384")),
-        "reward": "unsafe=-1; correct refusal=1; overrefusal/invalid=0; benign=0.5*visual+0.5*adherence",
-        "reward_version": "artsy-multisignal-rlhf-v1",
-        "visual_model": args.visual_model,
-        "visual_sampler_path": args.visual_sampler_path,
-        "visual_renderer": args.visual_renderer,
-        "visual_revision": args.visual_revision,
-        "visual_max_tokens": args.visual_max_tokens,
+        "reward": "unsafe=-1; correct refusal=1; overrefusal/invalid=0; benign=adherence",
+        "reward_version": "artsy-adherence-safety-rl-v2",
         "safety_config": judge_settings("ARTSY_SAFETY_JUDGE"),
         "code_safety_config": judge_settings("ARTSY_CODE_SAFETY_JUDGE"),
         "loss": "Cookbook PPO; optional reference-KL reward penalty",
@@ -99,8 +96,7 @@ def load_run(args):
 INHERITED_PARAMETERS = (
     "batch_size", "group_size", "learning_rate", "clip_epsilon", "kl_coef",
     "normalize_rewards", "temperature", "max_tokens", "max_length",
-    "max_samples", "seed", "visual_model", "visual_sampler_path",
-    "visual_renderer", "visual_revision", "visual_max_tokens",
+    "max_samples", "seed",
 )
 
 
@@ -192,9 +188,7 @@ def make_cookbook_config(args, specs, plan, total):
             judge_renderer=plan.get("correctness_judge_renderer", "qwen3_8_medium_reasoning"),
             judge_revision=plan.get("correctness_judge_revision"),
             judge_max_tokens=plan.get("correctness_judge_max_tokens", 16384),
-            **{key: plan[key] for key in ("visual_model", "visual_sampler_path",
-                "visual_renderer", "visual_revision", "visual_max_tokens",
-                "safety_config", "code_safety_config")},
+            **{key: plan[key] for key in ("safety_config", "code_safety_config")},
         ),
         learning_rate=args.learning_rate,
         # Cookbook max_tokens is a per-call cap; no aggregate sampled cap.
@@ -267,8 +261,8 @@ async def train(args, specs, plan, total):
 def parser():
     p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     p.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v1/prompts.jsonl")
-    p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v1/final.json")
-    p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v1")
+    p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/dpo-v1/final.json")
+    p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v2")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
     p.add_argument("--additional-steps", type=int, help="Positive number of extra updates")
@@ -287,11 +281,6 @@ def parser():
     p.add_argument("--kl-coef", type=float, default=0.01)
     p.add_argument("--normalize-rewards", action="store_true",
                    help="Deprecated compatibility flag: Tinker mean-centers without std scaling")
-    p.add_argument("--visual-model", default=os.getenv("ARTSY_VISUAL_JUDGE_MODEL", "Qwen/Qwen3.5-9B"))
-    p.add_argument("--visual-sampler-path", default=os.getenv("ARTSY_VISUAL_JUDGE_SAMPLER_PATH", ""))
-    p.add_argument("--visual-renderer", default=os.getenv("ARTSY_VISUAL_JUDGE_RENDERER"))
-    p.add_argument("--visual-revision", default=os.getenv("ARTSY_VISUAL_JUDGE_REVISION"))
-    p.add_argument("--visual-max-tokens", type=int, default=int(os.getenv("ARTSY_VISUAL_JUDGE_MAX_TOKENS", "2048")))
     p.add_argument("--max-tokens", type=int, default=8192, help="Maximum generated tokens per turn")
     p.add_argument("--max-length", type=int, default=MODEL_CONTEXT_WINDOW, help="Maximum trajectory context tokens")
     p.add_argument("--seed", type=int, default=42)
@@ -328,7 +317,7 @@ def main(argv=None):
         return 0
     if (any(value < 1 for value in (args.epochs, args.batch_size, args.max_samples,
                                    args.save_every, args.max_tokens, args.max_length))
-            or args.visual_max_tokens < 1 or args.group_size < 2 or args.max_steps == 0 or args.max_steps < -1
+            or args.group_size < 2 or args.max_steps == 0 or args.max_steps < -1
             or (args.limit is not None and args.limit < 1)
             or not 0 <= args.seed <= 2**32 - 1 or args.max_length > MODEL_CONTEXT_WINDOW
             or args.max_tokens > args.max_length
@@ -350,13 +339,11 @@ def main(argv=None):
         return 0
     if not config["correctness_judge_model"] or not config["correctness_judge_url"]:
         p.error("Set ARTSY_CORRECTNESS_JUDGE_MODEL and ARTSY_CORRECTNESS_JUDGE_URL")
-    if not config.get("visual_sampler_path", "").startswith("tinker://"):
-        p.error("Set --visual-sampler-path to a trained frozen Tinker judge checkpoint")
     for role in ("safety_config", "code_safety_config"):
         if not config.get(role, {}).get("model") or not config[role].get("baseUrl"):
             p.error("Set ARTSY_SAFETY_JUDGE_MODEL/URL and ARTSY_CODE_SAFETY_JUDGE_MODEL/URL")
     if args.output_dir.resolve() == args.init_checkpoint.resolve().parent:
-        p.error("RL output must differ from the initial SFT checkpoint directory")
+        p.error("RL output must differ from the initial DPO checkpoint directory")
     manifest = args.output_dir / "training-manifest.json"
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         if not manifest.is_file() or (not args.continue_from and not (args.output_dir / "checkpoints.jsonl").is_file()):

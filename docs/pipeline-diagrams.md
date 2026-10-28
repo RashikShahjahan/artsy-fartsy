@@ -133,6 +133,30 @@ Sequences are preflighted rather
 than truncated or packed. Resume uses the local checkpoint metadata to restore the
 remote optimizer state and deterministic data order.
 
+## Policy stages: SFT → visual DPO → RL
+
+```mermaid
+flowchart TD
+    A[SFT final.json] --> B[DPO policy initialization]
+    A --> C[Frozen SFT reference sampler]
+    D[Approved drawing trajectories and A/B/Tie image labels] --> E[Validate image-to-record bindings,<br/>same request/seed and held-out splits]
+    E --> F[Non-tie training pairs<br/>chosen and rejected full trajectories]
+    F --> G[Encode with assistant-only masks]
+    B --> H[DPO loss on trajectory log probability ratios]
+    C --> H
+    G --> H
+    H --> I[DPO final.json]
+    I --> J[RL policy initialization and frozen KL reference]
+    J --> K[Grouped multi-turn Docker rollouts]
+    K --> L[Fresh final rendering and independent<br/>adherence, image safety and code safety judges]
+    L --> M[Safety/refusal outcomes or normalized adherence reward]
+    M --> N[Cookbook PPO updates and RL checkpoints]
+```
+
+DPO learns visual quality from offline preferences. Ties and validation/test pairs
+do not receive updates. RL uses no visual preference score or comparison judge.
+See [stage configuration and commands](preference-rlhf.md).
+
 ## Shared execution boundary
 
 Dataset generation uses the model-independent `DrawingEnvironment` and the

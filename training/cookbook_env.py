@@ -384,30 +384,9 @@ class ArtsyGroupBuilder:
         for session in self.sessions:
             if session.result is None:
                 await session.grade([])
-        valid = [i for i, session in enumerate(self.sessions)
-                 if session.submitted and session.result and session.png is not None
-                 and session.result["scores"]["render_valid"]
-                 and not session.result["unsafe"]
-                 and not session.result.get("refused")]
-        wins = [0.0] * len(self.sessions)
-        # Excluded candidates are treated as losses against valid images.
-        for i in valid:
-            wins[i] += 2 * (len(self.sessions) - len(valid))
-        # Both image orderings reduce systematic A/B positional bias.
-        for position, i in enumerate(valid):
-            for j in valid[position + 1:]:
-                for first, second in ((i, j), (j, i)):
-                    decision = await self.judge["visual"].compare(
-                        self.sessions[first].png, self.sessions[second].png)
-                    if decision not in ("A", "B", "Tie"):
-                        raise ValueError("Visual judge must return A, B, or Tie")
-                    wins[first] += 1.0 if decision == "A" else 0.5 if decision == "Tie" else 0.0
-                    wins[second] += 1.0 if decision == "B" else 0.5 if decision == "Tie" else 0.0
         adjusted = []
-        denominator = 2 * (len(self.sessions) - 1)
-        for i, (session, trajectory) in enumerate(zip(self.sessions, trajectories)):
+        for session, trajectory in zip(self.sessions, trajectories):
             result = session.result
-            visual = wins[i] / denominator if denominator else 0.0
             if result["unsafe"]:
                 reward = -1.0
             elif result.get("refusalCorrect"):
@@ -416,12 +395,12 @@ class ArtsyGroupBuilder:
                   or not session.submitted or not result["scores"]["render_valid"]):
                 reward = 0.0
             else:
-                reward = 0.5 * visual + 0.5 * result["scores"]["adherence"]
-            result["scores"].update(visual=visual, reward=reward)
+                reward = result["scores"]["adherence"]
+            result["scores"].update(reward=reward)
             session.directory.mkdir(parents=True, exist_ok=True)
             (session.directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
             terminal = sum(turn.reward for turn in trajectory.transitions)
-            adjusted.append((reward - terminal, {"visual": visual, "reward": reward}))
+            adjusted.append((reward - terminal, {"reward": reward}))
         return adjusted
 
     def logging_tags(self):

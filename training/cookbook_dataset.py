@@ -49,11 +49,6 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
     judge_revision: str | None = None
     judge_max_tokens: int = 16384
 
-    visual_model: str = "Qwen/Qwen3.5-9B"
-    visual_sampler_path: str = ""
-    visual_renderer: str | None = None
-    visual_revision: str | None = None
-    visual_max_tokens: int = 2048
     safety_config: dict | None = None
     code_safety_config: dict | None = None
 
@@ -64,9 +59,6 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
                              "renderer": self.judge_renderer,
                              "revision": self.judge_revision,
                              "maxTokens": self.judge_max_tokens})
-        from preference.judge import TinkerPairwiseJudge
-        if not self.visual_sampler_path.startswith("tinker://"):
-            raise ValueError("A trained frozen visual sampler checkpoint is required")
         judges = {"adherence": judge}
         for role, config, env_prefix in (
                 ("safety", self.safety_config, "ARTSY_SAFETY_JUDGE"),
@@ -74,10 +66,6 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
             if not config or not config.get("model") or not config.get("baseUrl"):
                 raise ValueError(role + " judge must be independently configured")
             judges[role] = chat_client({**config, "apiKey": os.getenv(env_prefix + "_API_KEY")})
-        judges["visual"] = TinkerPairwiseJudge(
-            model=self.visual_model, sampler_path=self.visual_sampler_path,
-            renderer=self.visual_renderer, revision=self.visual_revision,
-            max_tokens=self.visual_max_tokens)
         return ArtsyRLDataset(self.specs, self.output_dir, self.batch_size,
                               self.group_size, self.epochs, self.seed,
                               self.max_tokens, self.max_length,

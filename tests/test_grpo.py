@@ -25,6 +25,21 @@ def response(code=0, output=b"", stderr=b""):
 
 
 class ToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_dataset_builds_only_adherence_and_safety_clients(self):
+        from training.cookbook_dataset import ArtsyDatasetBuilder
+        builder = ArtsyDatasetBuilder(
+            specs=({"id": "draw", "prompt": "Draw a circle", "seed": 1},),
+            output_dir="/tmp/artsy-dataset-test", batch_size=1, group_size=2,
+            epochs=1, seed=42, max_tokens=128, max_length=32768,
+            normalize_rewards=False, judge_model="adherence", judge_url="https://judge.example/v1",
+            safety_config={"model": "safety", "baseUrl": "https://safety.example/v1"},
+            code_safety_config={"model": "code", "baseUrl": "https://code.example/v1"})
+        with patch("training.cookbook_dataset.chat_client", side_effect=lambda config: config) as client:
+            dataset, evaluation = await builder()
+        self.assertEqual(set(dataset.judge), {"adherence", "safety", "code_safety"})
+        self.assertEqual(client.call_count, 3)
+        self.assertIsNone(evaluation)
+
     async def test_submit_is_the_only_terminating_bash_command(self):
         configure_concurrency(2)
         spec = {"id": "draw", "prompt": "Draw a circle", "seed": 42}
@@ -61,7 +76,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 await session.close()
             self.assertIsNone(session.container)
 
-    async def test_multisignal_group_rewards_adjust_existing_totals(self):
+    async def test_adherence_rewards_adjust_existing_totals_without_visual_scoring(self):
         spec = {"id": "draw", "prompt": "Draw a circle", "seed": 1}
         judge = {"visual": SimpleNamespace(compare=AsyncMock(side_effect=["A", "B"]))}
         with tempfile.TemporaryDirectory() as root:
@@ -70,12 +85,14 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 session = DockerSession(spec, Path(root) / str(index), judge)
                 session.submitted = True
                 session.png = b"image" + bytes([index])
-                session.result = {"unsafe": False, "scores": {"render_valid": 1.0, "adherence": 0.5}}
+                session.result = {"unsafe": False, "scores": {"render_valid": 1.0, "adherence": (index + 1) / 4}}
                 builder.sessions.append(session)
             trajectories = [SimpleNamespace(transitions=[SimpleNamespace(reward=0.2)]) for _ in range(2)]
             adjustments = await builder.compute_group_rewards(trajectories, [])
-            self.assertEqual([round(0.2 + delta, 4) for delta, _ in adjustments], [0.75, 0.25])
-            self.assertEqual(judge["visual"].compare.await_count, 2)
+            self.assertEqual([round(0.2 + delta, 4) for delta, _ in adjustments], [0.25, 0.5])
+            judge["visual"].compare.assert_not_awaited()
+            self.assertTrue(all("visual" not in metrics for _, metrics in adjustments))
+            self.assertTrue(all("visual" not in session.result["scores"] for session in builder.sessions))
 
     async def test_safety_and_refusal_override_quality(self):
         for unsafe, refusal, expected in ((True, True, -1.0), (False, True, 1.0), (False, False, 0.0)):
@@ -139,7 +156,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["score"], 4)
         self.assertEqual(client.complete.call_args.args[1], 16384)
 
-    async def test_unsubmitted_image_cannot_reduce_submitted_visual_reward(self):
+    async def test_unsubmitted_image_gets_zero_reward_without_visual_judge(self):
         spec = {"id": "x", "prompt": "Draw", "seed": 1}
         judge = {"visual": SimpleNamespace(compare=AsyncMock(return_value="Tie"))}
         with tempfile.TemporaryDirectory() as root:
@@ -268,16 +285,14 @@ class ConfigurationTests(unittest.TestCase):
 
     @unittest.skipUnless(importlib.util.find_spec("tinker_cookbook"),
                          "Install the pinned training dependencies")
-    def test_cookbook_uses_ppo_kl_and_sft_initialization(self):
+    def test_cookbook_uses_ppo_kl_and_dpo_initialization(self):
         args = parser().parse_args(["--max-steps", "1", "--clip-epsilon", "0.1"])
         args.output_dir = Path("/tmp/artsy-rl-example")
         plan = {"initial_state_path": "tinker://initial",
                 "reference_sampler_path": "tinker://reference",
                 "lora_rank": 32, "correctness_judge_model": "judge",
                 "correctness_judge_url": "https://judge.example/v1",
-                "visual_model": "Qwen/Qwen3.5-9B", "visual_sampler_path": "tinker://judge",
-                "visual_renderer": None, "visual_revision": None,
-                "visual_max_tokens": 2048, "safety_config": {}, "code_safety_config": {}}
+                "safety_config": {}, "code_safety_config": {}}
         config = make_cookbook_config(
             args, [{"id": "a", "prompt": "Draw a circle", "seed": 1}], plan, 1)
         self.assertEqual(config.loss_fn, "ppo")

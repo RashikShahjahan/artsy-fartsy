@@ -1,45 +1,44 @@
-# Artsy RLHF architecture
+# Artsy training architecture
 
-The Artsy policy is the existing Tinker-hosted `Qwen/Qwen3.5-4B` SFT checkpoint. RL optimizes full Mini SWE agent trajectories, including tool calls and optional visual repairs. Inspect remains the independent evaluation harness.
+The drawing policy is Tinker-hosted `Qwen/Qwen3.5-4B`. Training proceeds through **SFT → visual preference DPO → RL**. Inspect remains the independent evaluation harness.
 
-## Reward components
+## SFT: learn the agent workflow
 
-For every prompt, sample a group of independent agent rollouts (default four). Keep each rollout's final source, final trusted render, refusal artifact, full bash command history, and metadata.
+Supervise complete drawing trajectories, including source-writing tool calls, previews, repairs and submission. `training.sft` exports state and sampler paths in `checkpoints/sft-v1/final.json`.
 
-- **Safety:** independent content-image and code/action-history checks. A violation earns -1. Never allow good visuals to compensate for unsafe behavior, and never ignore earlier unsafe commands after a refusal or a later harmless image.
-- **Instruction adherence:** a rubric judge scores the final image from 0 through 4; divide by 4. This judge sees the original prompt and the trusted final PNG.
-- **Visual aesthetics:** a *separate, frozen* Qwen3.5-9B VLM compares safe, render-valid images for the *same prompt*. The judge predicts A, B, or Tie, without grading prompt adherence. For each rollout the visual reward is `(wins + 0.5 * ties) / (group_size - 1)`. Compare both image orderings to check position bias; render-invalid candidates lose automatically.
+## DPO: learn visual quality preferences
 
-The composite reward is:
+`training.dpo` starts from the SFT state and optimizes preferred versus rejected drawing trajectories for the same request and preview seed. Preferences concern composition, coherence, color, balance, craftsmanship and expressive appeal. Both candidates must be approved, safe, render-valid drawings; do not use adherence failures or unsafe outputs as aesthetic negatives.
 
-| Outcome | Reward |
-| --- | --- |
-| Safety violation (image, code, or action history) | -1 |
-| Correct refusal of a disallowed request | +1 |
-| Unnecessary refusal of a benign request | 0 |
-| Invalid or missing trusted render on a benign request | 0 |
-| Safe rendered response to a benign request | 0.5 × visual + 0.5 × adherence |
+Image comparisons alone are insufficient: each label must identify both recorded policy trajectories. The trainer validates image hashes against those records, retains the full multimodal tool history and applies loss only to assistant actions. It sums assistant-token log probabilities for each trajectory and uses the standard DPO loss against a **frozen SFT sampler**, including after resume. Ties and validation/test pairs do not receive training updates. Keep prompt families in one split; exact prompts, trajectories, sources and images cannot cross splits.
 
-The prompt kind must come from trusted dataset metadata, never from the policy's response. Safety-judge failures must not silently become safe verdicts.
+DPO exports the same state/sampler `final.json` format as SFT. The default destination is `checkpoints/dpo-v1/final.json`, which becomes the RL initialization and KL reference. See [data format and launch commands](preference-rlhf.md).
 
-## Preference model
+The existing `preference.train` and `preference.evaluate` tools may still train and calibrate a separate aesthetic comparison judge. That judge is optional for offline preference labeling and evaluation; it is not part of RL reward computation.
 
-Provide human-labeled comparison records with two PNG paths and preference `A`, `B`, or `Tie`. Train a Qwen3.5-9B visual comparison judge on Tinker with supervised assistant-label prediction and LoRA. Save an independent judge sampler checkpoint; never update it in the policy optimizer. Public aesthetic-preference pairs may supplement domain-specific Artsy labels, but the held-out human preference benchmark remains separate.
+## RL: improve adherence and safety
 
-## Policy training
+`training.grpo` requires the DPO checkpoint and optimizes full Mini SWE agent trajectories, including tool calls and optional visual repairs. Independent judges provide:
 
-The Tinker Cookbook RL environment carries the full tool trajectory and trusted terminal artifacts. Its `compute_group_rewards` compares final images across rollouts, merges the safety/adherence/visual signals and returns terminal reward adjustments. Cookbook computes advantages by subtracting the *group mean*; it does not divide by the group's standard deviation. Therefore there is no additional per-component z-score normalization or reward-variance scaling. The policy optimizer may optionally use KL against the frozen SFT reference checkpoint.
+- **Safety:** content-image and code/action-history checks. A violation earns −1. Earlier unsafe commands still count after a refusal or a later harmless image.
+- **Refusal:** a trusted prompt that should be refused earns +1 only for a submitted, protocol-valid refusal with no program. A refusal on a benign prompt earns 0.
+- **Instruction adherence:** a VLM grades the final rendered image against the original request on a 0–4 rubric, normalized to 0–1. It does not grade aesthetics.
 
-The visual judge should not see generated source code or hidden rubric output. The safety and adherence judges should not see the visual ranking. Keep the policy and all judges on separate model clients/checkpoints.
+| Outcome | Terminal reward |
+| --- | ---: |
+| Unsafe code/actions or image | −1 |
+| Correct refusal of a trusted harmful request | +1 |
+| Benign over-refusal, incorrect refusal, render failure or missing submission | 0 |
+| Safe rendered response to a benign request | adherence |
 
-## Validation
+Budget-limit terminations cannot earn positive reward. Visual quality contributes no RL score, metric or reward, and RL requires no visual judge checkpoint. Image safety reviews the final render, not every intermediate preview.
 
-Keep testing separate from policy training, using the existing Inspect evaluation pipeline and a held-out prompt family where practical. Track:
+The Tinker Cookbook environment carries the full tool trajectory and trusted terminal artifacts. `compute_group_rewards` applies safety/refusal outcomes and adherence, returning terminal reward adjustments. Cookbook subtracts the group mean without dividing by standard deviation. There is no per-component z-score normalization, efficiency reward or intermediate-render reward. Optional KL regularization uses the initial DPO sampler.
 
-- human preference win rate against SFT and judge agreement with held-out human comparisons;
-- reversal consistency and per-style aesthetic preference accuracy;
-- adherence distribution, visual win fractions and composite reward;
-- harmful-compliance rate, code-safety violations, benign over-refusals, successful safe refusals;
-- render validity and tool/turn metrics as diagnostics only (no efficiency reward).
+The policy and safety/adherence judges use separate clients. Judge failures stop scoring instead of producing fabricated rewards. The new reward/algorithm version rejects continuation of legacy RL runs that included visual rewards; start a fresh RL run from DPO. Compatible runs can resume or continue with the original DPO KL reference.
 
-Do not run large-scale RL until the native two-image Tinker bridge, independent judges, refusal path, and group reward calculation all pass offline tests and a small live smoke test.
+## Independent validation
+
+Keep held-out prompts and human labels out of SFT, DPO and judge training. Track human visual preference against SFT and DPO, adherence, safety failures, benign over-refusal, refusal success and render validity. Tool/turn metrics and RL reward are diagnostics; checkpoint selection also needs independent visual evaluation because RL no longer optimizes aesthetics directly.
+
+Before large runs, validate pair-to-trajectory bindings, the frozen reference, refusal behavior and reward calculation offline, then run small live DPO and Docker/RL smoke tests.

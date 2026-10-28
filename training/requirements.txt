@@ -2,3 +2,4 @@
 tinker==0.35.0
 tinker-cookbook==0.5.8
 torchvision==0.29.1
+python-dotenv==1.2.4

@@ -1,15 +1,15 @@
 # Continuing RLHF and selecting a checkpoint
 
-A continuation extends a completed, compatible multi-signal RLHF run in a new
-output directory while retaining its optimizer state and original SFT KL reference.
+A continuation extends a completed, compatible adherence/safety RL run in a new
+output directory while retaining its optimizer state and original DPO KL reference.
 The paths below are examples for future runs, not bundled checkpoints.
 
 ```sh
 # Validate without writing files or making Docker/model requests:
 .venv/bin/python -m training.grpo \
-  --continue-from checkpoints/grpo-rlhf-v1 \
+  --continue-from checkpoints/grpo-v2 \
   --additional-steps 25 \
-  --output-dir checkpoints/grpo-rlhf-v1-continued \
+  --output-dir checkpoints/grpo-v2-continued \
   --dry-run
 ```
 
@@ -45,3 +45,5 @@ comparisons and uncertainty estimates to assess small changes. Training reward,
 KL, entropy, and within-group reward variation are diagnostics; select checkpoints
 using independent quality and safety measurements. See the [RLHF setup](preference-rlhf.md)
 and [reward architecture](rlhf-architecture.md).
+
+Legacy runs that included visual preference rewards are incompatible with this reward version. Train the visual DPO stage and start a fresh RL run from its final checkpoint.
