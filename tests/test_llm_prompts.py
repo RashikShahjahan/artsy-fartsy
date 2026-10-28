@@ -355,6 +355,37 @@ class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue((output_dir / "prompt-plan.json").exists())
                 self.assertEqual(len(list((output_dir / "prompt-records").glob("*.json"))), 4)
 
+    async def test_teacher_png_observations_default_on_with_vision_judges(self) -> None:
+        observed = []
+
+        async def capture(options: dict) -> dict:
+            observed.append(options["imageObservations"])
+            return {"accepted": 0}
+
+        with tempfile.TemporaryDirectory() as folder:
+            specs = Path(folder) / "prompts.jsonl"
+            specs.write_text(json.dumps({"family": "circles", "prompt": "Draw a circle",
+                                         "seed": 42}) + "\n")
+            base = ["--input", str(specs), "--teacher-model", "teacher",
+                    "--output", str(Path(folder) / "dataset")]
+            judges = ["--correctness-judge-model", "correctness",
+                      "--safety-judge-model", "safety"]
+            with patch.dict("os.environ", {
+                    "ARTSY_CORRECTNESS_JUDGE_MODEL": "",
+                    "ARTSY_SAFETY_JUDGE_MODEL": "",
+                    "ARTSY_CODE_SAFETY_JUDGE_MODEL": "",
+                 }), patch("drawing.dataset_client.chat_client", return_value=PromptClient()), \
+                 patch("drawing.dataset.generate_dataset", side_effect=capture), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                for flags, enabled in ((judges, True),
+                                       (judges + ["--no-image-observations"], False),
+                                       (judges + ["--image-observations"], True),
+                                       ([], False)):
+                    self.assertEqual(await main(base + flags), 0)
+                    self.assertIs(observed[-1], enabled)
+                with self.assertRaisesRegex(ValueError, "requires both vision judges"):
+                    await main(base + ["--image-observations"])
+
     async def test_saved_prompt_plan_is_reused_without_new_model_calls(self) -> None:
         client = PromptClient()
 
