@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
 from pathlib import Path
 from typing import Any
 
-from .dataset_client import Message, parse_json_reply
+from .dataset_client import Message, parse_json_reply, supports_image_input
 from .dataset_specs import compact_json, sha256, validate_specs
 
-DATASET_VERSION = "artsy-dataset-v6"
+DATASET_VERSION = "artsy-dataset-v7"
 
 
 def _default_config() -> dict[str, Any]:
@@ -37,8 +38,10 @@ def _provenance(client: Any) -> dict[str, str]:
     return {"model": client.model, "baseUrl": client.baseUrl}
 
 
-def _parse_target(text: str) -> dict[str, str]:
+def _parse_target(text: str) -> dict[str, Any]:
     target = parse_json_reply(text)
+    if isinstance(target, dict) and set(target) == {"submit"} and target["submit"] is True:
+        return target
     if not isinstance(target, dict):
         raise ValueError("Return one JSON object with code or refusal")
     if len(target) != 1:
@@ -93,11 +96,13 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
         "trace": [], "evaluations": [], "teacher": _provenance(options["teacher"]),
         "runtimeVersion": config["runtimeVersion"], "apiDocHash": sha256(api_doc), "humanReviewed": False,
     }
-    record["generation"] = {"initialDraft": "natural", "executionFailures": 0}
+    record["generation"] = {"initialDraft": "natural", "executionFailures": 0, "imagePreviews": True}
 
     messages: list[Message] = [
         {"role": "system", "content": ("Write an editable Python/ArtCanvas program for the drawing request. Return ONLY JSON with exactly one string field: "
           "{\"code\":\"complete Python source\"}, or {\"refusal\":\"concise reason\"} for a request you cannot fulfill. "
+          "After each successful render you will receive the actual PNG preview. Inspect it against the original request. "
+          "Return complete revised code to fix visible mistakes, or {\"submit\":true} only after inspecting a satisfactory preview. "
           "Import ArtCanvas from artcanvas, use only its documented drawing API plus math/random, and save output.png in the working directory. "
           "Do not load files, use external images, access the network, or execute commands. Canvas size must be "
           f"{config['width']}x{config['height']}. The renderer seeds random with {spec['seed']}. Source limit: {config['sourceBytes']} bytes; "
@@ -124,8 +129,11 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
             reused = {"completion": first["completion"], "dataset": os.path.relpath(Path(directory).resolve(), output), "attempt": first["attempt"]}
             break
 
+    last_preview = None
+    code_attempts = 0
     try:
-        for attempt in range(repairs + 1):
+        # Reserve a response for inspecting and submitting the final preview.
+        for attempt in range(repairs + 2):
             completion = reused["completion"] if attempt == 0 and reused else await options["teacher"].complete(messages, options.get("maxTokens", 4096))
             trace: dict[str, Any] = {"attempt": attempt, "completion": completion}
             if attempt == 0 and reused:
@@ -144,6 +152,27 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                 trace["error"] = str(exc); record["reason"] = str(exc)
                 messages.append({"role": "user", "content": f"{exc}. Return the complete corrected JSON object."})
                 continue
+            if "submit" in target:
+                if last_preview is None:
+                    trace["error"] = "Render and inspect a successful preview before submitting"
+                    messages.append({"role": "user", "content": trace["error"] + ". Return complete code as JSON."})
+                    continue
+                record["trace"].pop()
+                feedback = await env.submit()
+                record["submission"] = {"completion": completion, "feedback": feedback,
+                                        "preview": last_preview}
+                if not feedback.get("ok"):
+                    record["reason"] = feedback.get("error") or "Fresh submission failed"
+                    if feedback.get("failureKind") == "infrastructure":
+                        record["status"] = "infrastructure_error"
+                    break
+                record["artifacts"].update({"image": rel(feedback["artifact"]), "source": rel(episode_dir / "program.py")})
+                image = Path(feedback["artifact"]).read_bytes()
+                record["sourceHash"] = sha256(re.sub(r"\r\n", "\n", record["code"]).strip())
+                record["imageHash"] = sha256(image)
+                record["pixelHash"] = _pixel_hash(image)
+                record.update(status="review", reason="Preview inspected by teacher; human review pending")
+                break
             if "refusal" in target:
                 record["refusal"] = target["refusal"]
                 feedback = await env.refuse(target["refusal"]); trace["feedback"] = feedback
@@ -151,6 +180,11 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                     record["reason"] = feedback.get("error") or feedback.get("outcome"); break
                 record.update(status="review", reason="Teacher refusal; human review pending")
                 break
+            if code_attempts >= repairs + 1:
+                record["reason"] = "Visual repair budget exhausted without teacher submission"
+                break
+            code_attempts += 1
+            last_preview = None
             record["code"] = target["code"]
             trace["executedCode"] = target["code"]
             feedback = await env.write_code(target["code"])
@@ -165,19 +199,16 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                 messages.append({"role": "user", "content": f"Execution feedback: {compact_json(feedback)}. Return a complete corrected program as JSON."})
                 if feedback.get("outcome") != "active": break
                 continue
-            feedback = await env.submit()
-            if not feedback.get("ok"):
-                trace["feedback"] = feedback; record["reason"] = feedback.get("error") or feedback.get("stderr") or feedback.get("outcome")
-                if feedback.get("failureKind") == "infrastructure": record["status"] = "infrastructure_error"; break
-                messages.append({"role": "user", "content": f"Fresh submission failed: {compact_json(feedback)}. Return corrected JSON."})
-                if feedback.get("outcome") != "active": break
-                continue
-            record["artifacts"].update({"image": os.path.relpath(feedback["artifact"], output), "source": os.path.relpath(episode_dir / "program.py", output)})
-            image = Path(feedback["artifact"]).read_bytes(); pixels_hash = _pixel_hash(image)
-            record["sourceHash"] = sha256(re.sub(r"\r\n", "\n", target["code"]).strip())
-            record["imageHash"] = sha256(image); record["pixelHash"] = pixels_hash
-            record.update(status="review", reason="Executable output; human review pending")
-            break
+            image = Path(feedback["artifact"]).read_bytes()
+            last_preview = {"image": rel(feedback["artifact"]), "imageHash": sha256(image)}
+            trace["previewObservation"] = last_preview
+            record["reason"] = "Preview review budget exhausted without teacher submission"
+            messages.append({"role": "user", "content": [
+                {"type": "text", "text": "Inspect your rendered preview against the original request. "
+                 "Return {\"submit\":true} if it is ready, or complete corrected code as JSON. "
+                 f"Execution feedback: {compact_json(feedback)}"},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(image).decode("ascii")}},
+            ]})
     except Exception as exc:
         record.update(status="infrastructure_error", reason=str(exc))
     return record
@@ -185,6 +216,10 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
 
 async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     specs = validate_specs(options["specs"])
+    teacher_client = options.get("teacher")
+    if (teacher_client and any(s.get("kind") != "refusal" for s in specs)
+            and not supports_image_input(teacher_client.model, teacher_client.baseUrl)):
+        raise ValueError("SFT generation requires a teacher model with image input support")
     output = Path(options["output"]).resolve()
     candidates, repairs = options.get("candidates", 2), options.get("repairs", 2)
     max_tokens, workers = options.get("maxTokens", 4096), options.get("workers", 1)
@@ -271,6 +306,8 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         for record in records:
             for row in [record, *record.get("previousAttempts", [])]:
                 completions.extend(t["completion"] for t in row.get("trace", []) if not t.get("reusedDraft"))
+                if row.get("submission"):
+                    completions.append(row["submission"]["completion"])
         count = len(records)
         summary = {"version": DATASET_VERSION, "prompts": len(specs), "candidates": count,
             "accepted": sum(r["status"] == "accepted" for r in records), "review": sum(r["status"] == "review" for r in records),

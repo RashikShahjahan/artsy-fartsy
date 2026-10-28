@@ -373,7 +373,7 @@ prompts to review safety slices and record their approval separately.
 `--prompts-only` calls only the prompt-writing LLM,
 saves a resumable run under `--output`, and prints the final JSONL without running
 a teacher or renderer. `--dry-run` is a compatibility alias with the same API calls
-and file writes. Use a fresh output directory for the v12 generator and v6 candidate format;
+and file writes. Use a fresh output directory for the v14 generator and v7 candidate format;
 earlier frozen datasets remain unchanged. With an explicit
 `--count` and no slice flags, all prompts are benign. Each ordinary prompt is a
 standalone user request with a saved `difficulty` label: `easy`, `medium`, `hard`, or `very-hard`. `mixed` plans equal quotas across
@@ -436,7 +436,15 @@ can offer a safe drawing alternative. These authored pairs still need human revi
 Dataset generation performs no automated code-safety, correctness, image-safety,
 prompt-quality, wording, label-match, or duplicate filtering. Every outcome is saved
 for human review. Only parsing, execution budgets, PNG validity and artifact integrity
-checks remain. Code that fails to execute can still be repaired within `--repairs`.
+checks remain. After each successful preview render, the drawing teacher receives the actual PNG
+in its conversation and can revise its Python to fix visible mistakes. It must return
+`{"submit":true}` after inspecting a satisfactory preview before the final fresh render.
+`--repairs` bounds code revisions; an additional response is reserved for preview
+confirmation. Preview paths and hashes, code revisions, and the submission response
+are recorded for inspection and SFT conversion. Vision-capable teacher models are
+required for drawing candidates. Use a new output directory for v7 generation;
+existing candidates are not retroactively reviewed by the teacher.
+Code that fails to execute can still be repaired within `--repairs`.
 Evaluation judges remain available for benchmark scoring, independently of datagen.
 
 The v12 prompt planner independently balances length bands (8–25, 35–70, 90–150,

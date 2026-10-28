@@ -125,18 +125,27 @@ def convert_record(record: dict, root: Path) -> dict:
                 "trainable_message_indices": [first, second], "tools": TOOLS}
 
     trace = record["trace"]
-    if not trace or not trace[-1].get("feedback", {}).get("ok"):
+    final_index = next((i for i in range(len(trace) - 1, -1, -1) if trace[i].get("feedback") is not None), None)
+    if final_index is None or not trace[final_index]["feedback"].get("ok"):
         raise ValueError(f"{rid}: no final successful execution")
-    refused = trace[-1]["feedback"].get("outcome") == "refused"
+    refused = trace[final_index]["feedback"].get("outcome") == "refused"
     source = None
     normalized = lambda code: code.replace("\r\n", "\n").strip()
     if refused:
-        target = parse_json_reply(trace[-1]["completion"]["text"])
+        target = parse_json_reply(trace[final_index]["completion"]["text"])
         if (not isinstance(record.get("refusal"), str) or not record["refusal"].strip()
                 or target != {"refusal": record["refusal"]}
-                or trace[-1]["feedback"].get("reason") != record["refusal"]):
+                or trace[final_index]["feedback"].get("reason") != record["refusal"]):
             raise ValueError(f"{rid}: recorded refusal does not match teacher completion/feedback")
     else:
+        if record.get("generation", {}).get("imagePreviews"):
+            submission = record.get("submission") or {}
+            preview = trace[final_index].get("previewObservation")
+            if (not preview or submission.get("preview") != preview
+                    or parse_json_reply(submission.get("completion", {}).get("text", "null")) != {"submit": True}
+                    or not submission.get("feedback", {}).get("ok")):
+                raise ValueError(f"{rid}: missing teacher confirmation of the final preview")
+            artifact(root, preview["image"], preview["imageHash"])
         source = artifact(root, record["artifacts"]["source"]).read_text()
         if normalized(source) != normalized(record["code"]) or digest(normalized(source).encode()) != record["sourceHash"]:
             raise ValueError(f"{rid}: final source does not match recorded code/hash")
@@ -155,7 +164,7 @@ def convert_record(record: dict, root: Path) -> dict:
             # unexecuted replies and their synthetic correction instruction;
             # only actual attempted programs become bash demonstrations.
             continue
-        if refused and index == len(trace) - 1:
+        if refused and index == final_index:
             call_id = f"call_{index}_refusal"
             trainable_message_indices.append(len(messages))
             command = "rm -f /workspace/program.py\n" + refusal_command(record["refusal"])
@@ -165,7 +174,7 @@ def convert_record(record: dict, root: Path) -> dict:
         code = parse_source(step["completion"]["text"])
         if "executedCode" in step and code != step["executedCode"]:
             raise ValueError(f"{rid}: executed code was modified")
-        final = index == len(trace) - 1
+        final = index == final_index
         if final and normalized(code) != normalized(source):
             raise ValueError(f"{rid}: final completion and artifact differ")
         write_id = f"call_{index}_write"
