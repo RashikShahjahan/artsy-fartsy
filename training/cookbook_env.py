@@ -21,7 +21,9 @@ from PIL import Image
 
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_CONTEXT_WINDOW
 from drawing.agent_contract import drawing_system_prompt
-from drawing.judges import JUDGE_MAX_TOKENS, correctness_judge_prompt, parse_correctness_judgment
+from drawing.judges import (JUDGE_MAX_TOKENS, CODE_SAFETY_MAX_TOKENS, adherence_rubric_prompt,
+    parse_adherence_rubric, code_safety_judge_prompt, parse_code_safety_judgment,
+    safety_judge_prompt, parse_safety_judgment, RL_JUDGE_VERSION)
 from training.data import ROOT
 from training.sft import create_encoder
 
@@ -125,6 +127,8 @@ class DockerSession:
         self.previews: list[dict] = []
         self._owns_slot = False
         self.submitted = False
+        self.result = None
+        self.png = None
 
     async def start(self):
         if self.container:
@@ -180,15 +184,60 @@ class DockerSession:
             raise RuntimeError("Cannot read submitted program from sandbox")
         return result.stdout.decode("utf-8") if result.stdout else ""
 
+    async def _read_refusal(self):
+        if not self.container:
+            return None
+        response = await _docker(["exec", self.container, "python", "-c",
+            "from pathlib import Path; import sys; p=Path('/workspace/refusal.json'); "
+            "sys.stdout.buffer.write(p.open('rb').read(4097) if p.is_file() else b'')"], timeout=10)
+        if response.returncode:
+            raise RuntimeError("Cannot read refusal from sandbox")
+        if not response.stdout:
+            return None
+        try:
+            value = json.loads(response.stdout)
+            reason = value.get("reason") if isinstance(value, dict) else None
+            return reason if isinstance(reason, str) and 0 < len(reason.encode()) <= 2048 else ""
+        except (ValueError, UnicodeDecodeError):
+            return ""
+
+    async def _judge(self, role, prompt, parser, png=None, max_tokens=None):
+        client = self.judge[role]
+        if max_tokens is None:
+            max_tokens = getattr(client, "max_tokens", JUDGE_MAX_TOKENS)
+        content = [{"type": "text", "text": prompt}]
+        if png is not None:
+            content.append({"type": "image_url", "image_url": {
+                "url": "data:image/png;base64," + base64.b64encode(png).decode()}})
+        response = await client.complete([{"role": "user", "content": content}],
+                                         max_tokens, temperature=0)
+        if response.get("finishReason") == "length":
+            raise ValueError(role + " judge reply truncated")
+        return parser(response["text"])
+
     async def grade(self, _messages: list[dict]) -> tuple[float, dict[str, float]]:
-        """Fresh trusted render, then the same correctness judge as evaluation."""
+        """Collect independent safety/adherence signals; group reward is computed later."""
         self.directory.mkdir(parents=True, exist_ok=True)
         source = await self._read_source()
+        refusal = await self._read_refusal()
         result = {"prompt": self.spec["prompt"], "seed": self.spec["seed"],
                   "outcome": "incomplete", "agent": "artsy-cookbook",
                   "commands": self.commands, "previewAttempts": len(self.previews),
-                  "scores": {"render_valid": 0.0, "adherence": 0.0}}
-        if source.strip() and len(source.encode()) <= SOURCE_BYTES:
+                  "scores": {"render_valid": 0.0, "adherence": 0.0},
+                  "judgeVersion": RL_JUDGE_VERSION, "unsafe": False,
+                  "refused": refusal is not None, "refusalCorrect": False,
+                  "expectedRefusal": self.spec.get("kind") == "refusal"}
+        judgment = await self._judge("code_safety",
+            code_safety_judge_prompt(self.spec["prompt"], source, self.commands),
+            parse_code_safety_judgment, max_tokens=CODE_SAFETY_MAX_TOKENS)
+        result["codeSafety"] = judgment
+        result["unsafe"] = judgment["malicious"]
+        if refusal is not None:
+            result["refusalCorrect"] = bool(refusal and not source and self.submitted
+                                             and result["expectedRefusal"])
+            result["outcome"] = "refused" if refusal and not source else "invalid_refusal"
+        if (not result["unsafe"] and refusal is None and source.strip()
+                and len(source.encode()) <= SOURCE_BYTES):
             (self.directory / "program.py").write_text(source)
             scored = await _docker(
                 ["run", "--rm", "-i", "--network", "none", "--memory", "2g",
@@ -213,18 +262,18 @@ class DockerSession:
                 result["sourceHash"] = hashlib.sha256(source.encode()).hexdigest()
                 result["imageHash"] = hashlib.sha256(png).hexdigest()
                 result["scores"]["render_valid"] = 1.0
-                response = await self.judge.complete([{"role": "user", "content": [
-                    {"type": "text", "text": correctness_judge_prompt(self.spec["prompt"])},
-                    {"type": "image_url", "image_url": {
-                        "url": "data:image/png;base64," + base64.b64encode(png).decode()}}]}],
-                    getattr(self.judge, "max_tokens", JUDGE_MAX_TOKENS), temperature=0)
-                if response.get("finishReason") == "length":
-                    raise ValueError("Correctness judge reply truncated")
-                judgment = parse_correctness_judgment(response["text"])
+                self.png = png
+                judgment = await self._judge("safety", safety_judge_prompt(self.spec["prompt"]),
+                                             parse_safety_judgment, png)
+                result["imageSafety"] = judgment
+                result["unsafe"] |= judgment["harmful"]
+                judgment = await self._judge("adherence", adherence_rubric_prompt(self.spec["prompt"]),
+                                             parse_adherence_rubric, png)
                 result["judgment"] = judgment
-                result["scores"]["adherence"] = judgment["score"]
+                result["scores"]["adherence"] = judgment["score"] / 4.0
+        self.result = result
         (self.directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-        return result["scores"]["adherence"], {
+        return 0.0, {
             "render_valid": result["scores"]["render_valid"],
             "preview_attempts": len(self.previews),
             "bash_calls": len(self.commands),
@@ -328,15 +377,52 @@ class ArtsyGroupBuilder:
         self.sessions.clear()
 
     async def compute_group_rewards(self, trajectories, envs):
-        """Optional within-prompt variance scaling before Cookbook centers rewards."""
-        if not self.normalize_rewards:
-            return [(0.0, {}) for _ in trajectories]
-        import statistics
-        rewards = [sum(turn.reward for turn in traj.transitions) for traj in trajectories]
-        scale = statistics.pstdev(rewards) + 1e-8
-        center = statistics.mean(rewards)
-        # The trainer centers adjusted totals again; this gives normalized advantages.
-        return [((reward - center) / scale - reward, {}) for reward in rewards]
+        """Return final reward adjustments, leaving mean-centering to Cookbook."""
+        if len(trajectories) != len(self.sessions):
+            raise ValueError("Trajectory/session count mismatch")
+        # Tool/turn/length limit terminations may bypass the terminal reward hook.
+        for session in self.sessions:
+            if session.result is None:
+                await session.grade([])
+        valid = [i for i, session in enumerate(self.sessions)
+                 if session.submitted and session.result and session.png is not None
+                 and session.result["scores"]["render_valid"]
+                 and not session.result["unsafe"]
+                 and not session.result.get("refused")]
+        wins = [0.0] * len(self.sessions)
+        # Excluded candidates are treated as losses against valid images.
+        for i in valid:
+            wins[i] += 2 * (len(self.sessions) - len(valid))
+        # Both image orderings reduce systematic A/B positional bias.
+        for position, i in enumerate(valid):
+            for j in valid[position + 1:]:
+                for first, second in ((i, j), (j, i)):
+                    decision = await self.judge["visual"].compare(
+                        self.sessions[first].png, self.sessions[second].png)
+                    if decision not in ("A", "B", "Tie"):
+                        raise ValueError("Visual judge must return A, B, or Tie")
+                    wins[first] += 1.0 if decision == "A" else 0.5 if decision == "Tie" else 0.0
+                    wins[second] += 1.0 if decision == "B" else 0.5 if decision == "Tie" else 0.0
+        adjusted = []
+        denominator = 2 * (len(self.sessions) - 1)
+        for i, (session, trajectory) in enumerate(zip(self.sessions, trajectories)):
+            result = session.result
+            visual = wins[i] / denominator if denominator else 0.0
+            if result["unsafe"]:
+                reward = -1.0
+            elif result.get("refusalCorrect"):
+                reward = 1.0
+            elif (result.get("refused") or self.spec.get("kind") == "refusal"
+                  or not session.submitted or not result["scores"]["render_valid"]):
+                reward = 0.0
+            else:
+                reward = 0.5 * visual + 0.5 * result["scores"]["adherence"]
+            result["scores"].update(visual=visual, reward=reward)
+            session.directory.mkdir(parents=True, exist_ok=True)
+            (session.directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+            terminal = sum(turn.reward for turn in trajectory.transitions)
+            adjusted.append((reward - terminal, {"visual": visual, "reward": reward}))
+        return adjusted
 
     def logging_tags(self):
         return ["artsy", self.spec.get("difficulty", "unspecified")]

@@ -31,7 +31,9 @@ class ContinuationTests(unittest.TestCase):
                            reference_sampler_path='tinker://original-sft-reference',
                            initial_state_path='tinker://original-sft-state',
                            correctness_judge_model='saved-judge', correctness_judge_url='saved-url')
-        self.config['source_sha256']['training/grpo.py'] = grpo.LEGACY_GRPO_SHA256
+        self.config.update(visual_sampler_path='tinker://frozen-visual-judge',
+                           safety_config={'model': 'safety', 'baseUrl': 'saved-url'},
+                           code_safety_config={'model': 'code-safety', 'baseUrl': 'saved-url'})
         self.record = dict(name='final', batch=3, state_path='tinker://rl-state',
                            sampler_path='tinker://rl-sampler')
         self.write_source()
@@ -170,7 +172,7 @@ class ContinuationTests(unittest.TestCase):
             grpo.main(['--continue-from', str(self.origin), '--additional-steps', '4',
                        '--learn', '0.1', '--dry-run'])
 
-    def test_reviewed_limit_migration_preserves_state_and_rejects_unrelated_drift(self):
+    def test_legacy_limit_migration_cannot_authorize_changed_rlhf_runtime(self):
         registry = json.loads((grpo.ROOT / 'training/rollout_limit_migration.json').read_text())
         self.config.update(max_tokens=4096, max_length=32768)
         for path, entry in registry['files'].items():
@@ -179,19 +181,17 @@ class ContinuationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'dependencies changed'):
             grpo.load_continuation(self.args)
         self.args.match_eval_limits = True
-        _, plan, _ = grpo.load_continuation(self.args)
-        self.assertEqual((plan['max_tokens'], plan['max_length']), (8192, 262144))
-        self.assertIsNone(plan['max_sampled_tokens'])
-        self.assertEqual(plan['reference_sampler_path'], self.config['reference_sampler_path'])
-        self.assertEqual(plan['continuation']['state_path'], self.record['state_path'])
-        self.assertEqual(plan['continuation']['limit_migration']['previous_limits']['max_length'], 32768)
-        for path in ('runtime/artcanvas.py', 'drawing/judges.py', 'training/cookbook_dataset.py'):
-            original = self.config['source_sha256'][path]
-            self.config['source_sha256'][path] = 'unreviewed'
-            self.write_source()
-            with self.assertRaisesRegex(ValueError, 'dependencies changed'):
+        # The old limit-only migration cannot authorize the new reward/runtime.
+        with self.assertRaisesRegex(ValueError, 'dependencies changed'):
+            grpo.load_continuation(self.args)
+
+    def test_correctness_only_runs_cannot_resume_with_changed_rewards(self):
+        self.config['algorithm'] = 'tinker-cookbook-ppo-v1'
+        self.write_source()
+        for migrate in (False, True):
+            self.args.match_eval_limits = migrate
+            with self.assertRaisesRegex(ValueError, 'completed compatible'):
                 grpo.load_continuation(self.args)
-            self.config['source_sha256'][path] = original
 
     def test_actual_completed_run_migration_dry_run_is_read_only(self):
         origin = grpo.ROOT / 'checkpoints/grpo-qwen38-v1-step125'
