@@ -4,19 +4,19 @@ Build an environment that trains a small language model to turn drawing instruct
 
 The starting point is the compact Cairo-backed `ArtCanvas` interface described in [Can an AI Learn to Draw?](https://blog.rashik.sh/tech/can-ai-learn-to-draw/). The central artifact is the program together with its rendered image.
 
-Last reconciled: **2026-10-26** against the implementation and local dataset/checkpoint manifests. Checked items indicate implemented capabilities or recorded runs; they do not establish held-out quality or safety gains. Dataset and checkpoint artifacts are local and may be Git-ignored.
+Last reconciled: **2026-10-27** against the implementation and local dataset/checkpoint manifests. Checked items indicate implemented capabilities or recorded runs; they do not establish held-out quality or safety gains. Dataset and checkpoint artifacts are local and may be Git-ignored.
 
-Current recorded runs:
+Current state:
 
 - SFT: `checkpoints/sft-v1/final.json` records 29 optimizer steps on 903 complete trajectories (708 one-shot drawings, 45 repairs, 150 refusal pairs), using Qwen/Qwen3.5-4B with hosted LoRA.
-- RL: `checkpoints/grpo-qwen38-v1/final.json` records 100 steps on 200 benign training prompts, initialized from that SFT run. It uses Tinker Cookbook PPO with grouped rollouts, reference-KL shaping, and the native Tinker Qwen/Qwen3.8-27B correctness judge.
-- Still open: a comparable base/SFT/RL held-out report, human judge calibration, and safety-aware RL. The reward table below remains a proposed extension; current RL uses final-image correctness only.
+- RL: the multi-signal RLHF trainer combines a frozen visual preference judge, rubric adherence, content safety, and code/action safety. A trained visual judge and explicit safety-role configuration are required before a live run.
+- Still open: a comparable base/SFT/RL held-out report, human judge calibration, an audited mixed drawing/refusal RL curriculum, and live validation of the current reward pipeline.
 
-Evidence: `checkpoints/sft-v1/training-manifest.json`, both final checkpoint files, `datasets/sft-v1/summary.json`, and `datasets/grpo-v1/manifest.json`. The choices and numerical targets that remain unchecked are proposals to validate.
+Evidence: `checkpoints/sft-v1/training-manifest.json`, `checkpoints/sft-v1/final.json`, `datasets/sft-v1/summary.json`, and `datasets/grpo-v1/manifest.json`. See `docs/preference-rlhf.md` for the current RL workflow. Unchecked numerical targets remain proposals to validate.
 
 ## 1. Define the first experiment
 
-- [x] Select Qwen/Qwen3.5-4B (Apache 2.0) with its vision encoder and native tool-call format, a pinned tokenizer revision, and a bounded 32,768-token context.
+- [x] Select Qwen/Qwen3.5-4B (Apache 2.0) with its vision encoder and native tool-call format, a pinned tokenizer revision, and a 262,144-token context window.
 - [ ] Document a frozen, untouched-base held-out benchmark and compare it with the trained checkpoints.
 - [ ] Consolidate hosted training, teacher, and judge spend limits and measured throughput/cost. Training uses Tinker; local GPU memory is not a requirement for the current hosted path.
 - [x] Use Qwen/Qwen3.5-4B as a vision-language policy. It receives API documentation, the user prompt, its code, execution feedback, and rendered preview images. Keep independent evaluator scores outside policy observations.
@@ -89,28 +89,33 @@ pilot acceptance does not prove conformance to every later pipeline check.
 - [ ] Enforce documented-API use and calibrate blank-image handling against prompt intent.
 - [x] Judge holistic correctness from the original request and actual rendered PNG, returning a normalized score and reason.
 - [ ] Add reliable pixel/geometry checks and controlled count/color/layout/relationship error cases.
-- [x] Implement shared correctness/image-safety prompts and strict JSON parsers, treating image text as untrusted. Support HTTP judges and a native Tinker Qwen3.8 vision correctness judge; record renderer/revision/token budget and reject malformed or truncated responses. RL currently calls only the correctness judge.
+- [x] Implement shared correctness/image-safety prompts and strict JSON parsers, treating image text as untrusted. Support HTTP judges and a native Tinker Qwen3.8 vision correctness judge; record renderer/revision/token budget and reject malformed or truncated responses. RL uses separate adherence, visual preference, image-safety, and code-safety judge clients.
 - [ ] Calibrate the judge against human labels and controlled mistakes such as wrong counts, missing objects, swapped colors, and reversed relationships. Freeze evaluator versions within each experiment.
 - [ ] Define the harmful-content taxonomy, severity rules, thresholds, and an uncertainty/review path. Evaluate both the request and rendered content; a benign prompt can still produce a harmful image.
 - [ ] Implement a safety gate for every rendered attempt and final output. A confirmed harmful render receives a terminal negative reward and cannot be offset by functionality or adherence. Block its delivery in inference as well.
 - [x] Include harmful-image and malicious-code refusal demonstrations in SFT; provide refusal/category scoring and code-safety review in Inspect.
-- [ ] Add refusal rewards and safety tasks to RL, and measure harmful generation and over-refusal together.
-- [ ] Implement the provisional terminal reward table below and log every component separately. Tune weights only on development data.
+- [x] Implement hard safety/refusal rewards in RL.
+- [ ] Assemble an audited mixed drawing/refusal RL prompt set and measure harmful generation and over-refusal together.
+- [x] Implement the terminal reward table below and log reward components separately.
+- [ ] Calibrate reward weights on development data and validate the frozen visual judge against human preferences.
 - [x] Record generation infrastructure errors separately, support `--retry-errors`, and raise on trusted-scorer/judge failures in RL rather than inventing correctness scores.
 - [ ] Validate retry/exclusion and spend accounting end to end for live training infrastructure failures.
 - [ ] Test reward exploits: constant blank images, copying prompt text onto the canvas, judge-instruction text, stale artifacts, repeated tool calls, and attempts to access grading files. Keep reward state outside the worker.
 
-**Future safety-aware reward proposal (not the current correctness-only RL objective):**
+**Current terminal reward:**
 
-| Episode outcome | Proposed reward |
+| Episode outcome | Reward |
 | --- | --- |
-| Confirmed harmful render at any step, or a confirmed sandbox policy violation | `-1.0`, terminate; overrides every positive reward |
-| Correct refusal of a disallowed request, with no harmful render | `+1.0` |
-| Unnecessary refusal, failure to refuse a disallowed request without a harmful render, invalid final code, missing submission, or exhausted budget | `-0.5` |
-| Allowed request, safe output, functional submitted code | `0.25 + 0.75 × adherence - 0.05 × cost` |
-| Infrastructure failure or unresolved evaluator uncertainty | Retry/review; exclude from updates until resolved |
+| Malicious code/actions or harmful final image | `-1.0` |
+| Correct submitted refusal on a trusted refusal prompt | `+1.0` |
+| Over-refusal, failed refusal, invalid final drawing, or missing submission | `0.0` |
+| Benign request with safe, valid submitted drawing | `0.5 × visual + 0.5 × adherence` |
+| Trusted scorer or judge failure | Raise; do not invent a score |
 
-`adherence` and `cost` are normalized to `[0, 1]`. Cost measures bounded token/tool use and remains a small secondary term. Functional code is a gate for positive drawing rewards; safety is a gate for the entire episode. These weights are hypotheses to calibrate, not established optimal values.
+`visual` is the frozen judge's within-group pairwise win fraction, including half
+credit for ties and both A/B orders. `adherence` is the 0–4 rubric score divided by
+four. There is no cost reward. Budget-limit terminations cannot earn positive
+reward. Image safety reviews final renders; per-preview safety gating remains open.
 
 **Done when:** controlled failures receive the expected scores and sampled reward rankings agree adequately with human judgments under a documented acceptance criterion.
 
@@ -125,26 +130,26 @@ pilot acceptance does not prove conformance to every later pipeline check.
 - [ ] Complete a stratified human correctness/diversity/safety audit of the final dataset. The training manifest reports zero unreviewed records; that is not evidence of independent human review.
 - [ ] Establish semantic separation of held-out tasks from all SFT data; former pilot split labels no longer define holdouts.
 - [ ] Compare base and SFT checkpoints on render validity, adherence, repair success, harmful-output rate, benign refusal rate, latency, and cost.
-- [ ] Document whether SFT meets the provisional 90% valid-render gate on simple held-out tasks and separate adherence/safety criteria. RL has already run; this gate still needs a reported measurement.
+- [ ] Document whether SFT meets the provisional 90% valid-render gate on simple held-out tasks and separate adherence/safety criteria. This gate still needs a reported measurement before the next RL experiment.
 
 **Done when:** the trained model's held-out strengths and failures are documented, beyond training loss and successful checkpoint export.
 
 ## 6. Run and evaluate RL in the mini environment
 
-- [x] Integrate Tinker Cookbook `EnvFromMessageEnv`, grouped environment/dataset builders, and `rl.train.main`, initialized from the selected SFT state. Cookbook owns token-level PPO updates, grouped advantages, and reference-KL reward shaping; the earlier custom GRPO objective is superseded.
+- [x] Integrate Tinker Cookbook `EnvFromMessageEnv`, grouped environment/dataset builders, and `rl.train.main`, initialized from the selected SFT state. Cookbook owns token-level PPO updates, grouped advantages, and reference-KL reward shaping.
 - [x] Support bounded multi-turn bash write → run → fix → submit rollouts with actual PNG observations, one network-isolated Docker workspace per trajectory, and a separate fresh Docker final render. Inspect remains the independent evaluation harness.
 - [x] Freeze 200 benign training prompts in `datasets/grpo-v1/` with difficulty/skill coverage, provenance, and cross-source lexical overlap checks. These are training prompts, not a held-out benchmark.
-- [x] Complete the recorded `grpo-qwen38-v1` run: 100 steps, two prompt groups per batch, four trajectories per group, learning rate 1e-5, PPO clipping ±0.2, and reference-KL coefficient 0.01. Use the independent native Tinker Qwen/Qwen3.8-27B judge and save final optimizer/sampler paths.
-- [x] Delegate policy-token loss/log-probability handling to Cookbook; support per-prompt reward centering, optional variance normalization, and removal of constant-reward groups.
-- [x] Keep terminal final-image correctness primary; zero positive reward on budget-limit termination. No intermediate render reward is accumulated.
-- [x] Save Cookbook metrics/checkpoints, grouped rollout logs, and per-episode source/final PNG/correctness scores. Validate dataset/source/configuration compatibility on resume and support `--finalize-only` checkpoint-export recovery.
+- [x] Delegate policy-token loss/log-probability handling to Cookbook; support per-prompt reward mean-centering without variance normalization, and removal of constant-reward groups.
+- [x] Combine terminal visual preference and rubric adherence equally, with hard safety/refusal outcomes; zero positive reward on budget-limit termination. No intermediate render reward is accumulated.
+- [x] Save Cookbook metrics/checkpoints, grouped rollout logs, and per-episode source/final PNG/judgments/reward components. Validate dataset/source/configuration compatibility on resume and support `--finalize-only` checkpoint-export recovery.
 - [ ] Validate live optimizer-resume equivalence and failure recovery; existing configuration/export tests do not establish a successful interrupted-run recovery.
 - [ ] Measure reward variance, throughput, judge cost, and loss of SFT capabilities; use them to tune group sizes, curriculum, and concurrency.
-- [ ] Add safety/refusal tasks and safety-aware rewards. Current RL excludes refusal prompts and optimizes final-image correctness only.
+- [x] Add independent visual, adherence, image-safety, and code-safety rewards with refusal support.
+- [ ] Train and calibrate the frozen visual preference judge; run a small live multi-signal policy smoke test.
 - [ ] Complete component/safety/refusal/cost reporting, evaluation caching keyed by prompt/code/seed/runtime/judge version, worker retries, and strict spend limits.
 - [ ] Run controlled base vs. SFT vs. SFT+RL, single-attempt vs. repair, and evaluator comparisons with equal token/tool budgets. Confirm held-out improvement without unacceptable validity, safety, or benign-refusal regressions.
 
-**Done when:** a repeatable RL run shows measured held-out improvements over SFT under documented validity and safety criteria. A completed 100-step run alone does not satisfy this gate.
+**Done when:** a repeatable RL run shows measured held-out improvements over SFT under documented validity and safety criteria. Training completion alone does not satisfy this gate.
 
 ## 7. Evaluate and package the environment
 

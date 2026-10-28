@@ -54,11 +54,11 @@ Configure these settings in the local `.env` (never commit credentials):
 
 The visual judge uses Tinker's native image sampler; it does not need the Artsy inference server. For Tinker-native rubric/safety judges set each `*_URL=tinker://native` and use a supported VLM model/renderer.
 
-This changes the reward algorithm. Start a fresh RL output directory from the SFT checkpoint; correctness-only RL runs cannot be resumed or continued under the new reward. Continuation remains supported between compatible RLHF runs with the same frozen judges and settings.
+Start a fresh RL output directory from the SFT checkpoint. Continuation is supported between compatible RLHF runs with the same reward, frozen judges, source files, and settings.
 
 ## Train the policy
 
-Use the *existing SFT checkpoint* as policy initialization and an RL prompt JSONL that includes both benign and trusted `kind=refusal` harmful examples:
+Use the *existing SFT checkpoint* as policy initialization. The example uses the bundled drawing-only prompt set; pass an audited mixed prompt JSONL with trusted `kind="refusal"` examples to train refusal behavior:
 
 ```bash
 uv run python -m training.grpo \
@@ -70,7 +70,7 @@ uv run python -m training.grpo \
   --dry-run
 ```
 
-Remove `--dry-run` after verifying the plan and credentials. Artsy uses its trusted Docker renderer and native Cookbook multi-turn rollouts. The group reward ranks final PNGs pairwise (including reversed order), combines visual preference and 0–4 rubric adherence equally, and applies hard safety/refusal outcomes. The Cookbook itself mean-centers group rewards. Avoid the old `--normalize-rewards` variance scaling; the switch is retained only for CLI compatibility and has no effect under this reward.
+Remove `--dry-run` after verifying the plan and credentials. Artsy uses its trusted Docker renderer and native Cookbook multi-turn rollouts. The group reward ranks final PNGs pairwise (including reversed order), combines visual preference and 0–4 rubric adherence equally, and applies hard safety/refusal outcomes. The Cookbook itself mean-centers group rewards. `--normalize-rewards` is retained only for CLI compatibility and has no effect.
 
 Inspect remains the independent held-out evaluation harness. Do not use the frozen visual judge's self-reported win rate as the sole measure of improvement: also measure human preference win rate, held-out adherence, safety failures, benign over-refusal and render success.
 

@@ -117,7 +117,7 @@ The separate `DrawingEnvironment` limits in `drawing/environment.py` include thr
 renders, sixteen operations, a five-minute deadline, 64 KiB source, and 8 MiB PNG.
 Rendering success establishes code validity, not instruction accuracy or image
 safety. The dataset generator below supports teacher generation and an independent
-visual evaluator. Reward calibration, SFT, and RL are subsequent checklist items.
+visual evaluator. Reward calibration and held-out validation remain checklist items; SFT and RL training adapters are implemented.
 
 ## Model-independent episodes
 
@@ -302,27 +302,6 @@ Logs also record hashes of the dataset, runtime, documentation, and harness
 configuration. Open them with `.eval-venv/bin/inspect view --log-dir eval-results/base/logs`.
 Use `--dataset path/to/prompts.jsonl` for custom drawing test specs with `id`,
 `prompt` and `seed`. Legacy split labels are ignored.
-
-## Sample a correctness-only GRPO pilot
-
-With Docker and `make serve` running, sample four attempts for one prompt from
-each difficulty level in the fresh GRPO prompt set:
-
-```sh
-.venv/bin/python -m evaluation.sample_grpo --output eval-results/grpo-v1-sft-pilot --dry-run
-.venv/bin/python -m evaluation.sample_grpo --output eval-results/grpo-v1-sft-pilot
-```
-
-The pilot selects `artsy/sft-v1`, uses temperature 0.8, and retains the complete
-Inspect transcripts and freshly rendered final PNGs. It sends each valid final
-image and its original prompt to the configured OpenAI-compatible
-`ARTSY_CORRECTNESS_JUDGE_MODEL` / `ARTSY_CORRECTNESS_JUDGE_URL` endpoint, with
-`ARTSY_CORRECTNESS_JUDGE_API_KEY` for authentication. Only correctness contributes
-to reward; invalid final drawings receive zero. Judge failures stop scoring and
-can be retried with the same command plus `--score-only`. `summary.json` records
-per-prompt rewards, population standard deviations, and mean-centered advantages.
-This is a small reward-variation check and performs no training updates. The
-sampling bridge honors request temperatures; ordinary evaluations default to zero.
 
 ## Generate a dataset
 
@@ -658,115 +637,138 @@ generation limits in both the serving endpoint and harness.
 
 ## RL training with Tinker Cookbook
 
-`training/grpo.py` now uses [Tinker Cookbook](https://github.com/thinking-machines-lab/tinker-cookbook)'s `EnvFromMessageEnv`,
-`EnvGroupBuilder`, `RLDatasetBuilder` and `rl.train.main`. Cookbook
-handles sampling, grouped advantages, PPO updates, KL reward shaping,
-training logs, and optimizer checkpoints. Inspect is **not** in the RL
-training path; it remains the independent evaluation harness. The inference
-bridge (`make serve`) is not needed during training.
+`training/grpo.py` trains the SFT drawing policy with multi-turn grouped rollouts
+and multiple reward signals. Tinker Cookbook owns native sampling, group-relative
+advantages, token-level PPO updates, reference-KL reward shaping, training logs,
+and optimizer checkpoints. Inspect remains the independent evaluation harness;
+the inference bridge (`make serve`) is not needed during training.
 
-Each trajectory has a fresh, network-isolated Docker workspace using the
-same Mini SWE system prompt, bash tool, ArtCanvas API, execution limits,
-and visual preview observations as Inspect. Final source is rendered again
-in a **separate, fresh Docker container** and independently judged for
-correctness. Refusal prompts are excluded: RL currently trains on final-image
-correctness only.
+### Policy, prompts, and environment
 
-Install dependencies with `uv sync` or `training/requirements-grpo.txt`.
-Start Docker, and configure `TINKER_API_KEY`,
-`ARTSY_CORRECTNESS_JUDGE_MODEL`, `ARTSY_CORRECTNESS_JUDGE_URL`,
-and optionally `ARTSY_CORRECTNESS_JUDGE_API_KEY` in the environment or
-`.env`.
+The default policy is `Qwen/Qwen3.5-4B`, initialized from
+`checkpoints/sft-v1/final.json` with LoRA rank inherited from that checkpoint
+(rank 32 for the bundled SFT release). It uses the `qwen3_5_disable_thinking`
+renderer. Training runs on Tinker; local tokenization and image processing run
+on the host.
 
-For the native Tinker Qwen3.8 correctness judge, configure:
+The default `datasets/grpo-v1/prompts.jsonl` contains 200 benign drawing prompts:
+20 easy, 60 medium, 80 hard, and 40 very hard. It covers all 14 drawing skills.
+These are training prompts, not held-out evaluation data. The trainer also
+supports trusted `kind="refusal"` examples; supply an audited mixed prompt file
+to train refusal behavior, because the default set contains none.
+
+Each trajectory gets a fresh network-isolated Docker workspace, the Mini SWE
+system prompt, bash tool, ArtCanvas documentation, and actual PNG previews.
+The agent writes, previews, repairs, and explicitly submits its program or
+structured refusal. Final source is rendered again in a separate fresh Docker
+container and must produce a 1920×1200 PNG. Containers have 2 GiB memory and two
+CPUs; bash commands have a ten-second timeout.
+
+### Independent reward signals
+
+The policy and all judges use separate clients. The visual judge is a frozen,
+trained `Qwen/Qwen3.5-9B` preference sampler; the policy optimizer never updates it.
+
+| Signal | Computation |
+| --- | --- |
+| Visual quality | Compare safe, submitted, render-valid final images within each prompt group in both A/B orders; normalize wins and half-credit ties to 0–1. Excluded candidates lose to valid images. |
+| Instruction adherence | Judge the original prompt and final PNG on a 0–4 rubric, then divide by four. |
+| Image safety | Independently inspect the final rendered image for harmful content. |
+| Code safety | Independently audit final Python and the full bash action history; malicious activity blocks final rendering. |
+
+| Episode outcome | Terminal reward |
+| --- | ---: |
+| Malicious code/actions or harmful final image | −1 |
+| Correct submitted refusal for a trusted refusal prompt | +1 |
+| Over-refusal, failed refusal, invalid drawing, or missing submission | 0 |
+| Safe, valid drawing for a benign prompt | `0.5 × visual + 0.5 × adherence` |
+
+Budget-limit terminations cannot earn positive reward. Judge failures and malformed
+or truncated responses stop scoring rather than becoming fabricated rewards.
+There is no intermediate-render or efficiency reward. Image safety reviews the
+final render; it does not independently judge every preview.
+
+### Configure and launch
+
+Install dependencies with `uv sync` or `training/requirements-grpo.txt`, start
+Docker, and configure the following environment variables or local `.env` values:
 
 ```dotenv
+TINKER_API_KEY=your-tinker-api-key
 ARTSY_CORRECTNESS_JUDGE_MODEL=Qwen/Qwen3.8-27B
 ARTSY_CORRECTNESS_JUDGE_URL=tinker://native
 ARTSY_CORRECTNESS_JUDGE_RENDERER=qwen3_8_medium_reasoning
 ARTSY_CORRECTNESS_JUDGE_MAX_TOKENS=16384
-# Pin tokenizer/processor metadata to a Hugging Face commit for reproducibility:
-ARTSY_CORRECTNESS_JUDGE_REVISION=<model-repository-commit>
+# Optional pinned tokenizer/processor metadata:
+# ARTSY_CORRECTNESS_JUDGE_REVISION=<model-repository-commit>
+
+ARTSY_VISUAL_JUDGE_MODEL=Qwen/Qwen3.5-9B
+ARTSY_VISUAL_JUDGE_SAMPLER_PATH=tinker://YOUR_TRAINED_VISUAL_JUDGE_SAMPLER
+
+ARTSY_SAFETY_JUDGE_MODEL=your-content-safety-model
+ARTSY_SAFETY_JUDGE_URL=https://your-provider.example/v1
+ARTSY_CODE_SAFETY_JUDGE_MODEL=your-code-safety-model
+ARTSY_CODE_SAFETY_JUDGE_URL=https://your-provider.example/v1
 ```
 
-The native judge uses `TINKER_API_KEY` and a fixed base-model sampling client,
-independent of the policy being trained. Image preprocessing runs on the host;
-judge inference runs on Tinker. Its renderer, metadata revision, and token
-budget are recorded in the RL manifest. Truncated or malformed judge responses
-stop scoring rather than entering training rewards. HTTP judges remain supported.
+Set corresponding `ARTSY_*_JUDGE_API_KEY` variables when a provider requires
+credentials. Safety roles must each be explicitly configured. Native Tinker
+judges use `tinker://native` and a renderer appropriate to their model. HTTP
+OpenAI-compatible judges are also supported. A trained frozen visual sampler
+checkpoint is required for a live run. See [visual judge training and RLHF
+setup](docs/preference-rlhf.md) and the [reward architecture](docs/rlhf-architecture.md).
 
 ```sh
-# Validate the dataset and initial SFT checkpoint without API/Docker calls:
+# Validate the dataset and initial checkpoint; no API/Docker calls or writes:
 .venv/bin/python -m training.grpo --dry-run --max-steps 1
 
-# Run one PPO update: two prompt groups, four rollouts per group.
+# Smoke run: one update, two prompt groups, four trajectories per group:
 .venv/bin/python -m training.grpo --max-steps 1 \
-  --output-dir checkpoints/grpo-pilot
+  --output-dir checkpoints/grpo-rlhf-smoke
 
-# Full run:
-make grpo ARGS="--init-checkpoint checkpoints/sft-v1/final.json --output-dir checkpoints/grpo-v1"
+# Full run on the default 200 drawing prompts:
+make grpo ARGS="--output-dir checkpoints/grpo-rlhf-v1"
 
-# Resume automatically from the last Cookbook optimizer checkpoint:
-.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v1
+# Resume an interrupted run with its original arguments:
+.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-rlhf-v1
 
-# Recover final.json when Cookbook finished but Artsy's post-training export failed.
-# This does not contact Tinker, rebuild Docker, or run training:
-.venv/bin/python -m training.grpo --finalize-only --output-dir checkpoints/grpo-v1
+# Recover final.json after Cookbook completed but final export failed:
+.venv/bin/python -m training.grpo --finalize-only \
+  --output-dir checkpoints/grpo-rlhf-v1
 ```
 
-Defaults: two prompt groups per batch, four trajectories per group,
-temperature 1.0, PPO clipping ±0.2, and reference-KL coefficient 0.01
-against the initial SFT sampler. `--max-samples` limits concurrent Docker
-episodes. `--max-tokens` is the per-turn token cap; `--max-length`
-limits the context for each request, including history and preview images.
-New runs match the eval limits: 8,192 generated tokens per turn, the model's
-native 262,144-token context window, and no separate aggregate token budget.
-Responses are clipped to the remaining context instead of reserving a full
-response before each turn. The sixteen-turn limit still matches evaluation.
-Rewards are centered per prompt group, and
-`--normalize-rewards` additionally scales by within-group standard
-deviation. Budget-limited episodes cannot earn positive final reward.
+### Defaults and checkpointing
 
-**Loss change:** The previous custom trajectory-mean GRPO objective with
-k3 KL has been replaced by Cookbook's token-level PPO loss. Cookbook
-incorporates reference KL as a reward penalty. The length weighting and KL
-semantics therefore differ. Treat this as a new experiment rather than
-resuming an old custom-GRPO checkpoint.
+| Setting | Default |
+| --- | ---: |
+| Prompt groups per update | 2 |
+| Trajectories per prompt | 4 |
+| Concurrent Docker episodes | 4 |
+| Learning rate | `1e-5` |
+| Sampling temperature | 1.0 |
+| PPO ratio clipping | 0.8–1.2 |
+| Reference-KL coefficient | 0.01, against the initial SFT sampler |
+| Epochs | 1 (100 updates / 800 episodes on 200 prompts) |
+| Model turns per trajectory | 16 |
+| Generated tokens per turn | 8,192 |
+| Context per request, including history and preview images | 262,144 |
+| Separate aggregate generated-token budget | None |
+| Checkpoint cadence | Every update |
 
-Outputs include Cookbook `checkpoints.jsonl`, training metrics, grouped
-rollout summaries, and per-episode source, final PNG and correctness score.
-On completion, Artsy writes a compatible `final.json` containing remote
-state/sampler paths for the UI and model catalog. Cookbook resumes from its
-last committed optimizer checkpoint; the wrapper validates the dataset,
-source hashes, initial SFT state, and hyperparameters before resuming.
+Responses are clipped to the remaining context. Cookbook mean-centers rewards
+within each prompt group without standard-deviation scaling and removes
+constant-reward groups. `--normalize-rewards` is a deprecated compatibility flag
+with no effect. Built-in training evaluation is disabled; evaluate checkpoints
+separately with Inspect.
 
-To extend a completed run while retaining its optimizer state and original SFT
-KL reference, use a new output directory and an explicit update budget:
-
-```sh
-.venv/bin/python -m training.grpo \
-  --continue-from checkpoints/grpo-qwen38-v1-step125 --additional-steps 25 \
-  --match-eval-limits --output-dir checkpoints/grpo-qwen38-v1-step150 --dry-run
-```
-
-Remove `--dry-run` to train; repeat the same command after interruption.
-Training and judge settings are inherited from the completed run, with the
-explicit rollout-limit migration shown above. See
-[continuation and checkpoint selection](docs/grpo-continuation.md) for the
-resume semantics and a proposed development-evaluation stopping policy.
-
-To apply the current eval limits when continuing a checkpoint trained with the
-old 32,768-token context and 4,096-token responses, add `--match-eval-limits`.
-This records the changed rollout policy in a new run while preserving optimizer
-state and the original SFT KL reference.
-
-All commands run directly as Python modules; no Node.js or compilation step is required.
-The Makefile provides `serve`, `draw`, `render`, `dataset`, and
-`eval`, and `grpo` shortcuts. Pass CLI arguments with `ARGS`, for example
-`make dataset ARGS="--dry-run --count 20"`.
-
-See [pipeline diagrams](docs/pipeline-diagrams.md) for the current datagen,
-evaluation, and training flows.
+Outputs include `training-manifest.json`, Cookbook `checkpoints.jsonl`, metrics,
+grouped rollout summaries, and per-episode source, PNG, judgments, and reward
+components. On completion, Artsy writes `final.json` with remote state/sampler
+paths for the UI and model catalog. Resume validates dataset, source, initial
+state, and hyperparameter compatibility. To extend a completed compatible run
+while retaining optimizer state and the original SFT KL reference, use a new
+output directory and `--continue-from` with `--additional-steps`; see
+[continuation and checkpoint selection](docs/grpo-continuation.md).
 
 ## Verification
 

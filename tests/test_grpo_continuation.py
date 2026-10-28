@@ -172,39 +172,8 @@ class ContinuationTests(unittest.TestCase):
             grpo.main(['--continue-from', str(self.origin), '--additional-steps', '4',
                        '--learn', '0.1', '--dry-run'])
 
-    def test_legacy_limit_migration_cannot_authorize_changed_rlhf_runtime(self):
-        registry = json.loads((grpo.ROOT / 'training/rollout_limit_migration.json').read_text())
-        self.config.update(max_tokens=4096, max_length=32768)
-        for path, entry in registry['files'].items():
-            self.config['source_sha256'][path] = entry['from'][0]
+    def test_incompatible_reward_algorithm_is_rejected(self):
+        self.config['algorithm'] = 'incompatible-reward-algorithm'
         self.write_source()
-        with self.assertRaisesRegex(ValueError, 'dependencies changed'):
+        with self.assertRaisesRegex(ValueError, 'completed compatible'):
             grpo.load_continuation(self.args)
-        self.args.match_eval_limits = True
-        # The old limit-only migration cannot authorize the new reward/runtime.
-        with self.assertRaisesRegex(ValueError, 'dependencies changed'):
-            grpo.load_continuation(self.args)
-
-    def test_correctness_only_runs_cannot_resume_with_changed_rewards(self):
-        self.config['algorithm'] = 'tinker-cookbook-ppo-v1'
-        self.write_source()
-        for migrate in (False, True):
-            self.args.match_eval_limits = migrate
-            with self.assertRaisesRegex(ValueError, 'completed compatible'):
-                grpo.load_continuation(self.args)
-
-    def test_legacy_completed_run_is_rejected_without_modifying_artifacts(self):
-        origin = grpo.ROOT / 'checkpoints/grpo-qwen38-v1-step125'
-        if not origin.exists():
-            self.skipTest('Local completed run unavailable')
-        before = {p.name: p.read_bytes() for p in origin.iterdir() if p.is_file()}
-        with patch.object(grpo, '_build_sandbox_image') as docker, patch.object(grpo, 'train') as train:
-            with self.assertRaises(SystemExit) as rejected:
-                grpo.main(['--continue-from', str(origin), '--additional-steps', '1',
-                           '--match-eval-limits', '--dry-run',
-                           '--output-dir', str(self.root / 'actual')])
-            self.assertEqual(rejected.exception.code, 2)
-        docker.assert_not_called()
-        train.assert_not_called()
-        self.assertFalse((self.root / 'actual').exists())
-        self.assertEqual(before, {p.name: p.read_bytes() for p in origin.iterdir() if p.is_file()})

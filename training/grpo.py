@@ -96,9 +96,6 @@ def load_run(args):
     return specs, config, total
 
 
-# The original wrapper predates continuation. Accept only this known migration;
-# subsequent runs must match all current source and dependency hashes.
-LEGACY_GRPO_SHA256 = "e33e57a06e9e20f4f69d3f61cafbe7bad45f4347c0c073bd44c892da79a1e1d0"
 INHERITED_PARAMETERS = (
     "batch_size", "group_size", "learning_rate", "clip_epsilon", "kl_coef",
     "normalize_rewards", "temperature", "max_tokens", "max_length",
@@ -129,17 +126,8 @@ def load_continuation(args):
         raise ValueError("Continuation source must be a completed compatible Cookbook run")
     current_hashes = {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES}
     old_hashes = previous["source_sha256"]
-    migration = None
-    if args.match_eval_limits:
-        registry = json.loads((ROOT / "training/rollout_limit_migration.json").read_text())
-        migration = registry["files"]
     if set(old_hashes) != set(current_hashes) or any(
-            old_hashes[p] != h for p, h in current_hashes.items()
-            if not ((p == "training/grpo.py" and old_hashes[p] == LEGACY_GRPO_SHA256
-                     and not args.match_eval_limits)
-                    or (migration is not None and p in migration
-                        and old_hashes[p] in migration[p]["from"]
-                        and h == migration[p]["to"]))):
+            old_hashes[p] != h for p, h in current_hashes.items()):
         raise ValueError("Continuation source runtime or training dependencies changed")
     if (previous["model"] != MODEL_ID or previous["tokenizer_revision"] != MODEL_REVISION
             or previous["renderer"] != RENDERER or previous["image_size"] != IMAGE_SIZE
@@ -152,8 +140,6 @@ def load_continuation(args):
         raise ValueError("Continuation prompt selection changed")
     for key in INHERITED_PARAMETERS:
         setattr(args, key, previous[key])
-    if args.match_eval_limits:
-        args.max_tokens, args.max_length = 8192, MODEL_CONTEXT_WINDOW
     total = start + args.additional_steps
     args.epochs = math.ceil(total / math.ceil(len(specs) / args.batch_size))
     args.max_steps = total
@@ -164,16 +150,6 @@ def load_continuation(args):
                                "state_path": final["state_path"],
                                "sampler_path": final["sampler_path"],
                                "source_sha256": old_hashes}}
-    if args.match_eval_limits:
-        config.update(max_tokens=args.max_tokens, max_length=args.max_length,
-                      max_sampled_tokens=None)
-        config["continuation"]["limit_migration"] = {
-            "policy": "match-eval-limits-v1",
-            "registry_sha256": digest((ROOT / "training/rollout_limit_migration.json").read_bytes()),
-            "previous_limits": {k: previous.get(k) for k in
-                                ("max_tokens", "max_length", "max_sampled_tokens")},
-            "changed_sources": {p: {"from": old_hashes[p], "to": h}
-                                for p, h in current_hashes.items() if old_hashes[p] != h}}
     return specs, config, total
 
 
@@ -295,8 +271,6 @@ def parser():
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v1")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
-    p.add_argument("--match-eval-limits", action="store_true",
-                   help="Explicitly migrate a completed legacy run to reviewed eval rollout limits")
     p.add_argument("--additional-steps", type=int, help="Positive number of extra updates")
     p.add_argument("--finalize-only", action="store_true",
                    help="Recover final.json from a completed Cookbook run without training")
@@ -331,8 +305,6 @@ def main(argv=None):
     p = parser()
     arguments = list(sys.argv[1:] if argv is None else argv)
     args = p.parse_args(arguments)
-    if args.match_eval_limits and args.continue_from is None:
-        p.error("--match-eval-limits requires --continue-from")
     if args.continue_from is not None:
         forbidden = {"--" + k.replace("_", "-") for k in INHERITED_PARAMETERS}
         forbidden.update({"--epochs", "--max-steps", "--limit", "--init-checkpoint"})
