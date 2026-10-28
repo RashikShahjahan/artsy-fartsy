@@ -222,6 +222,7 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
         except (ValueError, TypeError):
             refusal = {}
         commands = bash_commands(getattr(state, "messages", []) or [])
+        result["commands"] = commands
         malicious = False
         if code_safety_judge_model and (source or commands):
             code_judge = get_model(role="code_safety_grader", default=code_safety_judge_model)

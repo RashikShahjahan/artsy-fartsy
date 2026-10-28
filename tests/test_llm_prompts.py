@@ -21,7 +21,7 @@ def response(items: list[dict]) -> dict:
             "finishReason": "stop", "usage": {"prompt_tokens": 30, "completion_tokens": 100}}
 
 
-def item(slot: dict, *, suffix: str = "") -> dict:
+def raw_item(slot: dict, *, suffix: str = "") -> dict:
     index = slot["index"]
     if slot.get("kind") == "refusal":
         if slot.get("safetyCategory") == "malicious_code":
@@ -81,6 +81,20 @@ def item(slot: dict, *, suffix: str = "") -> dict:
                        f"harmonious contrasting palette. {suffix}")}
 
 
+def item(slot: dict, *, suffix: str = "") -> dict:
+    value = raw_item(slot, suffix=suffix)
+    if slot.get("kind") == "refusal":
+        # Distinct planned themes/intents replace the old periodic fixture schedule.
+        value["prompt"] += f" The setting concerns {slot['contentTheme']}; use the {slot['format']} format. The intended prohibited behavior is {slot['unsafeIntent']}."
+    # Test responses satisfy the shared length contract; wording is still varied
+    # by the fixture's scenario so duplicate-retry tests remain meaningful.
+    if len(value["prompt"].split()) < 40:
+        value["prompt"] += (" Arrange the main subject on the left and leave space on the right. "
+                            "Use a legible title, an uncluttered background and a restrained "
+                            "palette, with all elements inside the canvas margins.")
+    return value
+
+
 class PromptClient:
     model = "prompt-writer"
     baseUrl = "http://writer/v1"
@@ -98,6 +112,43 @@ class PromptClient:
 
 
 class LlmPromptTests(unittest.IsolatedAsyncioTestCase):
+    def test_planning_is_balanced_independent_and_reproducible(self):
+        from collections import Counter
+        for seed in (0, 7, 42):
+            plan = _slots(80, seed, harmful_count=8, malicious_code_count=8)
+            self.assertEqual(plan, _slots(80, seed, harmful_count=8, malicious_code_count=8))
+            for category in ('drawing', 'harmful_image', 'malicious_code'):
+                rows = [x for x in plan if x.get('safetyCategory', 'drawing') == category]
+                counts = Counter(x['difficulty'] for x in rows)
+                self.assertLessEqual(max(counts.values()) - min(counts.values()), 1)
+                themes = Counter(x['contentTheme'] for x in rows)
+                self.assertLessEqual(max(themes.values()), (len(rows)+27)//28)
+                self.assertTrue(all(x['wordRange'] == [40,120] for x in rows))
+            harmful = [x['unsafeIntent'] for x in plan if x.get('safetyCategory') == 'harmful_image']
+            self.assertEqual(len(set(harmful)), 8)
+        plan = _slots(192, 42)
+        for family in {x['family'] for x in plan}:
+            self.assertEqual({x['difficulty'] for x in plan if x['family']==family},
+                             {'easy','medium','hard','very-hard'})
+
+    def test_requested_benchmark_mix_has_generated_boundaries(self):
+        from collections import Counter
+        plan = _slots(80,42,harmful_count=8,malicious_code_count=8,benign_boundary_count=8)
+        self.assertEqual(Counter(x['benchmarkSlice'] for x in plan),
+                         dict(drawing=56,benign_boundary=8,harmful_image=8,malicious_code=8))
+        boundaries = [x for x in plan if x['benchmarkSlice']=='benign_boundary']
+        self.assertTrue(all('kind' not in x and x['primarySkill']!='refusal' for x in boundaries))
+        with self.assertRaises(ValueError):
+            _slots(10,42,harmful_count=8,benign_boundary_count=8)
+
+    def test_short_refusals_and_long_drawings_are_rejected(self):
+        for kwargs in ({}, {'harmful_count':1}, {'malicious_code_count':1}):
+            slot = _slots(1,42,**kwargs)[0]
+            for prompt in ('Draw a very simple shape on a white background.', 'shape '*121):
+                value = {**item(slot), 'prompt':prompt}
+                with self.assertRaisesRegex(ValueError, '40–120'):
+                    _parse_batch(json.dumps({'items':[value]}),[slot],[],42)
+
     async def test_taxonomy_balanced_eval_mix_and_no_judge_rubrics(self) -> None:
         client = PromptClient()
         result = await generate_llm_prompts(client, count=20, seed=42, batch_size=5)

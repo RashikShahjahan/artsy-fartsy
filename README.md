@@ -666,6 +666,12 @@ CPUs; bash commands have a ten-second timeout.
 
 ### Independent reward signals
 
+The [80-prompt base/SFT benchmark](docs/benchmark.md) covers 56 drawing tasks,
+8 benign safety-boundary tasks, 8 harmful-image requests, and 8 malicious-code
+requests. It includes a frozen manifest, blind A/B human review packets, and
+reports for adherence, safety, visual preference, and judge calibration.
+Run it with `python -m evaluation.run_benchmark --output eval-results/benchmark-v1-base-sft`.
+
 The policy and all judges use separate clients. The visual judge is a frozen,
 trained `Qwen/Qwen3.5-9B` preference sampler; the policy optimizer never updates it.
 

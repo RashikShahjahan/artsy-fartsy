@@ -79,6 +79,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--count")
     parser.add_argument("--harmful-count", default="0")
     parser.add_argument("--malicious-code-count", default="0")
+    parser.add_argument("--benign-boundary-count", default="0", help="Permitted safety-adjacent drawing requests within count")
     parser.add_argument("--difficulty", default="mixed")
     parser.add_argument("--seed", default="42")
     parser.add_argument("--input")
@@ -135,12 +136,15 @@ async def main(argv: list[str] | None = None) -> int:
     count = int(args.count) if args.count is not None else 20
     harmful_count = int(args.harmful_count)
     malicious_code_count = int(args.malicious_code_count)
+    benign_boundary_count = int(args.benign_boundary_count)
     if count < 1:
         raise ValueError("count must be positive")
     if not 0 <= harmful_count <= count:
         raise ValueError("--harmful-count must be between zero and --count")
     if malicious_code_count < 0 or harmful_count + malicious_code_count > count:
         raise ValueError("Refusal counts must be nonnegative and sum to at most --count")
+    if benign_boundary_count < 0 or harmful_count + malicious_code_count + benign_boundary_count > count:
+        raise ValueError("Slice counts must be nonnegative and sum to at most --count")
     output = args.output or "datasets/pilot"
     model = args.teacher_model or os.getenv("ARTSY_TEACHER_MODEL")
     base_url = args.teacher_url or os.getenv("ARTSY_TEACHER_URL") or "http://127.0.0.1:8080/v1"
@@ -149,14 +153,14 @@ async def main(argv: list[str] | None = None) -> int:
     prompt_config = {
         "version": GENERATOR_VERSION,
         "count": count, "harmfulCount": harmful_count, "maliciousCodeCount": malicious_code_count,
-        "difficulty": args.difficulty,
+        "difficulty": args.difficulty, "benignBoundaryCount": benign_boundary_count,
         "seed": seed, "model": prompt_model, "baseUrl": prompt_url,
         "batchSize": int(args.prompt_batch_size), "maxTokens": int(args.prompt_max_tokens),
         "retries": int(args.prompt_retries),
     }
     prompt_generation = None
     if args.input:
-        if harmful_count or malicious_code_count:
+        if harmful_count or malicious_code_count or benign_boundary_count:
             raise ValueError("Refusal count options cannot be used with --input; include refusal pairs in the input file")
         specs = validate_specs(_read_specs(args.input))
     else:
@@ -218,14 +222,15 @@ async def main(argv: list[str] | None = None) -> int:
 
                 generated = await generate_llm_prompts(prompt_client, count, seed,
                     difficulty=args.difficulty, harmful_count=harmful_count,
-                    malicious_code_count=malicious_code_count,
+                    malicious_code_count=malicious_code_count, benign_boundary_count=benign_boundary_count,
                     batch_size=prompt_config["batchSize"],
                     max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"],
                     completed=completed, on_record=on_record)
                 specs = generated["specs"]
                 if not args.dry_run:
                     _write_json(plan_path, {"config": prompt_config, "specs": specs,
-                        "specsHash": sha256(compact_json(specs)), "batches": generated["batches"]})
+                        "specsHash": sha256(compact_json(specs)), "batches": generated["batches"],
+                        "audit": generated["audit"]})
             finally:
                 if lock_fd is not None:
                     os.close(lock_fd)

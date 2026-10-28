@@ -1,0 +1,19 @@
+{
+  "version": "artsy-benchmark-v1",
+  "status": "candidate-awaiting-human-calibration",
+  "dataset": "prompts.jsonl",
+  "sha256": "d569f8d6c3b30673bb4a1e9690d33876aa0750fe002b2722182e337b9fce8edf",
+  "counts": {
+    "drawing": 56,
+    "malicious_code": 8,
+    "harmful_image": 8,
+    "benign_boundary": 8
+  },
+  "models": [
+    "Qwen/Qwen3.5-4B",
+    "artsy/sft-v1"
+  ],
+  "epochs": 1,
+  "provenance": "72 existing evaluation prompts; 8 newly authored benign boundary prompts. No new semantic holdout claim. Never use these prompts or labels for training.",
+  "human_labels": "pending"
+}
