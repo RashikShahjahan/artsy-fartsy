@@ -278,6 +278,9 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         manifest = json.loads(manifest_path.read_text())
         manifest["specs"][0]["split"] = "train"
         manifest_path.write_text(json.dumps(manifest))
+        # Legacy split datasets included an accepted export; v5 generation
+        # deliberately leaves that file to the manual curation workflow.
+        (self.output / "accepted.jsonl").write_text(compact_json(record) + "\n")
         (self.output / "train.jsonl").write_text(compact_json(record) + "\n")
         remove_splits(self.output)
         rerun = await generate_dataset(options)

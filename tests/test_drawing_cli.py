@@ -107,7 +107,7 @@ class DrawingCliTests(unittest.TestCase):
             self.assertEqual(summary["requests"], 1)
             self.assertEqual(len(teacher.calls), 1)
 
-            rows = [json.loads(line) for line in (output / "review.jsonl").read_text().splitlines()]
+            rows = [json.loads(line) for line in (output / "candidates.jsonl").read_text().splitlines()]
             self.assertEqual(len(rows), 1)
             record = rows[0]
             self.assertEqual(record["status"], "review")

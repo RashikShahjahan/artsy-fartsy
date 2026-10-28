@@ -92,7 +92,7 @@ class ManualInspectorTests(unittest.TestCase):
         images = image_paths(record, self.root)
         self.assertEqual(len(images), 1)
         self.assertEqual(images[0][0], "Attempt 1 preview")
-        self.assertEqual(images[0][1], nested / "preview-1.png")
+        self.assertEqual(images[0][1], (nested / "preview-1.png").resolve())
 
 
 if __name__ == "__main__":
