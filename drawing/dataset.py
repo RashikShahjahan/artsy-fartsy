@@ -1,4 +1,4 @@
-"""Checkpointed generation and review of ArtCanvas drawing datasets."""
+"""Checkpointed generation of unfiltered ArtCanvas drawing candidates."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from .judges import (
 )
 from .dataset_specs import compact_json, sha256, validate_specs
 
-DATASET_VERSION = "artsy-dataset-v4"
+DATASET_VERSION = "artsy-dataset-v5"
 EVALUATOR_VERSION = JUDGE_VERSION
 
 
@@ -355,7 +355,6 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         (output / "prompts.jsonl").write_text("".join(compact_json(s) + "\n" for s in specs), encoding="utf-8")
         records_path = output / "records"; records_path.mkdir(parents=True, exist_ok=True)
         records: list[dict[str, Any]] = []
-        seen_source: dict[str, str] = {}; seen_pixels: dict[str, str] = {}
 
         async def process_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
             saved_records = []
@@ -375,13 +374,6 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
                     record["previousAttempts"] = [*(saved.get("previousAttempts", [])), {k: v for k, v in saved.items() if k != "previousAttempts"}]
                 if record.get("id") != f"{spec['id']}-c{index}" or record.get("spec") != spec:
                     raise ValueError(f"Invalid checkpoint: {filename}")
-                if record.get("status") in ("accepted", "review"):
-                    duplicate = (record.get("sourceHash") and seen_source.get(record["sourceHash"])) or (record.get("pixelHash") and seen_pixels.get(record["pixelHash"]))
-                    if duplicate:
-                        record.update(status="rejected", reason=f"Duplicate source or rendered pixels of {duplicate}")
-                    else:
-                        if record.get("sourceHash"): seen_source[record["sourceHash"]] = record["id"]
-                        if record.get("pixelHash"): seen_pixels[record["pixelHash"]] = record["id"]
                 _write_json(records_path / filename, record)
                 out.append(record)
                 callback = options.get("onRecord")
@@ -396,10 +388,9 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             for group in batch: records.extend(group)
         order = {s["id"]: i for i, s in enumerate(specs)}
         records.sort(key=lambda r: (order[r["spec"]["id"]], r["candidate"]))
-        for name, rows in [("candidates", records), ("accepted", [r for r in records if r["status"] == "accepted"]),
-                           ("review", [r for r in records if r["status"] == "review"]),
-                           ("rejected", [r for r in records if r["status"] in ("rejected", "infrastructure_error")])]:
-            _write_jsonl_atomic(output / f"{name}.jsonl", rows)
+        # Keep every candidate, including failed runs and low-scoring renders.
+        # Human review determines which complete trajectories to export for SFT.
+        _write_jsonl_atomic(output / "candidates.jsonl", records)
         completions = []
         for record in records:
             for row in [record, *record.get("previousAttempts", [])]:

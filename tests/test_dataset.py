@@ -285,12 +285,15 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "configuration changed"):
             await generate_dataset({**options, "threshold": 0.9})
 
-    async def test_without_judge_output_is_review_only_and_duplicates_are_rejected(self) -> None:
+    async def test_without_judge_output_is_retained_for_manual_review(self) -> None:
         one = example_spec()
         summary = await generate_dataset({"output": str(self.output), "specs": [one], "teacher": ScriptedClient(['{"code":"draw()"}']),
                                           "candidates": 1, "renderer": self.renderer(), "config": self.config()})
         self.assertEqual(summary["review"], 1); self.assertEqual(summary["accepted"], 0)
-        self.assertEqual((self.output / "accepted.jsonl").read_text(), "")
+        self.assertFalse((self.output / "accepted.jsonl").exists())
+        full = [json.loads(line) for line in (self.output / "candidates.jsonl").read_text().splitlines()]
+        self.assertEqual(len(full), 1)
+        self.assertEqual(full[0]["status"], "review")
         self.assertIn("evaluation pending", (self.output / "records" / f"{one['id']}-c0.json").read_text())
 
     async def test_authored_harmful_refusal_pair_is_trainable_without_renderer(self) -> None:
@@ -306,12 +309,12 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(summary["refusalPairs"], 1)
         self.assertEqual(summary["requests"], 0)
         self.assertEqual(len(list((self.output / "records").glob("*.json"))), 1)
-        row = json.loads((self.output / "accepted.jsonl").read_text())
+        row = json.loads((self.output / "candidates.jsonl").read_text())
         self.assertEqual(row["refusal"], spec["refusal"])
         self.assertEqual(row["artifacts"], {})
         self.assertEqual(row["generation"]["initialDraft"], "authored_refusal")
 
-    async def test_duplicate_rendered_pixels_are_rejected_across_families(self) -> None:
+    async def test_duplicate_rendered_pixels_are_retained_for_manual_review(self) -> None:
         specs = [
             {"id": "circle", "family": "circles", "prompt": "Draw a blue circle", "seed": 1},
             {"id": "house", "family": "houses", "prompt": "Draw a blue house", "seed": 2},
@@ -323,13 +326,13 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
                                           "correctnessJudge": correctness, "safetyJudge": safety,
                                           "codeSafetyJudge": ScriptedClient(['{"malicious":false,"reason":"Drawing only"}'] * 2, model="code-safety"),
                                           "candidates": 1, "renderer": self.renderer(), "config": self.config()})
-        self.assertEqual(summary["accepted"], 1); self.assertEqual(summary["rejected"], 1)
-        rejected = (self.output / "rejected.jsonl").read_text()
-        self.assertIn("Duplicate source or rendered pixels", rejected)
-        accepted = [json.loads(line) for line in (self.output / "accepted.jsonl").read_text().splitlines()]
-        self.assertEqual(len(accepted), 1)
-        self.assertNotIn("split", accepted[0]["spec"])
-        for name in ("train", "validation", "test"):
+        self.assertEqual(summary["accepted"], 2); self.assertEqual(summary["rejected"], 0)
+        candidates = [json.loads(line) for line in (self.output / "candidates.jsonl").read_text().splitlines()]
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual(candidates[0]["pixelHash"], candidates[1]["pixelHash"])
+        self.assertTrue(all(r["status"] == "accepted" for r in candidates))
+        self.assertNotIn("split", candidates[0]["spec"])
+        for name in ("accepted", "review", "rejected", "train", "validation", "test"):
             self.assertFalse((self.output / f"{name}.jsonl").exists())
 
     async def test_malformed_teacher_reply_uses_bounded_repairs_and_lock_is_enforced(self) -> None:
