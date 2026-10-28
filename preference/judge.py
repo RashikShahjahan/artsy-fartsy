@@ -33,12 +33,15 @@ def parse_winner(text: str) -> str:
 def validate_png(png: bytes) -> None:
     if not isinstance(png, bytes) or not png or len(png) > 8 * 1024 * 1024:
         raise ValueError("Expected PNG bytes of at most 8 MiB")
-    with Image.open(io.BytesIO(png)) as image:
-        if (image.format != "PNG"
-                or not 1 <= image.width <= 4096
-                or not 1 <= image.height <= 4096):
-            raise ValueError("Invalid preference image")
-        image.load()
+    try:
+        with Image.open(io.BytesIO(png)) as image:
+            if (image.format != "PNG"
+                    or not 1 <= image.width <= 4096
+                    or not 1 <= image.height <= 4096):
+                raise ValueError("Invalid preference image")
+            image.load()
+    except OSError as exc:
+        raise ValueError("Invalid preference image") from exc
 
 
 def pair_messages(image_a: bytes, image_b: bytes) -> list[dict]:

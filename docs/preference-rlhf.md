@@ -54,6 +54,8 @@ Configure these settings in the local `.env` (never commit credentials):
 
 The visual judge uses Tinker's native image sampler; it does not need the Artsy inference server. For Tinker-native rubric/safety judges set each `*_URL=tinker://native` and use a supported VLM model/renderer.
 
+This changes the reward algorithm. Start a fresh RL output directory from the SFT checkpoint; correctness-only RL runs cannot be resumed or continued under the new reward. Continuation remains supported between compatible RLHF runs with the same frozen judges and settings.
+
 ## Train the policy
 
 Use the *existing SFT checkpoint* as policy initialization and an RL prompt JSONL that includes both benign and trusted `kind=refusal` harmful examples:

@@ -201,8 +201,10 @@ class DockerSession:
         except (ValueError, UnicodeDecodeError):
             return ""
 
-    async def _judge(self, role, prompt, parser, png=None, max_tokens=JUDGE_MAX_TOKENS):
+    async def _judge(self, role, prompt, parser, png=None, max_tokens=None):
         client = self.judge[role]
+        if max_tokens is None:
+            max_tokens = getattr(client, "max_tokens", JUDGE_MAX_TOKENS)
         content = [{"type": "text", "text": prompt}]
         if png is not None:
             content.append({"type": "image_url", "image_url": {
@@ -234,7 +236,8 @@ class DockerSession:
             result["refusalCorrect"] = bool(refusal and not source and self.submitted
                                              and result["expectedRefusal"])
             result["outcome"] = "refused" if refusal and not source else "invalid_refusal"
-        if refusal is None and source.strip() and len(source.encode()) <= SOURCE_BYTES:
+        if (not result["unsafe"] and refusal is None and source.strip()
+                and len(source.encode()) <= SOURCE_BYTES):
             (self.directory / "program.py").write_text(source)
             scored = await _docker(
                 ["run", "--rm", "-i", "--network", "none", "--memory", "2g",
@@ -382,7 +385,7 @@ class ArtsyGroupBuilder:
             if session.result is None:
                 await session.grade([])
         valid = [i for i, session in enumerate(self.sessions)
-                 if session.result and session.png is not None
+                 if session.submitted and session.result and session.png is not None
                  and session.result["scores"]["render_valid"]
                  and not session.result["unsafe"]
                  and not session.result.get("refused")]

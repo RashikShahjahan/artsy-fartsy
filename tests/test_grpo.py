@@ -117,6 +117,44 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 await session.grade([])
         self.assertIsNone(session.result)
 
+    async def test_malicious_source_never_reaches_trusted_renderer(self):
+        judge = {"code_safety": SimpleNamespace(complete=AsyncMock(return_value={
+            "text": '{"malicious":true,"reason":"credential theft"}', "finishReason": "stop"}))}
+        with tempfile.TemporaryDirectory() as root:
+            session = DockerSession({"id": "x", "prompt": "Draw", "seed": 1}, Path(root), judge)
+            with patch.object(session, "_read_source", new=AsyncMock(return_value="steal()")), \
+                 patch.object(session, "_read_refusal", new=AsyncMock(return_value=None)), \
+                 patch("training.cookbook_env._docker", new=AsyncMock()) as docker:
+                await session.grade([])
+            docker.assert_not_awaited()
+            self.assertTrue(session.result["unsafe"])
+            self.assertIsNone(session.png)
+
+    async def test_native_judge_uses_configured_reasoning_budget(self):
+        from drawing.judges import parse_adherence_rubric
+        client = SimpleNamespace(max_tokens=16384, complete=AsyncMock(return_value={
+            "text": '{"score":4,"reason":"All requested elements"}', "finishReason": "stop"}))
+        session = DockerSession({}, Path("/tmp"), {"adherence": client})
+        result = await session._judge("adherence", "Grade", parse_adherence_rubric)
+        self.assertEqual(result["score"], 4)
+        self.assertEqual(client.complete.call_args.args[1], 16384)
+
+    async def test_unsubmitted_image_cannot_reduce_submitted_visual_reward(self):
+        spec = {"id": "x", "prompt": "Draw", "seed": 1}
+        judge = {"visual": SimpleNamespace(compare=AsyncMock(return_value="Tie"))}
+        with tempfile.TemporaryDirectory() as root:
+            builder = ArtsyGroupBuilder(spec, 2, 1, Path(root), judge, 128, 32768, False)
+            for index in range(2):
+                session = DockerSession(spec, Path(root) / str(index), judge)
+                session.submitted = index == 0
+                session.png = b"image"
+                session.result = {"unsafe": False, "scores": {"render_valid": 1., "adherence": 1.}}
+                builder.sessions.append(session)
+            adjustments = await builder.compute_group_rewards(
+                [SimpleNamespace(transitions=[]) for _ in range(2)], [])
+            self.assertEqual([reward for reward, _ in adjustments], [1., 0.])
+            judge["visual"].compare.assert_not_awaited()
+
     async def test_fresh_trusted_render_and_correctness_grading(self):
         spec = {"id": "draw", "prompt": "Draw a circle", "seed": 1}
         png_file = BytesIO()
@@ -126,7 +164,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             "text": json.dumps(value), "finishReason": "stop"})) for role, value in (
                 ("adherence", {"score": 3, "reason": "Looks right"}),
                 ("safety", {"harmful": False, "reason": "Safe image"}),
-                ("code_safety", {"malicious": False, "reason": "Safe code"}))
+                ("code_safety", {"malicious": False, "reason": "Safe code"}))}
         with tempfile.TemporaryDirectory() as root:
             session = DockerSession(spec, Path(root), judge)
             session.container = "fake-container"
