@@ -35,6 +35,7 @@ article{cursor:pointer}article.selected{border-color:#277c5d;box-shadow:0 0 0 2p
 img{max-width:100%;max-height:480px;object-fit:contain;border:1px solid #ddd;background:white}
 textarea{width:100%;box-sizing:border-box;min-height:65px}.good{color:#2c805e}.bad{color:#a84d38}
 button.primary{background:#276b51;color:white}small{color:#63786d}
+.attempt-list{list-style:none;padding:0;margin:16px 0 0;display:grid;gap:10px}.attempt-card{border:1px solid #d5dfd8;border-radius:9px;background:#fff;overflow:hidden}.attempt-card>summary{cursor:pointer;display:flex;align-items:center;gap:10px;padding:13px 15px;list-style:none}.attempt-card>summary::-webkit-details-marker{display:none}.attempt-number{background:#e8f0eb;color:#21583f;border-radius:50%;width:25px;height:25px;line-height:25px;text-align:center;font-size:12px;font-weight:700;flex:none}.attempt-title{font-weight:650;flex:1}.attempt-state{font-size:12px;padding:3px 8px;border-radius:20px;background:#edf4ef;color:#28674c}.attempt-card.failed .attempt-state{background:#fbece7;color:#9a4935}.attempt-card.incomplete .attempt-state{background:#f7f0dd;color:#745f28}.attempt-body{border-top:1px solid #e5ebe6;padding:0 15px 15px}.attempt-body h4{font-size:13px;margin:16px 0 6px}.attempt-body pre{margin:6px 0;max-height:360px;font-size:12px;line-height:1.55}.attempt-body .error-text{background:#fbece7;color:#853e2e}.attempt-meta{display:flex;flex-wrap:wrap;gap:5px 14px;font-size:12px;color:#577064;margin:10px 0}.attempt-body p{margin:6px 0;line-height:1.5}.attempt-body figure{margin:12px 0}.attempt-body img{max-height:360px}.trace-heading{margin-bottom:3px}.trace-summary{margin-top:0;color:#577064;font-size:13px}.trace-empty{color:#577064}.attempt-card details{margin:10px 0}.attempt-card details summary{cursor:pointer;font-size:12px;color:#316e52}.attempt-card details pre{max-height:260px}
 @media(max-width:760px){main{display:block}#items{max-height:40vh}header{position:static}}
 </style>
 <header><h1>Artsy · Full SFT data inspector</h1>
@@ -86,11 +87,62 @@ function imageSection(images) {
  for(const image of images) {const d=node('figure');d.append(node('figcaption',image.label,'meta'));const i=document.createElement('img');i.src=image.url;i.alt=image.label;i.loading='lazy';d.append(i);group.append(d);}
  return group;
 }
+function appendText(parent, heading, value, cls) {
+ if(value===undefined || value===null || value==='')return;
+ parent.append(node('h4',heading),node('pre',typeof value==='string'?value:JSON.stringify(value,null,2),cls));
+}
+function appendReason(parent, heading, value) {
+ if(!value)return;
+ const block=node('div');block.append(node('strong',heading+' '),node('span',value));parent.append(block);
+}
+function attemptTimeline(record, images) {
+ const trace=Array.isArray(record.trace)?record.trace:[];
+ const wrap=node('section');wrap.append(node('h3','Generation trace','trace-heading'));
+ if(!trace.length){wrap.append(node('p','No generation attempts were recorded.','trace-empty'));return wrap;}
+ const rendered=trace.filter(step=>step.feedback?.ok).length;
+ const failed=trace.filter(step=>step.feedback?.ok===false || step.error).length;
+ wrap.append(node('p',trace.length+' attempt'+(trace.length===1?'':'s')+' · '+rendered+' rendered · '+failed+' with errors','trace-summary'));
+ const list=node('ol');list.className='attempt-list';
+ trace.forEach((step,index)=>{
+  const feedback=step.feedback || null, completion=step.completion || {};
+  const state=feedback?.ok===false || step.error?'failed':feedback?.ok===true?'success':'incomplete';
+  const label=feedback?.ok===true?(feedback.outcome==='refused'?'Refused':'Rendered'):feedback?.ok===false?'Render failed':step.error?'Generation failed':'No render';
+  const item=node('li'), card=node('details');card.className='attempt-card '+state;
+  card.open=trace.length===1 || index===trace.length-1 || state==='failed';
+  const summary=node('summary');summary.append(node('span',index+1,'attempt-number'),node('span','Attempt '+(index+1),'attempt-title'),node('span',label,'attempt-state'));card.append(summary);
+  const body=node('div');body.className='attempt-body';
+  const meta=node('div');meta.className='attempt-meta';
+  if(completion.model)meta.append(node('span','Model: '+completion.model));
+  if(completion.usage){const usage=completion.usage;const parts=[];if(usage.prompt_tokens!=null)parts.push(usage.prompt_tokens+' input tokens');if(usage.completion_tokens!=null)parts.push(usage.completion_tokens+' output tokens');if(parts.length)meta.append(node('span',parts.join(' · ')));}
+  if(feedback?.elapsedMs!=null)meta.append(node('span','Render: '+feedback.elapsedMs+' ms'));
+  if(feedback?.width && feedback?.height)meta.append(node('span',feedback.width+' × '+feedback.height));
+  if(meta.childNodes.length)body.append(meta);
+  appendText(body,'Generation error',step.error,'error-text');
+  appendText(body,'Render error',feedback?.error || feedback?.stderr,'error-text');
+  if(feedback)body.append(node('p','Render outcome: '+(feedback.outcome || (feedback.ok?'ok':'failed'))+(feedback.exitCode!=null?' · exit code '+feedback.exitCode:''),'meta'));
+  const attemptImages=images.filter(image=>image.label.startsWith('Attempt '+(index+1)+' '));
+  if(attemptImages.length)body.append(imageSection(attemptImages));
+  appendText(body,'Executed code',step.executedCode);
+  const evaluation=step.evaluation || {};
+  if(evaluation.correctness || evaluation.safety){
+   const score=evaluation.correctness?.score;
+   if(score!=null)body.append(node('p','Correctness score: '+score,'meta'));
+   appendReason(body,'Correctness:',evaluation.correctness?.reason);
+   appendReason(body,'Safety:',evaluation.safety?.reason);
+  }
+  appendText(body,'Tool output',feedback?.stdout);
+  if(completion.text){const raw=node('details');raw.append(node('summary','Full model response'),node('pre',completion.text));body.append(raw);}
+  const raw=node('details');raw.append(node('summary','Raw attempt record'),node('pre',JSON.stringify(step,null,2)));body.append(raw);
+  card.append(body);item.append(card);list.append(item);
+ });
+ wrap.append(list);return wrap;
+}
 async function openRecord(id) {
  current=id;render();$('detail').replaceChildren(node('p','Loading complete record...'));
  try {
   const response=await fetch('/api/record?id='+encodeURIComponent(id));const x=await response.json();
   if(!response.ok)throw Error(x.error);
+  if(current!==id)return;
   const d=reviews[id] || {decision:'pending',notes:''}, box=$('detail');box.replaceChildren();
   box.append(node('h2',x.record.spec.prompt));
   box.append(node('p','Candidate '+id+' · '+x.record.status+' · '+(x.record.reason || ''),'meta'));
@@ -103,12 +155,16 @@ async function openRecord(id) {
   const notes=node('textarea');notes.placeholder='Manual review notes';notes.value=d.notes || '';
   notes.oninput=()=>{reviews[id]={decision:(reviews[id] || {}).decision || 'pending',notes:notes.value};changed=true;status();};
   box.append(notes);
-  if(x.images.length){box.append(node('h3','Rendered images and previews'),imageSection(x.images));}
+  const finalImage=x.images.filter(image=>image.label==='Final rendered image');
+  if(finalImage.length)box.append(node('h3','Final image'),imageSection(finalImage));
+  box.append(attemptTimeline(x.record,x.images));
+  const otherImages=x.images.filter(image=>!image.label.startsWith('Attempt ') && image.label!=='Final rendered image');
+  if(otherImages.length)box.append(node('h3','Other judge renders'),imageSection(otherImages));
   if(x.conversionError)box.append(node('p','Not SFT-convertible: '+x.conversionError,'bad'));
   else box.append(node('p','Structurally SFT-convertible after manual approval.','good'));
   if(x.example)box.append(section('Complete SFT conversation (messages, tool calls, image references, loss indices)',x.example));
   box.append(section('Raw generation record (all attempts, judge feedback, code, metadata)',x.record));
- } catch(e) {$('detail').replaceChildren(node('p',e.message,'bad'));}
+ } catch(e) {if(current===id)$('detail').replaceChildren(node('p',e.message,'bad'));}
 }
 async function post(path, body) {
  const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
