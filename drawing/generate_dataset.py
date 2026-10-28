@@ -11,9 +11,10 @@ from typing import Any
 
 HELP = """Python dataset generation
   --output DIR          Dataset directory (default: datasets/pilot)
-  --count N             Total number of prompts (default: 20)
-  --harmful-count N     Refusal-worthy prompt/target pairs within the total (default: 0)
-  --malicious-code-count N  Additional malicious-code refusal pairs within the total (default: 0)
+  --count N             Total prompts (default: 80 with a 56/8/8/8 mix)
+  --benign-boundary-count N  Permitted safety-adjacent drawings within the total
+  --harmful-count N     Harmful-image refusal pairs within the total
+  --malicious-code-count N  Malicious-code refusal pairs within the total
   --difficulty LEVEL    mixed (default), easy, medium, hard, or very-hard
   --seed N              Taxonomy/slot seed (default: 42; prompt text is model-generated)
   --input FILE          Custom JSONL specs instead of the built-in curriculum
@@ -41,6 +42,10 @@ HELP = """Python dataset generation
   --dry-run             LLM-generate prompt JSONL (no rendering)
   --retry-errors        Retry checkpointed infrastructure failures on resume
   --help, -h            Show this help
+
+Without --count, the default is 56 drawings, 8 benign boundary drawings,
+8 harmful-image refusals, and 8 malicious-code refusals (80 total).
+With --count, omitted slice counts default to zero. Explicit slice flags override.
 
 Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_CORRECTNESS_JUDGE_API_KEY, ARTSY_SAFETY_JUDGE_API_KEY, ARTSY_CODE_SAFETY_JUDGE_API_KEY.
 Both vision judges and code safety review are required for automatic drawing acceptance. No judges: executable examples go to review.jsonl;
@@ -77,9 +82,9 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False, usage=HELP.splitlines()[0])
     parser.add_argument("--output")
     parser.add_argument("--count")
-    parser.add_argument("--harmful-count", default="0")
-    parser.add_argument("--malicious-code-count", default="0")
-    parser.add_argument("--benign-boundary-count", default="0", help="Permitted safety-adjacent drawing requests within count")
+    parser.add_argument("--harmful-count")
+    parser.add_argument("--malicious-code-count")
+    parser.add_argument("--benign-boundary-count", help="Permitted safety-adjacent drawing requests within count")
     parser.add_argument("--difficulty", default="mixed")
     parser.add_argument("--seed", default="42")
     parser.add_argument("--input")
@@ -133,10 +138,14 @@ async def main(argv: list[str] | None = None) -> int:
     if args.difficulty not in ("mixed", "easy", "medium", "hard", "very-hard"):
         raise ValueError("difficulty must be mixed, easy, medium, hard, or very-hard")
     seed = int(args.seed)
-    count = int(args.count) if args.count is not None else 20
-    harmful_count = int(args.harmful_count)
-    malicious_code_count = int(args.malicious_code_count)
-    benign_boundary_count = int(args.benign_boundary_count)
+    count = int(args.count) if args.count is not None else 80
+    # Apply the curated four-way mix only when the CLI owns the prompt count.
+    # An explicit --count retains the existing all-drawing default; --input
+    # supplies its own slice composition.
+    default_slice_count = 8 if args.count is None and not args.input else 0
+    harmful_count = int(args.harmful_count) if args.harmful_count is not None else default_slice_count
+    malicious_code_count = int(args.malicious_code_count) if args.malicious_code_count is not None else default_slice_count
+    benign_boundary_count = int(args.benign_boundary_count) if args.benign_boundary_count is not None else default_slice_count
     if count < 1:
         raise ValueError("count must be positive")
     if not 0 <= harmful_count <= count:

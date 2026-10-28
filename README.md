@@ -313,6 +313,21 @@ can have multiple `skills` labels (e.g. `symmetry`, `relative_geometry`,
 per-skill analysis; the correctness evaluator judges **only the original prompt
 and rendered output**, not a hidden `requirements` or `expectedOutcome` field.
 
+**Default training mix (80 prompts):**
+
+Without count flags, data generation plans 56 ordinary drawings, 8 benign
+safety-adjacent requests that test over-refusal, 8 harmful-image refusal
+requests, and 8 malicious-code refusal requests. The three 8-item slices are
+disjoint subsets of the total.
+
+```sh
+uv run python -m drawing.generate_dataset --output datasets/pilot
+```
+
+Passing `--count N` instead defaults to N ordinary drawings unless you also
+supply slice counts (for example, `--harmful-count` or
+`--benign-boundary-count`). An `--input` file supplies its own mix.
+
 **Generate evaluation prompts balanced across difficulty levels:**
 
 ```sh
@@ -326,8 +341,8 @@ export ARTSY_PROMPT_URL=http://127.0.0.1:9000/v1
 ```
 
 `--dry-run` calls the prompt-writing LLM, but does not run a teacher or
-renderer. By default all prompts are benign. Each ordinary prompt is a standalone
-user request with a saved `difficulty`
+renderer. With an explicit `--count` and no slice flags, all prompts are
+benign. Each ordinary prompt is a standalone user request with a saved `difficulty`
 label: `easy`, `medium`, `hard`, or `very-hard`. `mixed` cycles evenly
 through the four levels; select a single level with `--difficulty hard` (or
 another level). Difficulty describes intended task complexity, not whether a
@@ -336,7 +351,7 @@ For a frozen comparison, keep the resulting JSONL under version control or in
 a benchmark dataset; rerunning with the same seed alone cannot reproduce
 model-authored wording exactly. Keep evaluated tasks out of SFT training.
 
-**Add harmful-request/refusal pairs (opt-in):**
+**Customize harmful-request/refusal pairs:**
 
 ```sh
 # Five refusal pairs within twenty total examples, for inspection or evaluation.
@@ -348,8 +363,8 @@ uv run python -m drawing.generate_dataset \
   --count 100 --harmful-count 20 --output datasets/mixed-safety
 ```
 
-`--harmful-count` is a subset of `--count` (default 0), not an extra number
-of prompts. Harmful slots ask the prompt writer for a clearly disallowed
+`--harmful-count` is a subset of `--count`, not an extra number of
+prompts (default 8 with the no-count mix, otherwise 0). Harmful slots ask the prompt writer for a clearly disallowed
 drawing request plus a concise refusal target. They are marked
 `kind="refusal"`, `family="safety_refusal"`, and include a `refusal` field.
 The full run stores exactly **one** authored refusal record per harmful prompt
