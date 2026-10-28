@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 from collections import Counter
-import difflib
 import re
 import random
 import urllib.error
@@ -11,9 +10,8 @@ from typing import Any, Callable
 
 from .dataset_client import parse_json_reply
 from .dataset_specs import DIFFICULTIES, FAMILIES, SKILL_TAXONOMY, compact_json, sha256, validate_specs
-from .prompt_quality import QUALITY_VERSION, ReviewError, lint_prompt, review_prompt, reviewed_spec, validate_review
 
-GENERATOR_VERSION = "artsy-llm-prompts-v10"
+GENERATOR_VERSION = "artsy-llm-prompts-v11"
 MALICIOUS_CODE_INTENTS = (
     "credential theft", "private-file access", "data exfiltration", "destructive file changes",
     "unauthorized network use", "concealed command execution", "unwanted persistence",
@@ -194,55 +192,26 @@ def _slots(count: int, seed: int, difficulty: str = "mixed", harmful_count: int 
     return slots
 
 
-def _words(prompt: str) -> set[str]:
-    return {word for word in re.findall(r"[a-z0-9]+", prompt.lower()) if len(word) >= 3}
-
-
-def _too_similar(prompt: str, earlier: list[str]) -> bool:
-    normalized = re.sub(r"\s+", " ", prompt.strip()).lower()
-    words = _words(normalized)
-    for previous in earlier:
-        other = _words(previous)
-        overlap = len(words & other) / len(words | other) if words | other else 1.0
-        if normalized == previous or overlap >= 0.82:
-            return True
-        if overlap >= 0.55 and difflib.SequenceMatcher(None, normalized, previous).ratio() >= 0.88:
-            return True
-    return False
-
-
 def _parse_batch(text: str, slots: list[dict[str, Any]], earlier: list[str], seed: int) -> list[dict[str, Any]]:
     reply = parse_json_reply(text)
-    if not isinstance(reply, dict) or set(reply) != {"items"} or not isinstance(reply["items"], list):
+    if not isinstance(reply, dict) or not isinstance(reply.get("items"), list):
         raise ValueError("Prompt generator must return JSON with an items array")
     if len(reply["items"]) != len(slots):
         raise ValueError("Prompt generator returned the wrong number of items")
     specs = []
-    prompts = list(earlier)
     for slot, item in zip(slots, reply["items"]):
         if not isinstance(item, dict) or type(item.get("index")) is not int or item["index"] != slot["index"]:
             raise ValueError("Prompt generator returned a missing or out-of-order slot index")
         refusal_slot = slot.get("kind") == "refusal"
-        required = {"index", "prompt", "skills", "refusal"} if refusal_slot else {"index", "prompt", "skills"}
-        if set(item) != required:
-            raise ValueError("Unexpected prompt generator fields")
         prompt = item["prompt"]
-        low, high = slot["wordRange"]
-        if (not isinstance(prompt, str) or len(prompt) > 2500
-                or not low <= len(prompt.split()) <= high or any(ord(char) < 32 and char not in "\n\t" for char in prompt)
-                or "```" in prompt):
-            raise ValueError(f"Generated prompt must be plain language with {low}–{high} words for this voice/difficulty")
-        lint_prompt(prompt, slot)
-        skills = item["skills"]
-        if (not isinstance(skills, list) or not 1 <= len(skills) <= 5
-                or any(not isinstance(skill, str) or skill not in SKILL_TAXONOMY for skill in skills)
-                or len(set(skills)) != len(skills) or slot["primarySkill"] not in skills
-                or (not refusal_slot and "refusal" in skills)):
-            raise ValueError(f"Generated skill labels must be unique taxonomy members including the primary skill (slot {slot['index']}, required {slot['primarySkill']!r}, received {skills!r})")
+        if not isinstance(prompt, str) or not prompt.strip():
+            raise ValueError("Generated prompt must be a nonempty string")
+        # Labels describe the draft; they do not decide whether to retain it.
+        skills = item.get("skills", [slot["primarySkill"]])
+        if (not isinstance(skills, list) or not skills
+                or any(not isinstance(skill, str) for skill in skills)):
+            raise ValueError("Generated skills must be a nonempty list of strings")
         normalized = re.sub(r"\s+", " ", prompt.strip()).lower()
-        if _too_similar(normalized, prompts):
-            raise ValueError("Generated prompt is a duplicate or near-duplicate")
-        prompts.append(normalized)
         index = slot["index"]
         entropy = sha256(f"{GENERATOR_VERSION}:{seed}:{index}")
         spec: dict[str, Any] = {
@@ -265,7 +234,6 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
                                malicious_code_count: int = 0, benign_boundary_count: int = 0,
                                batch_size: int = 8,
                                max_tokens: int = 4096, retries: int = 5,
-                               reviewer: Any | None = None,
                                completed: dict[int, dict[str, Any]] | None = None,
                                on_record: Callable[[dict[str, Any]], None] | None = None,
                                on_attempt: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
@@ -298,14 +266,8 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
             parsed = _parse_batch(record["completion"]["text"], [slots[index]], previous_prompts, seed)
         except (ValueError, KeyError, TypeError) as error:
             raise ValueError(f"Invalid checkpointed prompt at index {index}: {error}") from error
-        quality = record.get("review", {})
-        if quality.get("version") != QUALITY_VERSION:
-            raise ValueError(f"Checkpointed prompt {index} has no compatible quality review")
-        assessed = validate_review(quality, parsed[0], slots[index])
-        if assessed != quality.get("assessment") or assessed["issues"]:
-            raise ValueError(f"Checkpointed prompt {index} has an invalid quality review")
-        if validate_specs([reviewed_spec(parsed[0], slots[index], assessed)]) != [record.get("spec")]:
-            raise ValueError(f"Checkpointed prompt at index {index} differs from its completion/review")
+        if parsed[0] != record.get("spec"):
+            raise ValueError(f"Checkpointed prompt at index {index} differs from its completion")
         previous_prompts.append(parsed[0]["prompt"])
 
     semaphore = asyncio.Semaphore(batch_size)
@@ -316,9 +278,9 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
         failure = "unknown error"
         previous_draft = None
         for attempt in range(1, retries + 1):
-            response = quality = None
+            response = None
             try:
-                # Hold capacity through review/commit. Queued jobs build their
+                # Hold capacity through generation/commit. Queued jobs build their
                 # context only after a preceding job has had a chance to commit.
                 async with semaphore:
                     async with lock:
@@ -343,16 +305,9 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
                     async with lock:
                         prior = [record["spec"]["prompt"] for record in accepted.values()]
                         spec = _parse_batch(response["text"], [slot], prior, seed)[0]
-                    quality = await review_prompt(reviewer or client, spec, slot, prior, max_tokens)
-                    if quality["assessment"]["issues"]:
-                        raise ValueError("Quality review: " + "; ".join(quality["assessment"]["issues"]))
-                    spec = validate_specs([reviewed_spec(spec, slot, quality["assessment"])])[0]
                     async with lock:
-                        # Other jobs may have committed while this one was reviewed.
-                        _parse_batch(response["text"], [slot],
-                                     [r["spec"]["prompt"] for r in accepted.values()], seed)
                         record = {"index": index, "spec": spec, "attempts": attempt,
-                                  "completion": response, "slot": slot, "review": quality,
+                                  "completion": response, "slot": slot,
                                   "recentPromptsToAvoid": recent}
                         if on_attempt is not None:
                             on_attempt({**record, "status": "accepted"})
@@ -362,11 +317,9 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
                     return
             except (ValueError, KeyError, TypeError, RuntimeError, urllib.error.URLError) as error:
                 failure = str(error)
-                if isinstance(error, ReviewError):
-                    quality = {"version": QUALITY_VERSION, "completion": error.completion, "safety": error.safety}
                 if on_attempt is not None:
                     on_attempt({"index": index, "attempts": attempt, "slot": slot,
-                                "completion": response, "review": quality,
+                                "completion": response,
                                 "status": "rejected", "reason": failure})
                 if isinstance(error, (RuntimeError, urllib.error.URLError)) and attempt < retries:
                     await asyncio.sleep(min(2 ** (attempt - 1), 8))
@@ -399,11 +352,11 @@ async def generate_llm_prompts(client: Any, count: int = 20, seed: int = 42, *,
             "plannedFormatCounts": dict(Counter(slots[i]["format"] for i in indices)),
             "styleCounts": dict(Counter(slots[i]["artStyle"] for i in indices)),
             "voiceCounts": dict(Counter(slots[i]["voice"] for i in indices)),
-            "reviewedCount": len(indices),
+            "generatedCount": len(indices),
             "wordCount": {"min": min(lengths), "max": max(lengths), "mean": sum(lengths)/len(lengths)},
         }
     return {"specs": specs, "audit": audit, "batches": [
         {"indices": [record["index"]], "attempts": record["attempts"],
          "completion": record["completion"], "slot": slots[record["index"]],
-         "review": record["review"], "recentPromptsToAvoid": record["recentPromptsToAvoid"]} for record in records
+         "recentPromptsToAvoid": record["recentPromptsToAvoid"]} for record in records
     ]}

@@ -1,12 +1,11 @@
 """Local prompt review UI. No inference or external requests."""
-import argparse
 from collections import Counter
 import hashlib
 import html
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 from pathlib import Path
-from .benchmark import suite, ROOT, write_json
+from evaluation.benchmark import suite, ROOT, write_json
 from drawing.eval_specs import load_specs
 
 PAGE = '''<!doctype html><meta charset="utf-8"><title>Artsy · Dataset review</title>
@@ -112,25 +111,3 @@ def make_handler(prompts=None, output=None, include_drawings=True, port=4173, *,
             except (ValueError,TypeError,AttributeError) as e:self.respond(400,json.dumps({'error':str(e)}))
     return Handler
 
-
-def main():
-    p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--port',type=int,default=8766)
-    p.add_argument('--output',type=Path)
-    inputs = p.add_mutually_exclusive_group()
-    inputs.add_argument('--dataset',type=Path,help='SFT candidates.jsonl or prompt JSONL')
-    inputs.add_argument('--prompts',type=Path,help='Prompt JSONL for review before evaluation')
-    p.add_argument('--accepted-output',type=Path,help='SFT export path (default: DATASET/accepted.jsonl)')
-    p.add_argument('--include-drawings',action='store_true',help='Include ordinary drawings; default prompt inspector shows safety slices only')
-    a=p.parse_args()
-    if a.dataset:
-        first = next((line for line in a.dataset.read_text().splitlines() if line.strip()), '{}')
-        if 'spec' in json.loads(first):
-            from drawing.manual_inspector import serve
-            return serve(a.dataset, a.port, a.output, a.accepted_output)
-        a.prompts = a.dataset
-    Handler = make_handler(a.prompts, a.output, a.include_drawings, a.port)
-    print(f'Viewer: http://127.0.0.1:{a.port}',flush=True)
-    ThreadingHTTPServer(('127.0.0.1',a.port),Handler).serve_forever()
-
-if __name__=='__main__':main()

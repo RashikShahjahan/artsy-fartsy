@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from drawing.manual_inspector import (
+from ui.candidate_review import (
     approved_record, export_approved, image_paths, load_candidates, validate_review,
 )
 
@@ -53,7 +53,7 @@ class ManualInspectorTests(unittest.TestCase):
                                 "c-c0": {"decision": "approved", "notes": "Manual override"},
                                 "a-c0": {"decision": "rejected", "notes": "Duplicate"}}}
         output = self.root / "accepted.jsonl"
-        with patch("drawing.manual_inspector.convert_record", return_value={"messages": []}) as convert:
+        with patch("ui.candidate_review.convert_record", return_value={"messages": []}) as convert:
             self.assertEqual(export_approved(self.records, review, self.root, output), 2)
         result = [json.loads(line) for line in output.read_text().splitlines()]
         self.assertEqual([r["id"] for r in result], ["b-c0", "c-c0"])
@@ -70,7 +70,7 @@ class ManualInspectorTests(unittest.TestCase):
                                 "b-c0": {"decision": "approved"}}}
         output = self.root / "accepted.jsonl"
         output.write_text("previous export\n")
-        with patch("drawing.manual_inspector.convert_record", side_effect=[
+        with patch("ui.candidate_review.convert_record", side_effect=[
             {"messages": []}, ValueError("missing final render")
         ]):
             with self.assertRaisesRegex(ValueError, "b-c0.*missing final render"):

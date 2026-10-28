@@ -6,57 +6,67 @@ training data, while the latter measures a model on a fixed test set.
 
 ## Dataset generation (`drawing.generate_dataset`)
 
+### 1. Prompt planning
+
 ```mermaid
 flowchart TD
-    A[CLI options and prompt source] --> B[Generate or reuse prompt plan]
-    B --> AA{Harmful refusal slot?}
-    AA -- Yes --> AB[Prompt writer supplies refusal target]
-    AB --> AC[Accepted refusal record, no render]
-    AC --> V
-    AA -- No --> C[Teacher writes ArtCanvas Python]
-    C --> CS{Code-safety monitor}
-    CS -- Malicious --> N[Reject before execution]
-    CS -- Monitor error --> CE[Infrastructure error, no execution]
-    CS -- Safe / unconfigured --> D[Local execution and PNG render]
-    D --> E{Execution valid?}
-    E -- No --> F[Send execution feedback]
-    F --> C
-    E -- Yes --> G{Both judges configured?}
-    G -- No --> H[Fresh submission]
-    G -- Yes --> I[Correctness vision judge]
-    G -- Yes --> J[Independent safety vision judge]
-    I --> K{Score passes and image safe?}
-    J --> K
-    K -- Low score --> M[Send visual critique]
-    M --> C
-    K -- Harmful --> N[Reject]
-    K -- Pass --> H
-    H --> O{Fresh render valid?}
-    O -- No --> F
-    O -- Yes --> P{Both judges configured?}
-    P -- No --> Q[Review queue]
-    P -- Yes --> R[Rejudge final PNG with both roles]
-    R --> S{Score meets threshold and safe?}
-    S -- Yes --> CP{Code review passed?}
-    CP -- Yes --> T[Accept and deduplicate]
-    CP -- Unconfigured --> Q
-    S -- No --> N
-    U[Refusal] --> N
-    T --> V[Combined accepted JSONL]
+    A[CLI options and .env] --> B{Prompt source?}
+    B -- --input --> C[Read parseable JSONL specs]
+    B -- Built-in curriculum --> D[Make seeded balanced slots]
+    D --> E[Author writes one request per slot]
+    E --> F{Parseable prompt and slot identity?}
+    F -- No --> R[Retry protocol/API error up to 5 times]
+    R --> E
+    F -- Yes --> G[Checkpoint raw prompt without content review]
+    G --> H[Freeze prompt-plan.json and write prompts.jsonl]
+    C --> H
+    H --> I{--prompts-only?}
+    I -- Yes --> J[Exit]
+    I -- No --> K[Generate candidates]
 ```
 
-Prompt planning can also be bypassed by supplying input specs. With
-`--harmful-count`, the writer returns refusal-worthy prompts paired with target
-refusals. These are accepted into training without rendering unsafe code and
-must be audited before fine-tuning. Without both vision judges, executable
-ordinary drawings remain in `review.jsonl`; unexpected refusals to ordinary
-drawing requests are rejected because no final image can be graded. Both judge roles use the same image prompts
-and JSON parsing as Inspect, and their requests run concurrently. Generation
-checkpoints per candidate and writes its artifacts, trajectory, manifest, and
-summary under the output directory.
-`--malicious-code-count` adds a distinct refusal category for unsafe computing
-actions. The code-safety monitor reviews every teacher source before execution;
-automatic drawing acceptance requires it in addition to both vision judges.
+The default plan contains 35 ordinary drawings and 5 each of benign boundary,
+harmful-image refusal and malicious-code refusal requests. Quotas and authoring
+instructions guide generation; no reviewer, wording, label-match, length or
+similarity gate filters the results. IDs and required data types remain validated.
+Each successful prompt uses only one author call. New plans use generator v11;
+use a fresh output directory for the changed configuration.
+
+### 2. Candidate generation and human curation
+
+```mermaid
+flowchart TD
+    A[Prompt specs] --> B{Authored refusal?}
+    B -- Yes --> C[Save refusal target for human review]
+    B -- No --> D[Teacher returns code or refusal]
+    D --> E{Parseable response?}
+    E -- No --> R[Repair within configured budget]
+    R --> D
+    E -- Refusal --> C
+    E -- Code --> F[Render preview under execution limits]
+    F -- Execution failure --> R
+    F -- Valid PNG --> G[Fresh final render]
+    G -- Execution failure --> R
+    G -- Success --> H[Save source, PNG, hashes and trace for human review]
+    C --> I[Checkpoint every candidate]
+    H --> I
+    R -- Exhausted --> I
+    F -- Infrastructure failure --> I
+    G -- Infrastructure failure --> I
+    I --> J[Write candidates.jsonl, manifest.json and summary.json]
+    J --> K[Human approves or rejects candidates]
+    K --> L[Verify recorded artifacts and convert trajectory]
+    L --> M[Export manually approved records to accepted.jsonl]
+```
+
+Dataset generation makes no prompt-review, code-monitor or image-judge calls,
+even when evaluation judge environment variables are configured. It does not
+reject duplicates or grade visual quality. New drawing and refusal records use
+`review` status; execution failures remain visible with their recorded outcomes.
+No automated status, selection audit or historical judge verdict blocks conversion
+of a human-selected record. Hashes, paths, source/trace consistency, runtime
+compatibility and usable recorded actions are still checked. Existing frozen
+datasets are left intact; new candidate generation uses dataset v6.
 
 ## Evaluation (`evaluation.evaluate`)
 
@@ -96,7 +106,7 @@ already ran in Docker and gates the final render; `--execution-only` skips all t
 
 ```mermaid
 flowchart TD
-    A[Dataset output accepted.jsonl] --> B[Load and validate records,<br/>hashes, review status]
+    A[Dataset output accepted.jsonl] --> B[Load and validate records,<br/>hashes and recorded evidence]
     B --> P{Authored refusal pair?}
     P -- Yes --> X[Write refusal.json and submit<br/>as supervised tool calls]
     X --> Q

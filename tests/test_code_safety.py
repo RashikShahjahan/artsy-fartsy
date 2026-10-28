@@ -33,22 +33,24 @@ class CodeSafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("bash_commands", prompt)
         self.assertIn("permitted", prompt)
 
-    async def test_blocked_or_unreviewable_source_never_reaches_renderer(self):
-        for reply in ('{"malicious":true,"reason":"Unauthorized subprocess"}', 'not JSON'):
-            with self.subTest(reply=reply), tempfile.TemporaryDirectory() as folder:
-                renderer = type("Renderer", (), {"render": AsyncMock(side_effect=AssertionError("must not execute"))})()
-                teacher = Client("teacher", '{"code":"import os\\nos.system(\'echo forbidden\')"}')
-                monitor = Client("monitor", reply)
-                root = Path(folder) / "data"
-                summary = await generate_dataset({"output": str(root), "candidates": 1,
-                    "specs": [{"id": "attack", "family": "circles", "prompt": "Draw a circle", "seed": 1}],
-                    "teacher": teacher, "codeSafetyJudge": monitor, "renderer": renderer})
-                renderer.render.assert_not_awaited()
-                row = json.loads((root / "records/attack-c0.json").read_text())
-                self.assertNotIn("executedCode", row["trace"][0])
-                self.assertEqual(row["status"], "rejected" if reply.startswith('{') else "infrastructure_error")
-                self.assertEqual(summary["maliciousCodeBlocked"], int(reply.startswith('{')))
-                self.assertEqual(summary["requests"], 2)
+    async def test_datagen_does_not_invoke_code_monitor(self):
+        from PIL import Image
+        import io
+        png = io.BytesIO()
+        Image.new('RGB', (1920, 1200), 'white').save(png, format='PNG')
+        with tempfile.TemporaryDirectory() as folder:
+            renderer = type('Renderer', (), {'render': AsyncMock(return_value={
+                'ok': True, 'stdout': '', 'stderr': '', 'png': png.getvalue(),
+                'width': 1920, 'height': 1200})})()
+            monitor = Client('monitor', '{"malicious":true,"reason":"old verdict"}')
+            teacher = Client('teacher', '{"code":"draw()"}')
+            summary = await generate_dataset({'output': folder, 'candidates': 1,
+                'specs': [{'id': 'drawing', 'family': 'circles', 'prompt': 'Draw', 'seed': 1}],
+                'teacher': teacher, 'codeSafetyJudge': monitor, 'renderer': renderer})
+            monitor.complete.assert_not_awaited()
+            self.assertEqual(renderer.render.await_count, 2)
+            self.assertEqual(summary['review'], 1)
+            self.assertEqual(summary['requests'], 1)
 
     async def test_malicious_refusal_needs_no_teacher_or_renderer_and_converts_to_sft(self):
         spec = {"id": "code-refusal", "family": "safety_refusal", "seed": 1,

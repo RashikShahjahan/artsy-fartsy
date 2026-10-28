@@ -13,14 +13,24 @@ from training.data import CONVERSION, INPUT_MODE, LOSS_POLICY, ROOT, SUBMIT, con
 
 
 class ConversionTests(unittest.TestCase):
-    def test_malicious_code_review_cannot_become_a_training_target(self):
-        self.record["trace"][-1]["codeSafety"] = {
-            "completion": {"text": '{"malicious":true,"reason":"Unauthorized behavior"}'},
-            "result": {"malicious": True, "reason": "Unauthorized behavior"},
-            "sourceHash": digest(self.record["code"].encode()),
-        }
-        with self.assertRaisesRegex(ValueError, "code safety review"):
-            convert_record(self.record, self.root)
+    def test_legacy_automated_verdicts_do_not_override_selected_records(self):
+        expected = convert_record(self.record, self.root)
+        self.record['trace'][-1]['codeSafety'] = {
+            'completion': {'text': 'malformed legacy review'}, 'result': {'malicious': True}}
+        self.record['selectionAudit'] = {'eligible': False}
+        self.record['generation'] = {'initialDraft': 'injected', 'imageObservations': True,
+                                     'finalImagePassed': False}
+        self.record['status'] = 'rejected'
+        self.assertEqual(convert_record(self.record, self.root), expected)
+        from ui.candidate_review import export_approved
+        review = {'reviewer': 'Human', 'decisions': {'repair': {'decision': 'approved'}}}
+        output = self.root / 'approved.jsonl'
+        self.assertEqual(export_approved([self.record], review, self.root, output), 1)
+        selected = json.loads(output.read_text())
+        self.assertEqual(selected['status'], 'accepted')
+        self.assertTrue(selected['humanReviewed'])
+        self.assertEqual(convert_record(selected, self.root), expected)
+
 
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -187,8 +197,8 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(len(example["trainable_message_indices"]), 5)
         self.assertTrue(Path(example["messages"][-2]["content"][1]["image"]).is_file())
 
-    def test_rejects_modified_source_observation_and_excluded_records(self):
-        for change in ("source", "observation", "final_image", "preview", "synthetic", "excluded"):
+    def test_rejects_modified_source_and_artifacts(self):
+        for change in ("source", "observation", "final_image", "preview"):
             with self.subTest(change=change):
                 record = copy.deepcopy(self.record)
                 if change == "source":
@@ -199,10 +209,6 @@ class ConversionTests(unittest.TestCase):
                     record["imageHash"] = "bad"
                 elif change == "preview":
                     record["trace"][-1]["feedback"]["artifact"] = "/old/missing.png"
-                elif change == "synthetic":
-                    record["generation"] = {"initialDraft": "injected"}
-                else:
-                    record["selectionAudit"] = {"eligible": False}
                 with self.assertRaises(ValueError):
                     convert_record(record, self.root)
 
@@ -215,12 +221,22 @@ class ConversionTests(unittest.TestCase):
                 record["warmup"]["split"] = split
                 self.assertEqual(convert_record(record, self.root), expected)
 
-    def test_explicit_duplicate_exception(self):
-        self.record.update(status="rejected", reason="Duplicate source or rendered pixels of other")
-        with self.assertRaises(ValueError):
-            convert_record(self.record, self.root)
-        self.record["warmup"]["duplicateException"] = True
-        self.assertEqual(convert_record(self.record, self.root)["id"], "repair")
+    def test_historical_duplicate_rejection_does_not_block_conversion(self):
+        self.record.update(status='rejected', reason='Duplicate source or rendered pixels of other')
+        self.assertEqual(convert_record(self.record, self.root)['id'], 'repair')
+
+    def test_teacher_refusal_is_convertible_and_requires_matching_recorded_evidence(self):
+        record = copy.deepcopy(self.record)
+        reason = 'I cannot fulfill this request.'
+        record.update(refusal=reason, artifacts={}, trace=[{
+            'completion': {'text': json.dumps({'refusal': reason})},
+            'feedback': {'ok': True, 'outcome': 'refused', 'reason': reason}}])
+        example = convert_record(record, self.root)
+        self.assertEqual(len(example['trainable_message_indices']), 2)
+        self.assertIn('refusal.json', json.dumps(example['messages']))
+        record['refusal'] = 'modified'
+        with self.assertRaisesRegex(ValueError, 'refusal does not match'):
+            convert_record(record, self.root)
 
     def test_unexecuted_teacher_replies_are_omitted_from_agent_demonstrations(self):
         self.record["trace"].insert(0, {"completion": {"text": "truncated JSON"}, "error": "truncated"})

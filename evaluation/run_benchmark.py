@@ -19,9 +19,9 @@ def main():
     args=parser.parse_args()
     if args.max_samples<1:parser.error('--max-samples must be positive')
     manifest,items=suite()
-    from .dataset_viewer import validate_review
+    from ui.prompt_review import validate_review
     if not args.approval.is_file():
-        raise ValueError('Review and approve the dataset in evaluation.dataset_viewer before running')
+        raise ValueError('Review and approve the dataset in the unified UI Prompt review workspace before running')
     validate_review(json.loads(args.approval.read_text()),manifest,items,require_approval=True)
     load_dotenv(ROOT/'.env')
     health=httpx.get('http://127.0.0.1:8080/health',timeout=10).raise_for_status().json()

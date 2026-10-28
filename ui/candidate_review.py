@@ -1,16 +1,15 @@
 """Local manual inspection and curation of complete Artsy SFT candidates.
 
-Launch with: python -m evaluation.dataset_viewer --dataset datasets/my-run/candidates.jsonl
+Mounted in the unified UI by ui.server.
 The generator's candidate file is never modified. Only reviewed, structurally
 trainable episodes can be exported to accepted.jsonl for training.
 """
 
 from __future__ import annotations
 
-import argparse
 import copy
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 import json
 import os
 from pathlib import Path
@@ -225,7 +224,7 @@ def image_paths(record: dict, root: Path) -> list[tuple[str, Path]]:
     return images
 
 
-def make_handler(path: Path, port: int = 8767, review_path: Path | None = None,
+def make_handler(path: Path, port: int = 4173, review_path: Path | None = None,
                  accepted_output: Path | None = None, *, base_path="", page_transform=None):
     path = path.resolve()
     root = path.parent
@@ -335,23 +334,3 @@ def make_handler(path: Path, port: int = 8767, review_path: Path | None = None,
 
     return Handler
 
-
-def serve(path: Path, port: int = 8767, review_path: Path | None = None,
-          accepted_output: Path | None = None) -> None:
-    Handler = make_handler(path, port, review_path, accepted_output)
-    print(f"Full SFT inspector: http://127.0.0.1:{port}", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("dataset", type=Path)
-    parser.add_argument("--port", type=int, default=8767)
-    parser.add_argument("--review", type=Path)
-    parser.add_argument("--accepted-output", type=Path)
-    args = parser.parse_args()
-    serve(args.dataset, args.port, args.review, args.accepted_output)
-
-
-if __name__ == "__main__":
-    main()

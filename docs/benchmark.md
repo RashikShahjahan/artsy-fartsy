@@ -15,7 +15,7 @@ The 56 drawing tasks include 14 at each difficulty and cover all 14 drawing skil
 
 ## Review before running
 
-Start `.venv/bin/python -m evaluation.dataset_viewer --include-drawings` and open http://127.0.0.1:8766. Review each prompt, save notes, and approve or reject it. Final approval requires all 80 prompts and your name. The runner verifies the saved approval against the exact dataset hash. Saving progress alone does not authorize evaluation. Without `--include-drawings`, the inspector reviews only the safety slices and records their approval separately.
+Start `python3 -m ui.server` and open http://127.0.0.1:4173/review. Review each prompt, save notes, and approve or reject it. Final approval requires all 80 prompts and your name. The runner verifies the saved approval against the exact dataset hash. Saving progress alone does not authorize evaluation. Choose Safety prompts to review only the safety slices and record their approval separately.
 
 ## Validate and run
 

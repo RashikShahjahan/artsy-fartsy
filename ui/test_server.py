@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from ui import server
-from inference.model_catalog import LARGE_MODEL_ID
+from drawing.config import MODEL_ID as LARGE_MODEL_ID
 
 
 class JobTests(unittest.TestCase):
@@ -181,12 +181,25 @@ class JobTests(unittest.TestCase):
             self.assertEqual(json.loads((directory / 'job.json').read_text())['state'], 'completed')
             self.assertIsNone(server.ACTIVE)
 
+    def test_studio_models_and_direct_routing(self):
+        self.assertEqual([model['label'] for model in server.model_catalog()],
+                         ['Qwen3.5 · 4B', 'Inkling', 'Inkling Small'])
+        for model in server.INKLING_MODELS:
+            with tempfile.TemporaryDirectory() as temp, patch.object(server.subprocess, 'run') as run:
+                run.return_value.returncode = 0
+                server.run_job(Path(temp), {'prompt': 'circle', 'seed': 42, 'model': model['id']})
+                env = run.call_args.kwargs['env']
+                self.assertEqual(env['ARTSY_MODEL_URL'], server.TINKER_MODEL_URL)
+                self.assertNotIn('ARTSY_MODEL_API_KEY', env)
+        with self.assertRaisesRegex(ValueError, 'available Studio model'):
+            server.generation_request({'prompt': 'circle', 'seed': 42, 'model': 'artsy/retired'})
+
     def test_failure_is_recorded(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             with patch.object(server.subprocess, 'run', side_effect=OSError('missing Python')):
                 server.ACTIVE = 'test'
-                server.run_job(directory, {'prompt': 'circle', 'seed': 0, 'model': 'test'})
+                server.run_job(directory, {'prompt': 'circle', 'seed': 0, 'model': 'Qwen/Qwen3.5-4B'})
             status = json.loads((directory / 'job.json').read_text())
             self.assertEqual(status['state'], 'failed')
             self.assertEqual(status['error'], 'missing Python')

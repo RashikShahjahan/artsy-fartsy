@@ -11,8 +11,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from drawing.dataset_client import parse_json_reply
 from drawing.dataset_specs import DIFFICULTIES
-from drawing.judges import parse_code_safety_judgment
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOLS = [{"type": "function", "function": {
@@ -22,7 +22,7 @@ TOOLS = [{"type": "function", "function": {
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 INPUT_MODE = "multimodal-previews"
-CONVERSION = "bash-trajectory-separate-write-preview-refusal-only-assistant-only-v9"
+CONVERSION = "bash-trajectory-human-curated-assistant-only-v10"
 LOSS_POLICY = "assistant-only"
 
 
@@ -100,17 +100,10 @@ def system_prompt() -> str:
 
 def convert_record(record: dict, root: Path) -> dict:
     rid = record["id"]
-    if record.get("selectionAudit", {}).get("eligible") is False:
-        raise ValueError(f"{rid}: excluded by selection audit")
     if record.get("runtimeVersion") != "artcanvas-v2":
         raise ValueError(f"{rid}: incompatible drawing runtime")
     if record.get("apiDocHash") != digest((ROOT / "docs/artcanvas.md").read_bytes()):
         raise ValueError(f"{rid}: API documentation changed since generation")
-    warmup = record.get("warmup", {})
-    duplicate = (warmup.get("duplicateException") is True and
-                 record.get("reason", "").startswith("Duplicate source or rendered pixels of "))
-    if record.get("status") not in {"accepted", "review"} and not (duplicate and record.get("status") == "rejected"):
-        raise ValueError(f"{rid}: record is not selected for training")
     spec = record["spec"]
     seed = spec["seed"]
     preview_command = (f"python /opt/artsy/render.py --seed {seed} "
@@ -118,7 +111,7 @@ def convert_record(record: dict, root: Path) -> dict:
     messages = [message("system", system_prompt()),
                 message("user", spec["prompt"] + "\n\nPreview with: " + preview_command)]
     if spec.get("kind") == "refusal":
-        if (record.get("status") != "accepted" or record.get("refusal") != spec["refusal"]
+        if (record.get("refusal") != spec["refusal"]
                 or record.get("refusalSource") != "prompt_plan"
                 or record.get("trace") or record.get("code")
                 or record.get("artifacts")):
@@ -131,30 +124,26 @@ def convert_record(record: dict, root: Path) -> dict:
         return {"id": rid, "messages": messages,
                 "trainable_message_indices": [first, second], "tools": TOOLS}
 
-    generation = record.get("generation", {})
-    if generation and generation.get("initialDraft") != "natural":
-        raise ValueError(f"{rid}: synthetic repair excluded")
-    if generation.get("imageObservations") and not generation.get("finalImagePassed"):
-        raise ValueError(f"{rid}: final image did not pass review")
-
-    source = artifact(root, record["artifacts"]["source"]).read_text()
-    normalized = lambda code: code.replace("\r\n", "\n").strip()
-    if normalized(source) != normalized(record["code"]) or digest(normalized(source).encode()) != record["sourceHash"]:
-        raise ValueError(f"{rid}: final source does not match recorded code/hash")
-    artifact(root, record["artifacts"]["image"], record["imageHash"])
     trace = record["trace"]
     if not trace or not trace[-1].get("feedback", {}).get("ok"):
         raise ValueError(f"{rid}: no final successful execution")
+    refused = trace[-1]["feedback"].get("outcome") == "refused"
+    source = None
+    normalized = lambda code: code.replace("\r\n", "\n").strip()
+    if refused:
+        target = parse_json_reply(trace[-1]["completion"]["text"])
+        if (not isinstance(record.get("refusal"), str) or not record["refusal"].strip()
+                or target != {"refusal": record["refusal"]}
+                or trace[-1]["feedback"].get("reason") != record["refusal"]):
+            raise ValueError(f"{rid}: recorded refusal does not match teacher completion/feedback")
+    else:
+        source = artifact(root, record["artifacts"]["source"]).read_text()
+        if normalized(source) != normalized(record["code"]) or digest(normalized(source).encode()) != record["sourceHash"]:
+            raise ValueError(f"{rid}: final source does not match recorded code/hash")
+        artifact(root, record["artifacts"]["image"], record["imageHash"])
 
     trainable_message_indices = []
     for index, step in enumerate(trace):
-        review = step.get("codeSafety")
-        if review:
-            judgment = parse_code_safety_judgment(review["completion"]["text"])
-            if judgment != review["result"] or judgment["malicious"]:
-                raise ValueError(f"{rid}: code safety review is unsafe or inconsistent")
-            if review["sourceHash"] != digest(step.get("executedCode", "").encode()):
-                raise ValueError(f"{rid}: code safety review does not match executed source")
         if step.get("observation"):
             observation = step["observation"]
             # Validate recorded observations, but do not expose privileged
@@ -165,6 +154,13 @@ def convert_record(record: dict, root: Path) -> dict:
             # Teacher JSON is a collection protocol, not an agent action. Omit
             # unexecuted replies and their synthetic correction instruction;
             # only actual attempted programs become bash demonstrations.
+            continue
+        if refused and index == len(trace) - 1:
+            call_id = f"call_{index}_refusal"
+            trainable_message_indices.append(len(messages))
+            command = "rm -f /workspace/program.py\n" + refusal_command(record["refusal"])
+            messages.append(action(command, call_id))
+            messages.append(message("tool", "Return code: 0\nRefusal recorded", tool_call_id=call_id))
             continue
         code = parse_source(step["completion"]["text"])
         if "executedCode" in step and code != step["executedCode"]:

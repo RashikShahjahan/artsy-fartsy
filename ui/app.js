@@ -225,8 +225,7 @@ async function poll(id) {
       updateModelAvailability();return;
     }
     if(active===id && displayedRun!==id) { setSource(run.prompt_id?'dataset':'freeform',false); displayedRun=id; if(drawingOnly){const spec=drawingData?.items.find(row=>row.id===run.prompt_id);if(spec)showDrawing(spec,false);displayedRun=id;} $('#prompt').value=run.prompt;
-      if (![...$('#model').options].some(option => option.value === run.model)) $('#model').add(new Option(run.model, run.model));
-      $('#model').value=run.model; }
+      if ([...$('#model').options].some(option => option.value === run.model)) $('#model').value=run.model; }
     $('#run-status').textContent=(run.result?.outcome || run.state) + (drawingOnly ? ` · ${run.model}` : '');
     $('#console').textContent=run.console || 'Waiting for process output…';
     $('#downloads').innerHTML=(run.artifacts || []).map(name=>`<a href="/api/runs/${id}/${name}" download="${name}">${esc(name)}</a>`).join('');
@@ -266,9 +265,11 @@ $('#generation-form').onsubmit=async e=>{
 };
 $('#expand').onclick=()=>{expanded=!expanded;document.querySelectorAll('#trace details').forEach(d=>d.open=expanded);hydrateRecords();$('#expand').textContent=expanded?'Collapse all':'Expand all';};
 let bridgeModels = null;
+let directModels = new Set();
 function updateModelAvailability() {
-  const unavailable = bridgeModels === null || !bridgeModels.includes($('#model').value);
-  $('#model-note').textContent = bridgeModels === null ? 'Native Tinker bridge is offline. Start make serve, then reload.'
+  const direct = directModels.has($('#model').value);
+  const unavailable = !direct && (bridgeModels === null || !bridgeModels.includes($('#model').value));
+  $('#model-note').textContent = direct ? 'Tinker API · same Docker drawing harness and PNG previews.' : bridgeModels === null ? 'Native Tinker bridge is offline. Start make serve, then reload.'
     : unavailable ? 'This model is unavailable on the running bridge. Restart make serve, then reload.'
     : 'Native Tinker sampling · same Docker drawing harness and PNG previews.';
   $('#generate').disabled = Boolean(active) || unavailable || (drawingOnly && (!selectedDrawing || !drawingData));
@@ -282,12 +283,13 @@ async function loadModels() {
     if (!response.ok) throw new Error('Could not load models');
     const {models, bridge_models} = await response.json();
     bridgeModels = bridge_models ?? null;
+    directModels = new Set(models.filter(model => model.direct).map(model => model.id));
     const selected = $('#model').value;
     $('#model').replaceChildren(...models.map(model => new Option(model.label, model.id)));
     if (models.some(model => model.id === selected)) $('#model').value = selected;
-    else if (selected) { $('#model').add(new Option(selected + ' (saved run)', selected)); $('#model').value = selected; }
+
     updateModelAvailability();
-  } catch { $('#model-note').textContent = 'Could not load fine-tunes. Restart the UI server and reload.'; }
+  } catch { $('#model-note').textContent = 'Could not load Studio models. Restart the UI server and reload.'; }
 }
 async function initialize() {
   await loadModels();

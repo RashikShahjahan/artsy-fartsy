@@ -34,13 +34,17 @@ Candidate decisions default to `manual-review.json` and approved exports to
 `--candidate-review`, and `--accepted-output`. The original data is preserved.
 
 The old `/drawings` URLs open the same Studio in dataset mode; saved `#run=...`
-and `#prompt=...` links remain usable. The standalone inspector CLIs remain
-available for compatibility and reuse the same handlers and validation logic.
+and `#prompt=...` links remain usable. Standalone viewer launchers have been removed; review handlers live inside `ui`.
 Only clicking Generate or Run starts sampling; switching prompt source, model,
 or workspace does not. Dataset runs preserve canonical prompt text, seed,
 dataset hash, and prompt ID. Saved runs are scoped to the dataset revision.
 
-Generate launches the existing `evaluation.draw` CLI. Model calls use credits. No generated code is executed by the web server: the drawing CLI retains its Docker execution boundary. Only one UI job runs at a time. The model dropdown discovers completed fine-tunes from `checkpoints/*/final.json` alongside Qwen3.5-4B. Only sampler checkpoints matching the base model and pinned tokenizer revision are listed. The selected fine-tune is routed to its saved Tinker sampler through a stable `artsy/<training-run>` model ID; samplers load on first use and reuse the bridge’s tokenizer and image processor. Restart the UI server and bridge once after updating to enable discovery and routing. If the running bridge does not advertise a selected fine-tune, the UI asks for a bridge restart and disables generation for that selection. Newly completed compatible training runs then appear on page reload without another bridge restart. Reopened runs retain their recorded model in the dropdown. Generation uses seed 42 automatically. The legacy `ARTSY_TINKER_MODEL_PATH` setting still configures the default model entry, labeled “configured checkpoint” when set.
+Generate launches the existing `evaluation.draw` CLI. Model calls use credits. No generated code is executed by the web server: the drawing CLI retains its Docker execution boundary. Only one UI job runs at a time. The Studio model dropdown contains Qwen3.5 4B, Inkling, and Inkling Small.
+Qwen uses the local native sampling bridge; Inkling models use Tinker's
+OpenAI-compatible endpoint with `TINKER_API_KEY` and 256K context model IDs.
+All three use the same Docker drawing harness. The Inkling models do not require
+the local bridge. Removed models are not restored to the dropdown by saved runs.
+
 
 Runs are stored in `episodes/ui/<id>/`. The UI shows process output while running. After the CLI finishes, it exports the full Inspect logs with resolved attachments to `output/trace.json`. The completed-run timeline pairs each command with its recorded tool results, shows failed renders and inline previews, and distinguishes submission requests from final render validation. Source rewrites show a line diff against the previous successful write, with full commands and source available to expand. Model response timing and token counts appear when recorded. The Transcript view preserves all messages; the Events view searches full event data and loads raw records when expanded. Failed actions open automatically. Downloads include the final PNG, Python source, result JSON, and full trace when present. Refusals and failures are displayed without substituting artwork. Reloading the same browser tab resumes polling its last run. Run URLs include `#run=<id>` so a saved run can be reopened directly.
 

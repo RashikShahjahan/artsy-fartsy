@@ -86,21 +86,26 @@ class DPOTests(unittest.TestCase):
         self.assertEqual(plan["config"]["lora_rank"], 32)
         self.assertIn("tool_calls", pairs[0]["chosen"]["messages"][2])
 
-    def test_mismatched_prompt_seed_image_unknown_record_and_unsafe_records_rejected(self):
+    def test_mismatched_prompt_seed_image_unknown_and_unapproved_records_rejected(self):
         originals = copy.deepcopy((self.records, self.labels))
         for mutation, error in (
                 (lambda: self.records[1]["spec"].update(prompt="Other request"), "same prompt and seed"),
                 (lambda: self.records[1]["spec"].update(seed=2), "same prompt and seed"),
                 (lambda: self.labels[0].update(record_b="0-a"), "label image does not match"),
                 (lambda: self.labels[0].update(record_b="missing"), "recorded trajectory"),
-                (lambda: self.records[1].update(status="review"), "approved drawing"),
-                (lambda: self.records[1]["trace"][0].update(evaluation={"safety": {"harmful": True}}), "unsafe image")):
+                (lambda: self.records[1].update(status="review"), "approved drawing")):
             with self.subTest(error=error):
                 self.records, self.labels = copy.deepcopy(originals)
                 mutation()
                 self.write()
                 with self.assertRaisesRegex(ValueError, error):
                     dpo.load_preferences(self.data, self.trajectories)
+
+    def test_historical_judge_verdict_does_not_override_approved_preferences(self):
+        self.records[1]['trace'][0]['evaluation'] = {'safety': {'harmful': True}}
+        self.write()
+        pairs, _ = dpo.load_preferences(self.data, self.trajectories)
+        self.assertEqual(len(pairs), 1)
 
     def test_prompt_cannot_leak_across_splits_with_different_images(self):
         self.add_pair("validation", "red", "pink")

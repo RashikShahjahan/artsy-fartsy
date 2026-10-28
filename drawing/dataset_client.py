@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 TINKER_MODEL_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
-DEFAULT_DATA_MODEL = "thinkingmachines/Inkling-Small:peft:262144"
+DEFAULT_DATA_MODEL = "thinkingmachines/Inkling:peft:262144"
 
 
 def supports_image_input(model: str, base_url: str) -> bool:

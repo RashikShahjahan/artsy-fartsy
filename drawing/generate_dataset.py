@@ -19,30 +19,19 @@ HELP = """Python dataset generation
   --seed N              Taxonomy/slot seed (default: 42; prompt text is model-generated)
   --input FILE          Custom JSONL specs instead of the built-in curriculum
   --drafts-from DIR     Reuse unmodified model drafts (repeatable)
-  --image-observations     Include PNGs in visual repairs (default with vision judges)
-  --no-image-observations  Disable PNG observations for teacher repairs
   --candidates N        Programs per prompt (default: 2)
   --workers N           Independent prompts processed concurrently, 1–8
   --repairs N           Repairs per candidate, 0–2 (default: 2)
   --max-tokens N        Teacher tokens per request (default: 4096; repair: 8192)
-  --threshold N         Minimum score for EVERY requirement (default: 0.85)
   --prompt-model ID     Prompt-writing LLM (defaults to teacher model)
   --prompt-url URL      Prompt-writing endpoint (defaults to teacher URL)
-  --prompt-review-model ID  Quality reviewer (default: prompt-writing model, separate call)
-  --prompt-review-url URL   Quality-review endpoint (default: prompt-writing endpoint)
   --prompt-batch-size N Concurrent single-prompt LLM requests, 1–8 (default: 8)
   --prompt-max-tokens N Prompt-writer output tokens per request (default: 4096)
   --prompt-retries N    Attempts per individual prompt, 1–5 (default: 5)
   --teacher-model ID    Required for rendering, or set ARTSY_TEACHER_MODEL
   --teacher-url URL     Chat base URL (default: http://127.0.0.1:8080/v1)
-  --correctness-judge-model ID  Vision correctness judge, or ARTSY_CORRECTNESS_JUDGE_MODEL
-  --correctness-judge-url URL   Correctness endpoint (defaults to teacher URL)
-  --safety-judge-model ID       Vision safety judge, or ARTSY_SAFETY_JUDGE_MODEL
-  --safety-judge-url URL        Safety endpoint (defaults to teacher URL)
-  --code-safety-judge-model ID  Source-code monitor (defaults to safety judge model)
-  --code-safety-judge-url URL   Code monitor endpoint (defaults to safety judge URL)
   --timeout-ms N        Per-request deadline (default: 60000)
-  --prompts-only        Generate/review/save prompts with resumable audit; no rendering
+  --prompts-only        Generate/save prompts with resumable audit; no rendering
   --dry-run             Alias for --prompts-only (calls LLMs and saves files)
   --retry-errors        Retry checkpointed infrastructure failures on resume
   --help, -h            Show this help
@@ -51,9 +40,9 @@ Without --count, the default is 35 drawings, 5 benign boundary drawings,
 5 harmful-image refusals, and 5 malicious-code refusals (50 total).
 With --count, omitted slice counts default to zero. Explicit slice flags override.
 
-Credentials: ARTSY_PROMPT_API_KEY, ARTSY_PROMPT_REVIEW_API_KEY, ARTSY_TEACHER_API_KEY, ARTSY_CORRECTNESS_JUDGE_API_KEY, ARTSY_SAFETY_JUDGE_API_KEY, ARTSY_CODE_SAFETY_JUDGE_API_KEY.
-Generation writes every candidate to candidates.jsonl, regardless of judge outcome;
-manually inspect and export accepted.jsonl before SFT. Judge results remain in each record.
+Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY.
+Generation writes every candidate to candidates.jsonl without automated content filtering;
+manually inspect and export accepted.jsonl before SFT.
 Repeating the same command resumes checkpointed prompts and candidate records.
 Generated Python runs locally with your current permissions, as with the drawing CLI.
 The prompt plan is saved before rendering and reused on resume."""
@@ -95,28 +84,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--input")
     parser.add_argument("--workers")
     parser.add_argument("--drafts-from", action="append")
-    parser.add_argument("--image-observations", dest="image_observations", action="store_true")
-    parser.add_argument("--no-image-observations", dest="image_observations", action="store_false")
-    parser.set_defaults(image_observations=None)
     parser.add_argument("--candidates")
     parser.add_argument("--repairs", default="2")
     parser.add_argument("--max-tokens")
-    parser.add_argument("--threshold", default="0.85")
     parser.add_argument("--prompt-model")
     parser.add_argument("--prompt-url")
-    parser.add_argument("--prompt-review-model")
-    parser.add_argument("--prompt-review-url")
     parser.add_argument("--prompt-batch-size", default="8")
     parser.add_argument("--prompt-max-tokens", default="4096")
     parser.add_argument("--prompt-retries", default="5")
     parser.add_argument("--teacher-model")
     parser.add_argument("--teacher-url")
-    parser.add_argument("--correctness-judge-model")
-    parser.add_argument("--correctness-judge-url")
-    parser.add_argument("--safety-judge-model")
-    parser.add_argument("--safety-judge-url")
-    parser.add_argument("--code-safety-judge-model")
-    parser.add_argument("--code-safety-judge-url")
     parser.add_argument("--timeout-ms", default="60000")
     parser.add_argument("--dry-run", "--prompts-only", dest="prompts_only", action="store_true")
     parser.add_argument("--retry-errors", action="store_true")
@@ -143,8 +120,7 @@ async def main(argv: list[str] | None = None) -> int:
     _load_env_file()
     from .dataset_specs import compact_json, sha256, validate_specs
     from .llm_prompts import AUTHOR_SYSTEM, GENERATOR_VERSION, generate_llm_prompts
-    from .dataset_client import chat_client, supports_image_input
-    from .prompt_quality import QUALITY_VERSION, REVIEW_SYSTEM, SAFETY_SYSTEM
+    from .dataset_client import chat_client
     if args.difficulty not in ("mixed", "easy", "medium", "hard", "very-hard"):
         raise ValueError("difficulty must be mixed, easy, medium, hard, or very-hard")
     seed = int(args.seed)
@@ -169,8 +145,6 @@ async def main(argv: list[str] | None = None) -> int:
     base_url = args.teacher_url or os.getenv("ARTSY_TEACHER_URL") or "http://127.0.0.1:8080/v1"
     prompt_model = args.prompt_model or os.getenv("ARTSY_PROMPT_MODEL") or model
     prompt_url = args.prompt_url or os.getenv("ARTSY_PROMPT_URL") or base_url
-    review_model = args.prompt_review_model or os.getenv("ARTSY_PROMPT_REVIEW_MODEL") or prompt_model
-    review_url = args.prompt_review_url or os.getenv("ARTSY_PROMPT_REVIEW_URL") or prompt_url
     prompt_config = {
         "version": GENERATOR_VERSION,
         "count": count, "harmfulCount": harmful_count, "maliciousCodeCount": malicious_code_count,
@@ -178,8 +152,7 @@ async def main(argv: list[str] | None = None) -> int:
         "seed": seed, "model": prompt_model, "baseUrl": prompt_url,
         "batchSize": int(args.prompt_batch_size), "maxTokens": int(args.prompt_max_tokens),
         "retries": int(args.prompt_retries),
-        "reviewModel": review_model, "reviewBaseUrl": review_url, "qualityVersion": QUALITY_VERSION,
-        "authorInstructionsHash": sha256(AUTHOR_SYSTEM), "reviewInstructionsHash": sha256(REVIEW_SYSTEM), "safetyInstructionsHash": sha256(SAFETY_SYSTEM),
+        "authorInstructionsHash": sha256(AUTHOR_SYSTEM),
     }
     prompt_generation = None
     if args.input:
@@ -205,9 +178,6 @@ async def main(argv: list[str] | None = None) -> int:
                 prompt_key = os.getenv("ARTSY_TEACHER_API_KEY") or os.getenv("TEACHER_API_KEY")
             prompt_client = chat_client({"model": prompt_model, "baseUrl": prompt_url,
                 "apiKey": prompt_key, "timeoutMs": int(args.timeout_ms)})
-            review_client = chat_client({"model": review_model, "baseUrl": review_url,
-                "apiKey": os.getenv("ARTSY_PROMPT_REVIEW_API_KEY") or (prompt_key if review_url == prompt_url else None),
-                "timeoutMs": int(args.timeout_ms)})
             completed = {}
             on_record = None
             lock_path = None
@@ -254,13 +224,12 @@ async def main(argv: list[str] | None = None) -> int:
                     malicious_code_count=malicious_code_count, benign_boundary_count=benign_boundary_count,
                     batch_size=prompt_config["batchSize"],
                     max_tokens=prompt_config["maxTokens"], retries=prompt_config["retries"],
-                    completed=completed, on_record=on_record, on_attempt=save_attempt,
-                    reviewer=review_client)
+                    completed=completed, on_record=on_record, on_attempt=save_attempt)
                 specs = generated["specs"]
                 _write_json(plan_path, {"config": prompt_config, "specs": specs,
                     "specsHash": sha256(compact_json(specs)), "batches": generated["batches"],
                     "audit": generated["audit"],
-                    "instructions": {"author": AUTHOR_SYSTEM, "reviewer": REVIEW_SYSTEM, "safetyReviewer": SAFETY_SYSTEM}})
+                    "instructions": {"author": AUTHOR_SYSTEM}})
             finally:
                 if lock_fd is not None:
                     os.close(lock_fd)
@@ -275,56 +244,16 @@ async def main(argv: list[str] | None = None) -> int:
         return 0
     if not model and any(spec.get("kind") != "refusal" for spec in specs):
         raise ValueError("Set --teacher-model or ARTSY_TEACHER_MODEL for drawing solutions")
-    correctness_model = args.correctness_judge_model or os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL")
-    safety_model = args.safety_judge_model or os.getenv("ARTSY_SAFETY_JUDGE_MODEL")
-    if bool(correctness_model) != bool(safety_model):
-        raise ValueError("Set both correctness and safety judge models, or neither")
-    # A judged generation run should let the teacher see the rendered preview
-    # when repairing a visual failure. Judge-free review runs remain supported.
-    image_observations = (bool(correctness_model) and supports_image_input(model or "", base_url)
-                          if args.image_observations is None
-                          else args.image_observations)
-    if image_observations and not supports_image_input(model or "", base_url):
-        raise ValueError("The selected Tinker teacher does not support image observations")
-    if image_observations and not correctness_model:
-        raise ValueError("--image-observations requires both vision judges")
-    correctness_url = args.correctness_judge_url or os.getenv("ARTSY_CORRECTNESS_JUDGE_URL") or base_url
-    safety_url = args.safety_judge_url or os.getenv("ARTSY_SAFETY_JUDGE_URL") or base_url
-    code_safety_model = args.code_safety_judge_model or os.getenv("ARTSY_CODE_SAFETY_JUDGE_MODEL") or safety_model
-    code_safety_url = args.code_safety_judge_url or os.getenv("ARTSY_CODE_SAFETY_JUDGE_URL") or safety_url
-    # Judges use separate calls and role prompts; the same hosted model may
-    # serve teaching and judging (for example Inkling Small on Tinker).
     teacher_key = os.getenv("ARTSY_TEACHER_API_KEY") or os.getenv("TEACHER_API_KEY")
     timeout_ms = int(args.timeout_ms)
     if timeout_ms < 1 or timeout_ms > 300_000:
         raise ValueError("timeout-ms must be an integer from 1 to 300000")
     teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms}) if model else None
-    correctness_judge = chat_client({
-        "model": correctness_model, "baseUrl": correctness_url,
-        "apiKey": os.getenv("ARTSY_CORRECTNESS_JUDGE_API_KEY")
-                  or (teacher_key if correctness_url == base_url else None),
-        "timeoutMs": timeout_ms,
-    }) if correctness_model else None
-    safety_judge = chat_client({
-        "model": safety_model, "baseUrl": safety_url,
-        "apiKey": os.getenv("ARTSY_SAFETY_JUDGE_API_KEY")
-                  or (teacher_key if safety_url == base_url else None),
-        "timeoutMs": timeout_ms,
-    }) if safety_model else None
-    code_safety_judge = chat_client({
-        "model": code_safety_model, "baseUrl": code_safety_url,
-        "apiKey": os.getenv("ARTSY_CODE_SAFETY_JUDGE_API_KEY")
-                  or (os.getenv("ARTSY_SAFETY_JUDGE_API_KEY") if code_safety_url == safety_url else None)
-                  or (teacher_key if code_safety_url == base_url else None),
-        "timeoutMs": timeout_ms,
-    }) if code_safety_model else None
     options = {"output": output, "candidates": int(args.candidates or 2),
         "repairs": int(args.repairs), "maxTokens": int(args.max_tokens or 4096),
-        "threshold": float(args.threshold), "workers": int(args.workers or 1),
-        "retryErrors": args.retry_errors, "imageObservations": image_observations,
+        "workers": int(args.workers or 1),
+        "retryErrors": args.retry_errors,
         "draftsFrom": args.drafts_from, "teacher": teacher,
-        "correctnessJudge": correctness_judge, "safetyJudge": safety_judge,
-        "codeSafetyJudge": code_safety_judge,
         "promptGenerator": prompt_generation,
         "onRecord": lambda record: print(f"{record['id']} {record['status']}: {record['reason']}", file=sys.stderr)}
     from .dataset import generate_dataset

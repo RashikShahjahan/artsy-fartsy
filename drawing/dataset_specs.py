@@ -54,7 +54,6 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list) or not value:
         raise ValueError("Expected at least one prompt specification")
     ids: set[str] = set()
-    prompts: set[str] = set()
     result: list[dict[str, Any]] = []
     for row in value:
         if (not isinstance(row, dict) or not isinstance(row.get("family"), str) or not row["family"].strip()
@@ -66,20 +65,15 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
             ident = sha256(compact_json([row["family"], row["prompt"], row["seed"]]))[:24]
         if not isinstance(ident, str) or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", ident) or ident in ids:
             raise ValueError("Prompt IDs must be unique safe filenames (1–80 characters)")
-        normalized = re.sub(r"\s+", " ", row["prompt"].strip()).lower()
-        if normalized in prompts:
-            raise ValueError("Duplicate prompt in generation plan")
         ids.add(ident)
-        prompts.add(normalized)
         # Legacy split labels are ignored, like other unused input metadata.
         normalized_row = {"id": ident, "family": row["family"], "prompt": row["prompt"],
                           "seed": row["seed"]}
         skills = row.get("skills")
         if skills is not None:
-            if (not isinstance(skills, list) or not 1 <= len(skills) <= 5
-                    or any(not isinstance(skill, str) or skill not in SKILL_TAXONOMY for skill in skills)
-                    or len(set(skills)) != len(skills)):
-                raise ValueError("Skills must be 1-5 unique taxonomy labels")
+            if (not isinstance(skills, list) or not skills
+                    or any(not isinstance(skill, str) or not skill.strip() for skill in skills)):
+                raise ValueError("Skills must be nonempty string labels")
             normalized_row["skills"] = list(skills)
         difficulty = row.get("difficulty")
         if difficulty is not None:
@@ -95,11 +89,8 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
             if kind != "refusal" or row["family"] != "safety_refusal":
                 raise ValueError("Only safety_refusal family may specify kind=refusal")
             refusal = row.get("refusal")
-            if (not isinstance(refusal, str) or not 10 <= len(refusal.strip()) <= 500
-                    or "```" in refusal or any(ord(char) < 32 and char not in "\n\t" for char in refusal)):
-                raise ValueError("Refusal targets must be 10-500 characters of plain text")
-            if skills is not None and "refusal" not in skills:
-                raise ValueError("Refusal skills must include refusal")
+            if not isinstance(refusal, str) or not refusal.strip():
+                raise ValueError("Refusal targets must be nonempty strings")
             normalized_row["kind"] = "refusal"
             normalized_row["refusal"] = refusal.strip()
             if "safetyCategory" in row:
@@ -118,9 +109,6 @@ def validate_specs(value: Any) -> list[dict[str, Any]]:
                 if not isinstance(row[key], str) or not row[key].strip() or len(row[key]) > 300:
                     raise ValueError(f"Invalid prompt metadata: {key}")
                 normalized_row[key] = row[key]
-        if "primarySkill" in row and (row["primarySkill"] not in SKILL_TAXONOMY
-                                      or row["primarySkill"] not in (skills or [])):
-            raise ValueError("Primary skill must be one of the prompt's skill labels")
         if "benchmarkSlice" in row:
             expected = row.get("safetyCategory", "harmful_image") if kind == "refusal" else None
             if (expected and row["benchmarkSlice"] != expected) or (

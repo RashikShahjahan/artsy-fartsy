@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import copy
 import json
 import os
 import re
@@ -12,15 +10,9 @@ from pathlib import Path
 from typing import Any
 
 from .dataset_client import Message, parse_json_reply
-from .judges import (
-    JUDGE_VERSION, JUDGE_MAX_TOKENS, correctness_judge_prompt, safety_judge_prompt,
-    parse_correctness_judgment, parse_safety_judgment,
-    CODE_SAFETY_MAX_TOKENS, code_safety_judge_prompt, parse_code_safety_judgment,
-)
 from .dataset_specs import compact_json, sha256, validate_specs
 
-DATASET_VERSION = "artsy-dataset-v5"
-EVALUATOR_VERSION = JUDGE_VERSION
+DATASET_VERSION = "artsy-dataset-v6"
 
 
 def _default_config() -> dict[str, Any]:
@@ -57,25 +49,6 @@ def _parse_target(text: str) -> dict[str, str]:
     return target
 
 
-async def evaluate(correctness_judge: Any, safety_judge: Any, prompt: str,
-                   image: bytes) -> dict[str, Any]:
-    """Use the same independent image-only judge prompts and settings as Inspect."""
-    image_data = "data:image/png;base64," + base64.b64encode(image).decode("ascii")
-    def messages(text: str) -> list[Message]:
-        return [{"role": "user", "content": [
-            {"type": "text", "text": text},
-            {"type": "image_url", "image_url": {"url": image_data}},
-        ]}]
-
-    correctness, safety = await asyncio.gather(
-        correctness_judge.complete(messages(correctness_judge_prompt(prompt)),
-                                   JUDGE_MAX_TOKENS),
-        safety_judge.complete(messages(safety_judge_prompt(prompt)),
-                              JUDGE_MAX_TOKENS),
-    )
-    return {"correctness": correctness, "safety": safety}
-
-
 def _pixel_hash(png: bytes) -> str:
     """Hash decoded RGBA pixels, matching PNG.sync.read + width/height in TS."""
     import io
@@ -91,8 +64,8 @@ def _refusal_candidate(spec: dict[str, Any], api_doc: str, config: dict[str, Any
         "id": f"{spec['id']}-c0",
         "spec": spec,
         "candidate": 0,
-        "status": "accepted",
-        "reason": "Authored unsafe-request refusal target; human audit recommended",
+        "status": "review",
+        "reason": "Authored refusal target; human review pending",
         "refusal": spec["refusal"],
         "generation": {"initialDraft": "authored_refusal"},
         "refusalSource": "prompt_plan",
@@ -120,20 +93,7 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
         "trace": [], "evaluations": [], "teacher": _provenance(options["teacher"]),
         "runtimeVersion": config["runtimeVersion"], "apiDocHash": sha256(api_doc), "humanReviewed": False,
     }
-    correctness_judge = options.get("correctnessJudge")
-    safety_judge = options.get("safetyJudge")
-    code_safety_judge = options.get("codeSafetyJudge")
-    if correctness_judge:
-        record["evaluator"] = {
-            "version": EVALUATOR_VERSION,
-            "correctness": _provenance(correctness_judge),
-            "safety": _provenance(safety_judge),
-        }
-    if code_safety_judge:
-        record.setdefault("evaluator", {"version": EVALUATOR_VERSION})["codeSafety"] = _provenance(code_safety_judge)
     record["generation"] = {"initialDraft": "natural", "executionFailures": 0}
-    if options.get("imageObservations"):
-        record["generation"].update({"visualFailures": 0, "imageObservations": True, "finalImagePassed": False})
 
     messages: list[Message] = [
         {"role": "system", "content": ("Write an editable Python/ArtCanvas program for the drawing request. Return ONLY JSON with exactly one string field: "
@@ -145,9 +105,6 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
         {"role": "user", "content": compact_json({"prompt": spec["prompt"], "candidate": index})},
     ]
     repairs = options.get("repairs", 2)
-    threshold = options.get("threshold", 0.85)
-    pending_observation = None
-    failed_visual_pixels: set[str] = set()
     reused = None
     for directory in options.get("draftsFrom") or []:
         path = Path(directory) / "records" / f"{spec['id']}-c{index}.json"
@@ -167,32 +124,13 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
             reused = {"completion": first["completion"], "dataset": os.path.relpath(Path(directory).resolve(), output), "attempt": first["attempt"]}
             break
 
-    async def grade(image: bytes, artifact: str | None = None) -> dict[str, Any]:
-        entry: dict[str, Any] = {}
-        if artifact is not None:
-            entry["artifact"] = artifact
-        record["evaluations"].append(entry)
-        try:
-            completions = await evaluate(correctness_judge, safety_judge, spec["prompt"], image)
-            for role, completion in completions.items():
-                entry[role] = {"completion": completion}
-                if completion.get("finishReason") == "length":
-                    raise ValueError(f"{role} judge reply was truncated")
-                parser = parse_correctness_judgment if role == "correctness" else parse_safety_judgment
-                entry[role]["result"] = parser(completion["text"])
-            return {role: entry[role]["result"] for role in ("correctness", "safety")}
-        except Exception as exc:
-            entry["error"] = str(exc)
-            raise
-
     try:
         for attempt in range(repairs + 1):
             completion = reused["completion"] if attempt == 0 and reused else await options["teacher"].complete(messages, options.get("maxTokens", 4096))
             trace: dict[str, Any] = {"attempt": attempt, "completion": completion}
-            if pending_observation: trace["observation"] = pending_observation
             if attempt == 0 and reused:
                 trace["reusedDraft"] = {"dataset": reused["dataset"], "recordId": f"{spec['id']}-c{index}", "attempt": reused["attempt"]}
-            record["trace"].append(trace); pending_observation = None
+            record["trace"].append(trace)
             messages.append({"role": "assistant", "content": completion["text"]})
             if not completion.get("usage"):
                 trace["error"] = "Token usage unavailable; charged maximum requested tokens"
@@ -211,23 +149,9 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                 feedback = await env.refuse(target["refusal"]); trace["feedback"] = feedback
                 if not feedback.get("ok"):
                     record["reason"] = feedback.get("error") or feedback.get("outcome"); break
-                # Inspect assigns no render validity or adherence to refusals.
-                record.update(status="rejected", reason="Refusal has no final drawing to grade")
+                record.update(status="review", reason="Teacher refusal; human review pending")
                 break
             record["code"] = target["code"]
-            if code_safety_judge:
-                review = {"sourceHash": sha256(target["code"])}
-                trace["codeSafety"] = review
-                code_completion = await code_safety_judge.complete([
-                    {"role": "user", "content": code_safety_judge_prompt(spec["prompt"], target["code"])}
-                ], CODE_SAFETY_MAX_TOKENS)
-                review["completion"] = code_completion
-                if code_completion.get("finishReason") == "length":
-                    raise ValueError("Code safety judge reply was truncated")
-                review["result"] = parse_code_safety_judgment(code_completion["text"])
-                if review["result"]["malicious"]:
-                    record["reason"] = "Malicious code blocked before execution: " + review["result"]["reason"]
-                    break
             trace["executedCode"] = target["code"]
             feedback = await env.write_code(target["code"])
             if feedback.get("ok"): feedback = await env.run_code()
@@ -241,31 +165,6 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                 messages.append({"role": "user", "content": f"Execution feedback: {compact_json(feedback)}. Return a complete corrected program as JSON."})
                 if feedback.get("outcome") != "active": break
                 continue
-            if correctness_judge:
-                png = Path(feedback["artifact"]).read_bytes()
-                if options.get("imageObservations"):
-                    trace["renderedPixelHash"] = _pixel_hash(png)
-                evaluation = await grade(png, artifact=os.path.relpath(feedback["artifact"], output))
-                trace["evaluation"] = evaluation
-                if evaluation["safety"]["harmful"]:
-                    record["reason"] = evaluation["safety"]["reason"]
-                    break
-                if evaluation["correctness"]["score"] < threshold:
-                    record["reason"] = evaluation["correctness"]["reason"]
-                    text = ("Inspect the actual rendered image attached below against the original drawing request. Visual evaluation found: "
-                            f"{compact_json(evaluation)}. Correct the visible mistakes and return a complete corrected program as JSON.")
-                    if options.get("imageObservations"):
-                        pixels = trace["renderedPixelHash"]
-                        failed_visual_pixels.add(pixels)
-                        record["generation"]["visualFailures"] += 1
-                        pending_observation = {"image": os.path.relpath(feedback["artifact"], output), "imageHash": sha256(png), "text": text}
-                        messages.append({"role": "user", "content": [{"type": "text", "text": text}, {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(png).decode("ascii")}}]})
-                    else:
-                        messages.append({"role": "user", "content": f"The image failed independent evaluation: {compact_json(evaluation)}. Return a complete corrected program as JSON."})
-                    continue
-                if record.get("generation", {}).get("visualFailures") and not record["generation"].get("executionFailures") and trace.get("renderedPixelHash") in failed_visual_pixels:
-                    record["reason"] = "The approved render is identical to a visually failed preview; no genuine visual repair was established"
-                    break
             feedback = await env.submit()
             if not feedback.get("ok"):
                 trace["feedback"] = feedback; record["reason"] = feedback.get("error") or feedback.get("stderr") or feedback.get("outcome")
@@ -277,22 +176,7 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
             image = Path(feedback["artifact"]).read_bytes(); pixels_hash = _pixel_hash(image)
             record["sourceHash"] = sha256(re.sub(r"\r\n", "\n", target["code"]).strip())
             record["imageHash"] = sha256(image); record["pixelHash"] = pixels_hash
-            if record.get("generation", {}).get("visualFailures") and not record["generation"].get("executionFailures") and pixels_hash in failed_visual_pixels:
-                record["reason"] = "Fresh final pixels match a previously visually failed preview; no genuine visual repair was established"; break
-            if not correctness_judge:
-                record.update(status="review", reason="Executable output; semantic and safety evaluation pending")
-                break
-            final_evaluation = await grade(image, artifact=record["artifacts"]["image"])
-            accepted = final_evaluation["correctness"]["score"] >= threshold and not final_evaluation["safety"]["harmful"]
-            record["status"] = "accepted" if accepted else "rejected"
-            if accepted and not code_safety_judge:
-                record["status"] = "review"
-            if options.get("imageObservations"):
-                record["generation"]["finalImagePassed"] = accepted
-            record["reason"] = (final_evaluation["safety"]["reason"] if final_evaluation["safety"]["harmful"]
-                                else final_evaluation["correctness"]["reason"])
-            if accepted and not code_safety_judge:
-                record["reason"] = "Vision checks passed; code safety evaluation pending"
+            record.update(status="review", reason="Executable output; human review pending")
             break
     except Exception as exc:
         record.update(status="infrastructure_error", reason=str(exc))
@@ -303,17 +187,11 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     specs = validate_specs(options["specs"])
     output = Path(options["output"]).resolve()
     candidates, repairs = options.get("candidates", 2), options.get("repairs", 2)
-    max_tokens, threshold, workers = options.get("maxTokens", 4096), options.get("threshold", 0.85), options.get("workers", 1)
+    max_tokens, workers = options.get("maxTokens", 4096), options.get("workers", 1)
     if type(workers) is not int or not 1 <= workers <= 8: raise ValueError("workers must be an integer from 1 to 8")
-    correctness_judge, safety_judge = options.get("correctnessJudge"), options.get("safetyJudge")
-    if bool(correctness_judge) != bool(safety_judge):
-        raise ValueError("Correctness and safety judges must both be configured, or neither")
-    if options.get("imageObservations") and not correctness_judge:
-        raise ValueError("Image observations require both vision judges")
     if type(candidates) is not int or candidates < 1: raise ValueError("candidates must be a positive integer")
     if type(max_tokens) is not int or max_tokens < 1: raise ValueError("maxTokens must be a positive integer")
     if type(repairs) is not int or not 0 <= repairs <= 2: raise ValueError("repairs must be 0, 1, or 2 (the environment permits three previews)")
-    if type(threshold) not in (float, int) or not 0 <= threshold <= 1: raise ValueError("threshold must be in [0,1]")
     output.mkdir(parents=True, exist_ok=True)
     lock_path = output / ".generation.lock"
     try:
@@ -333,19 +211,12 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         config = options.get("config") or _default_config()
         teacher = _provenance(options["teacher"]) if options.get("teacher") else None
         manifest: dict[str, Any] = {"version": DATASET_VERSION, "promptVersion": "artsy-specs-v1", "specs": specs,
-            "candidates": candidates, "repairs": repairs, "maxTokens": max_tokens, "threshold": threshold,
+            "candidates": candidates, "repairs": repairs, "maxTokens": max_tokens,
             "teacher": teacher,
-            "evaluator": {"version": EVALUATOR_VERSION,
-                          "correctness": _provenance(correctness_judge),
-                          "safety": _provenance(safety_judge)} if correctness_judge else None,
             "config": config, "apiDocHash": sha256(api_doc), "runtimeHashes": runtime_hashes}
-        if options.get("codeSafetyJudge"):
-            manifest["codeSafetyEvaluator"] = {"version": EVALUATOR_VERSION,
-                **_provenance(options["codeSafetyJudge"])}
         if options.get("promptGenerator"):
             manifest["promptVersion"] = options["promptGenerator"]["version"]
             manifest["promptGenerator"] = options["promptGenerator"]
-        if options.get("imageObservations"): manifest["imageObservations"] = True
         if draft_sources: manifest["draftSources"] = draft_sources
         manifest_path = output / "manifest.json"
         if manifest_path.exists():
@@ -388,25 +259,19 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             for group in batch: records.extend(group)
         order = {s["id"]: i for i, s in enumerate(specs)}
         records.sort(key=lambda r: (order[r["spec"]["id"]], r["candidate"]))
-        # Keep every candidate, including failed runs and low-scoring renders.
+        # Keep every candidate, including failed runs and teacher refusals.
         # Human review determines which complete trajectories to export for SFT.
         _write_jsonl_atomic(output / "candidates.jsonl", records)
         completions = []
         for record in records:
             for row in [record, *record.get("previousAttempts", [])]:
                 completions.extend(t["completion"] for t in row.get("trace", []) if not t.get("reusedDraft"))
-                completions.extend(t["codeSafety"]["completion"] for t in row.get("trace", [])
-                                   if t.get("codeSafety", {}).get("completion"))
-                completions.extend(e[role]["completion"] for e in row.get("evaluations", [])
-                                   for role in ("correctness", "safety") if role in e)
         count = len(records)
         summary = {"version": DATASET_VERSION, "prompts": len(specs), "candidates": count,
             "accepted": sum(r["status"] == "accepted" for r in records), "review": sum(r["status"] == "review" for r in records),
-            "refusalPairs": sum(r["spec"].get("kind") == "refusal" and r["status"] == "accepted" for r in records),
+            "refusalPairs": sum(r["spec"].get("kind") == "refusal" and r["status"] in {"accepted", "review"} for r in records),
             "maliciousCodeRefusalPairs": sum(r["spec"].get("safetyCategory") == "malicious_code"
-                                             and r["status"] == "accepted" for r in records),
-            "maliciousCodeBlocked": sum(any(t.get("codeSafety", {}).get("result", {}).get("malicious")
-                                             for t in r.get("trace", [])) for r in records),
+                                             and r["status"] in {"accepted", "review"} for r in records),
             "rejected": sum(r["status"] == "rejected" for r in records), "infrastructureErrors": sum(r["status"] == "infrastructure_error" for r in records),
             "requests": len(completions), "promptTokens": sum(c.get("usage", {}).get("prompt_tokens", 0) for c in completions),
             "completionTokens": sum(c.get("usage", {}).get("completion_tokens", 0) for c in completions),

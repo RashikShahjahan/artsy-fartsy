@@ -13,7 +13,18 @@ from urllib.parse import urlsplit, parse_qs
 from ui.shell import navigation, review_page, empty_page
 from urllib.request import urlopen
 
-from inference.model_catalog import model_catalog
+from drawing.config import MODEL_ID
+from drawing.dataset_client import TINKER_MODEL_URL
+
+INKLING_MODELS = [
+    {"id": "thinkingmachines/Inkling:peft:262144", "label": "Inkling", "direct": True},
+    {"id": "thinkingmachines/Inkling-Small:peft:262144", "label": "Inkling Small", "direct": True},
+]
+
+def model_catalog():
+    return [{"id": MODEL_ID, "label": "Qwen3.5 · 4B", "model_path": None},
+            *[dict(model) for model in INKLING_MODELS]]
+
 from drawing.dataset_specs import validate_specs
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,7 +78,7 @@ def generation_request(body):
             raise ValueError('Drawing prompt not found in this dataset.')
         prompt, seed = spec['prompt'], spec['seed']
         if model not in {item['id'] for item in model_catalog()}:
-            raise ValueError('Choose an available native Tinker model.')
+            raise ValueError('Choose an available Studio model.')
         origin = {'prompt_id': spec['id'], 'dataset_sha256': dataset['sha256'],
                   'dataset_path': dataset['path']}
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
@@ -76,6 +87,8 @@ def generation_request(body):
         raise ValueError('Seed must be a nonnegative safe integer.')
     if not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9_./:-]{1,200}', model):
         raise ValueError('Enter a valid model ID.')
+    if model not in {item['id'] for item in model_catalog()}:
+        raise ValueError('Choose an available Studio model.')
     return {'prompt': prompt.strip(), 'seed': seed, 'model': model, **origin}
 
 
@@ -110,9 +123,12 @@ def run_job(directory, request):
     try:
         with (directory / 'console.txt').open('w') as output:
             environment = os.environ.copy()
-            if request.get('prompt_id'):
-                environment.update(ARTSY_MODEL_URL='http://127.0.0.1:8080/v1',
-                                   ARTSY_MODEL_API_KEY='local-no-auth')
+            direct = request['model'] in {model['id'] for model in INKLING_MODELS}
+            environment['ARTSY_MODEL_URL'] = TINKER_MODEL_URL if direct else 'http://127.0.0.1:8080/v1'
+            if direct:
+                environment.pop('ARTSY_MODEL_API_KEY', None)
+            else:
+                environment['ARTSY_MODEL_API_KEY'] = 'local-no-auth'
             process = subprocess.run(
                 [interpreter(), '-u', '-m', 'ui.worker', str(directory), request['prompt'],
                  str(request['seed']), request['model']], cwd=ROOT, stdout=output,
@@ -169,11 +185,11 @@ class Handler(SimpleHTTPRequestHandler):
                             rendered = rendered.replace('<h1>', switch + '</div><h1>', 1)
                         return rendered
                     if mount == 'review':
-                        from evaluation.dataset_viewer import make_handler
+                        from ui.prompt_review import make_handler
                         handler_type = make_handler(Path(DRAWING_DATASET) if DRAWING_DATASET else None,
                             PROMPT_REVIEW_OUTPUT, not safety_only, PORT, base_path='/review', page_transform=transform)
                     elif CANDIDATE_DATASET:
-                        from drawing.manual_inspector import make_handler
+                        from ui.candidate_review import make_handler
                         handler_type = make_handler(Path(CANDIDATE_DATASET), PORT,
                             CANDIDATE_REVIEW_OUTPUT, ACCEPTED_OUTPUT,
                             base_path='/candidates', page_transform=transform)

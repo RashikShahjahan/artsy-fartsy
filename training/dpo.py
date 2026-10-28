@@ -44,13 +44,6 @@ def load_preferences(data: Path, trajectories: Path):
                 raise ValueError(f"{pair.pair_id}: visual DPO requires approved drawing trajectories")
             if record["imageHash"] != digest(image.read_bytes()):
                 raise ValueError(f"{pair.pair_id}: label image does not match {record_id}")
-            # An accepted record is the dataset's safety/validity approval. Also
-            # reject contradictory recorded safety evidence after manual review.
-            if any((t.get("evaluation") or {}).get("safety", {}).get("harmful") is True
-                   for t in record.get("trace", [])) or any(
-                       e.get("safety", {}).get("result", {}).get("harmful") is True
-                       for e in record.get("evaluations", [])):
-                raise ValueError(f"{pair.pair_id}: unsafe image in drawing trajectory")
             example = by_id[record_id]
             # The system/user prefix includes the original request and preview seed.
             context = json.dumps(example["messages"][:2], sort_keys=True)
