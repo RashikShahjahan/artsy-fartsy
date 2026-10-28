@@ -143,7 +143,7 @@ async def main(argv: list[str] | None = None) -> int:
     _load_env_file()
     from .dataset_specs import compact_json, sha256, validate_specs
     from .llm_prompts import AUTHOR_SYSTEM, GENERATOR_VERSION, generate_llm_prompts
-    from .dataset_client import chat_client
+    from .dataset_client import chat_client, supports_image_input
     from .prompt_quality import QUALITY_VERSION, REVIEW_SYSTEM, SAFETY_SYSTEM
     if args.difficulty not in ("mixed", "easy", "medium", "hard", "very-hard"):
         raise ValueError("difficulty must be mixed, easy, medium, hard, or very-hard")
@@ -281,19 +281,19 @@ async def main(argv: list[str] | None = None) -> int:
         raise ValueError("Set both correctness and safety judge models, or neither")
     # A judged generation run should let the teacher see the rendered preview
     # when repairing a visual failure. Judge-free review runs remain supported.
-    image_observations = (bool(correctness_model) if args.image_observations is None
+    image_observations = (bool(correctness_model) and supports_image_input(model or "", base_url)
+                          if args.image_observations is None
                           else args.image_observations)
+    if image_observations and not supports_image_input(model or "", base_url):
+        raise ValueError("The selected Tinker teacher does not support image observations")
     if image_observations and not correctness_model:
         raise ValueError("--image-observations requires both vision judges")
     correctness_url = args.correctness_judge_url or os.getenv("ARTSY_CORRECTNESS_JUDGE_URL") or base_url
     safety_url = args.safety_judge_url or os.getenv("ARTSY_SAFETY_JUDGE_URL") or base_url
     code_safety_model = args.code_safety_judge_model or os.getenv("ARTSY_CODE_SAFETY_JUDGE_MODEL") or safety_model
     code_safety_url = args.code_safety_judge_url or os.getenv("ARTSY_CODE_SAFETY_JUDGE_URL") or safety_url
-    for role, judge_model, judge_url in (("correctness", correctness_model, correctness_url),
-                                          ("safety", safety_model, safety_url),
-                                          ("code safety", code_safety_model, code_safety_url)):
-        if judge_model and judge_model.removeprefix("openai/") == model and judge_url == base_url:
-            raise ValueError(f"Select an independent {role} judge instead of the teacher model")
+    # Judges use separate calls and role prompts; the same hosted model may
+    # serve teaching and judging (for example GLM on Tinker).
     teacher_key = os.getenv("ARTSY_TEACHER_API_KEY") or os.getenv("TEACHER_API_KEY")
     timeout_ms = int(args.timeout_ms)
     if timeout_ms < 1 or timeout_ms > 300_000:

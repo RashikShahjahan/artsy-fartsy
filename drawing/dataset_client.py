@@ -4,11 +4,31 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
+
+TINKER_MODEL_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
+GLM_MODEL = "zai-org/GLM-5.3-Flash:peft:262144"
+
+
+def supports_image_input(model: str, base_url: str) -> bool:
+    # Tinker's current GLM and DeepSeek sampling profiles reject image chunks.
+    return not (base_url.rstrip("/") == TINKER_MODEL_URL
+                and model.startswith(("zai-org/GLM-5.3", "deepseek-ai/DeepSeek-V4.1")))
+
+
+def endpoint_api_key(base_url: str, configured_key: str | None = None) -> str | None:
+    """Use Tinker credentials only for the Tinker endpoint."""
+    if base_url.rstrip("/") == TINKER_MODEL_URL:
+        key = configured_key or os.getenv("TINKER_API_KEY")
+        if not key:
+            raise ValueError("Tinker inference requires TINKER_API_KEY")
+        return key
+    return configured_key
 
 
 class Message(TypedDict):
@@ -37,6 +57,10 @@ class ChatClient:
             raise RuntimeError("Chat endpoint request timed out") from None
 
     def _complete(self, messages: list[Message], max_tokens: int, temperature: float | None = None) -> Completion:
+        if not supports_image_input(self.model, self.baseUrl) and any(
+                part.get("type") == "image_url" for message in messages
+                if isinstance(message["content"], list) for part in message["content"]):
+            raise ValueError("This Tinker model does not support image input; configure a vision model")
         request_body: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -45,18 +69,30 @@ class ChatClient:
         }
         if temperature is not None:
             request_body["temperature"] = temperature
+        if self.baseUrl == TINKER_MODEL_URL:
+            request_body["separate_reasoning"] = True
+            if self.model.startswith("zai-org/GLM-5.3"):
+                request_body["reasoning_effort"] = "low"
         payload = json.dumps(request_body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         request = urllib.request.Request(f"{self.baseUrl}/chat/completions", payload, headers)
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_ms / 1000) as response:
-                status = getattr(response, "status", 200)
-                body_bytes = response.read()
-        except urllib.error.HTTPError as error:
-            # Provider bodies can echo credentials; never include them in exceptions.
-            raise RuntimeError(f"Chat endpoint returned HTTP {error.code}") from None
+        if self.baseUrl == TINKER_MODEL_URL:
+            # Tinker's edge rejects urllib's default client. Match its SDK's
+            # HTTP transport, retaining the same sanitized error handling.
+            import httpx
+            response = httpx.post(request.full_url, content=payload, headers=headers,
+                                  timeout=self.timeout_ms / 1000)
+            status, body_bytes = response.status_code, response.content
+        else:
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout_ms / 1000) as response:
+                    status = getattr(response, "status", 200)
+                    body_bytes = response.read()
+            except urllib.error.HTTPError as error:
+                # Provider bodies can echo credentials; never include them in exceptions.
+                raise RuntimeError(f"Chat endpoint returned HTTP {error.code}") from None
         if not 200 <= status < 300:
             raise RuntimeError(f"Chat endpoint returned HTTP {status}")
         try:
@@ -65,6 +101,8 @@ class ChatClient:
             raise RuntimeError("Chat endpoint returned invalid JSON") from None
         choices = body.get("choices") if isinstance(body, dict) else None
         choice = choices[0] if isinstance(choices, list) and choices else None
+        if self.baseUrl == TINKER_MODEL_URL and isinstance(choice, dict) and choice.get("finish_reason") == "length":
+            raise RuntimeError("Tinker reply truncated; increase max tokens")
         content = choice.get("message", {}).get("content") if isinstance(choice, dict) else None
         if not isinstance(content, str):
             raise RuntimeError("Chat endpoint returned no text completion")
@@ -120,7 +158,7 @@ def chat_client(options: dict[str, Any]):
     if type(timeout) is not int or timeout < 1:
         raise ValueError("timeoutMs must be a positive integer")
     key = options.get("apiKey")
-    return ChatClient(model=model, baseUrl=base, api_key=key if isinstance(key, str) else None,
+    return ChatClient(model=model, baseUrl=base, api_key=endpoint_api_key(base, key if isinstance(key, str) else None),
                       timeout_ms=timeout)
 
 

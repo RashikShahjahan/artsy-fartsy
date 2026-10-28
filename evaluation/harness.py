@@ -23,6 +23,7 @@ from PIL import Image
 from drawing.config import MODEL_ID
 from drawing.agent_contract import drawing_system_prompt
 from drawing.eval_specs import load_specs
+from drawing.dataset_client import TINKER_MODEL_URL
 from .host_agent import AGENT_NAME, AGENT_VERSION, drawing_agent
 from drawing.judges import (
     JUDGE_MAX_TOKENS, correctness_judge_prompt, safety_judge_prompt,
@@ -36,7 +37,6 @@ DEFAULT_MAX_TOKENS = 8192
 DEFAULT_TOKEN_LIMIT = None
 RUNTIME_VERSION = "artcanvas-v2"
 LOCAL_MODEL_URL = "http://127.0.0.1:8080/v1"
-TINKER_MODEL_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
 sha256 = lambda data: hashlib.sha256(data).hexdigest()
 
 

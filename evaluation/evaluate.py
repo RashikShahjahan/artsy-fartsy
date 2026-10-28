@@ -12,7 +12,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from inspect_ai import eval
 from inspect_ai.log import read_eval_log
-from inspect_ai.model import get_model
+from inspect_ai.model import GenerateConfig, get_model
 
 from .harness import (BASE_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_TOKEN_LIMIT, ROOT, check_native_bridge, drawing_task,
                       load_specs, model_from_env, model_url)
@@ -313,9 +313,13 @@ def main() -> int:
         if not key and url == os.getenv(f"{fallback}_URL"):
             key = os.getenv(f"{fallback}_API_KEY")
         if url:
-            roles[f"{role}_grader"] = get_model("openai/" + model.removeprefix("openai/"),
-                base_url=url, api_key=key or "local-no-auth",
-                responses_api=False)
+            from drawing.dataset_client import endpoint_api_key, TINKER_MODEL_URL
+            tinker_endpoint = url.rstrip("/") == TINKER_MODEL_URL
+            roles[f"{role}_grader"] = get_model(
+                ("openai-api/tinker/" if tinker_endpoint else "openai/") + model.removeprefix("openai/"),
+                base_url=url, api_key=endpoint_api_key(url, key) or "local-no-auth",
+                config=GenerateConfig(reasoning_effort="low") if tinker_endpoint else GenerateConfig(),
+                responses_api=False, **({"stream": False, "extra_body": {"separate_reasoning": True}} if tinker_endpoint else {}))
         else:
             roles[f"{role}_grader"] = get_model(model)
     logs = eval(
