@@ -2,7 +2,7 @@
 
 The shell wrapper is synthesized; the Python source and execution feedback are
 recorded evidence. Each record produces one complete conversation. All converted
-assistant tool-call actions receive loss, including unsuccessful attempts in a
+assistant reasoning and tool-call actions receive loss, including unsuccessful attempts in a
 successful episode. Instructions, tool feedback, and preview images are context.
 Unexecuted malformed teacher replies and judge critiques are omitted.
 """
@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from drawing.config import LIMITS, MODEL_CONTEXT_WINDOW
 from drawing.dataset_client import parse_json_reply
 from drawing.dataset_specs import DIFFICULTIES
 
@@ -22,7 +23,7 @@ TOOLS = [{"type": "function", "function": {
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 INPUT_MODE = "multimodal-previews"
-CONVERSION = "bash-trajectory-human-curated-assistant-only-v10"
+CONVERSION = "bash-trajectory-human-curated-reasoning-assistant-only-v11"
 LOSS_POLICY = "assistant-only"
 
 
@@ -43,11 +44,14 @@ def message(role: str, text: str, **kwargs) -> dict:
     return {"role": role, "content": [{"type": "text", "text": text}], **kwargs}
 
 
-def action(command: str, call_id: str) -> dict:
-    return message("assistant", "", tool_calls=[{
+def action(command: str, call_id: str, reasoning: str | None = None) -> dict:
+    result = message("assistant", "", tool_calls=[{
         "id": call_id, "type": "function",
         "function": {"name": "bash", "arguments": {"command": command}},
     }])
+    if isinstance(reasoning, str) and reasoning.strip():
+        result["content"].insert(0, {"type": "thinking", "thinking": reasoning})
+    return result
 
 
 def write_command(code: str) -> str:
@@ -90,7 +94,7 @@ def system_prompt() -> str:
         "A text answer or a pre-existing PNG does not count. "
         'If you cannot fulfill the request, write only refusal.json containing {"reason":"..."} '
         "with a concise reason and do not create program.py. "
-        "You have at most sixteen model turns and 32768 output tokens.\n\n"
+        f"You have at most {LIMITS['maxCalls']} tool calls and {MODEL_CONTEXT_WINDOW} total context tokens.\n\n"
         + (ROOT / "docs/artcanvas.md").read_text()
         + "\n\nEvery response must contain at least one bash tool call with "
         '{"command":"..."}. Shell state does not persist between commands; files do persist. '
@@ -168,7 +172,7 @@ def convert_record(record: dict, root: Path) -> dict:
             call_id = f"call_{index}_refusal"
             trainable_message_indices.append(len(messages))
             command = "rm -f /workspace/program.py\n" + refusal_command(record["refusal"])
-            messages.append(action(command, call_id))
+            messages.append(action(command, call_id, step["completion"].get("reasoning")))
             messages.append(message("tool", "Return code: 0\nRefusal recorded", tool_call_id=call_id))
             continue
         code = parse_source(step["completion"]["text"])
@@ -180,7 +184,7 @@ def convert_record(record: dict, root: Path) -> dict:
         write_id = f"call_{index}_write"
         call_id = f"call_{index}_preview"
         trainable_message_indices.append(len(messages))
-        messages.append(action(write_command(code), write_id))
+        messages.append(action(write_command(code), write_id, step["completion"].get("reasoning")))
         messages.append(message(
             "tool", "Synthesized protocol acknowledgment: program.py source supplied for writing; "
             "no recorded write execution result.", tool_call_id=write_id))
@@ -204,7 +208,7 @@ def convert_record(record: dict, root: Path) -> dict:
                                                     "imageHash": digest(preview.read_bytes())})
         messages.append(observation_message)
     trainable_message_indices.append(len(messages))
-    messages.append(action(SUBMIT, "call_submit"))
+    messages.append(action(SUBMIT, "call_submit", (record.get("submission") or {}).get("completion", {}).get("reasoning")))
     return {"id": rid, "messages": messages,
             "trainable_message_indices": trainable_message_indices, "tools": TOOLS}
 

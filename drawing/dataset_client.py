@@ -44,6 +44,8 @@ class Message(TypedDict):
 
 class Completion(TypedDict, total=False):
     text: str
+    reasoning: str
+    reasoning_details: list[dict[str, Any]]
     model: str
     usage: dict[str, int]
     finishReason: str
@@ -77,6 +79,8 @@ class ChatClient:
             request_body["max_tokens"] = max_tokens
         if temperature is not None:
             request_body["temperature"] = temperature
+        if self.baseUrl == OPENROUTER_MODEL_URL:
+            request_body["reasoning"] = {"enabled": True, "exclude": False}
         if self.baseUrl == TINKER_MODEL_URL:
             request_body["separate_reasoning"] = True
             if self.model.startswith(("thinkingmachines/Inkling", "zai-org/GLM-5.3")):
@@ -111,7 +115,8 @@ class ChatClient:
         choice = choices[0] if isinstance(choices, list) and choices else None
         if self.baseUrl == TINKER_MODEL_URL and isinstance(choice, dict) and choice.get("finish_reason") == "length":
             raise RuntimeError("Tinker reply truncated; increase max tokens")
-        content = choice.get("message", {}).get("content") if isinstance(choice, dict) else None
+        message = choice.get("message", {}) if isinstance(choice, dict) else {}
+        content = message.get("content")
         if not isinstance(content, str):
             raise RuntimeError("Chat endpoint returned no text completion")
         usage_value = body.get("usage")
@@ -124,8 +129,19 @@ class ChatClient:
             if any(type(n) is not int or n < 0 or n > 9_007_199_254_740_991 for n in (prompt, completion)):
                 raise RuntimeError("Invalid usage counts from chat endpoint")
             usage = {"prompt_tokens": prompt, "completion_tokens": completion}
+        # Keep provider-exposed reasoning separate from the strict JSON answer.
+        # Details can also contain opaque/encrypted blocks: preserve them for
+        # inspection, but only plain text is suitable as an SFT target.
+        reasoning = message.get("reasoning_content") or message.get("reasoning")
+        details = message.get("reasoning_details")
+        if not isinstance(reasoning, str) and isinstance(details, list):
+            reasoning = "\n".join(part["text"] for part in details
+                                  if isinstance(part, dict) and part.get("type") == "reasoning.text"
+                                  and isinstance(part.get("text"), str))
         return {
             "text": content,
+            **({"reasoning": reasoning} if isinstance(reasoning, str) and reasoning.strip() else {}),
+            **({"reasoning_details": details} if isinstance(details, list) and details else {}),
             "model": body.get("model") if isinstance(body.get("model"), str) else self.model,
             **({"usage": usage} if usage is not None else {}),
             "finishReason": choice.get("finish_reason") or "unknown",

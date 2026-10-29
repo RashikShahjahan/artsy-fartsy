@@ -1,7 +1,7 @@
 """Native hosted sampling with model-specific tokenization, vision and tools."""
 import json
 
-RENDERER = "qwen3_5_disable_thinking"
+RENDERER = "qwen3_5_preserve_thinking"
 
 
 class TinkerBackend:
@@ -12,13 +12,13 @@ class TinkerBackend:
         from tinker_cookbook import renderers
 
         self.model_id = model_id
-        self.native_tools = renderer_name.startswith('kimi_')
+        self.native_tools = renderer_name.startswith('kimi_') or renderer_name == RENDERER
         self.sampling_model_id = sampling_model_id or model_id
         self.service = tinker.ServiceClient()
         self.client = self.service.create_sampling_client(
             base_model=self.sampling_model_id,
             **({"model_path": model_path} if model_path else {}))
-        if self.native_tools:
+        if renderer_name.startswith('kimi_'):
             # Use the pinned vendor tokenizer rather than HF's generic backend;
             # Kimi's tool tokens and TypeScript declarations require this class.
             from transformers.dynamic_module_utils import get_class_from_dynamic_module
@@ -126,5 +126,8 @@ class TinkerBackend:
             message, termination = self.renderer.parse_response(tokens)
             if termination.is_clean and not message.get('unparsed_tool_calls'):
                 return message, prompt.length, len(tokens)
+            # The thinking prefill is already in the prompt, so raw sampled
+            # tokens cannot safely go through the legacy visible-text parser.
+            return {'role': 'assistant', 'content': 'Incomplete or malformed model response; retry the action.'}, prompt.length, len(tokens)
         # Keep the bridge's schema-aware parser: code arguments must stay strings.
         return self.tokenizer.decode(tokens, skip_special_tokens=False), prompt.length, len(tokens)

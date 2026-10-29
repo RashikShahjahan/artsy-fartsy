@@ -38,7 +38,7 @@ class FakeTeacher:
                 owner.calls.append(json.loads(self.rfile.read(size)))
                 payload = json.dumps({
                     "model": "fake",
-                    "choices": [{"message": {"content": json.dumps({"code": CODE})}, "finish_reason": "stop"}],
+                    "choices": [{"message": {"content": json.dumps({"code": CODE} if len(owner.calls) == 1 else {"submit": True})}, "finish_reason": "stop"}],
                     "usage": {"prompt_tokens": 100, "completion_tokens": 20},
                 }).encode()
                 self.send_response(200)
@@ -97,15 +97,14 @@ class DrawingCliTests(unittest.TestCase):
             args = (
                 "--output", str(output), "--input", str(prompts), "--candidates", "1",
                 "--teacher-model", "fake", "--teacher-url", teacher.url,
-                "--repairs", "0",
             )
             first = self.run_cli(*args)
             self.assertEqual(first.returncode, 0, first.stderr + first.stdout)
             summary = json.loads(first.stdout)
             self.assertEqual(summary["review"], 1)
             self.assertEqual(summary["accepted"], 0)
-            self.assertEqual(summary["requests"], 1)
-            self.assertEqual(len(teacher.calls), 1)
+            self.assertEqual(summary["requests"], 2)
+            self.assertEqual(len(teacher.calls), 2)
 
             rows = [json.loads(line) for line in (output / "candidates.jsonl").read_text().splitlines()]
             self.assertEqual(len(rows), 1)
@@ -123,8 +122,8 @@ class DrawingCliTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stderr + second.stdout)
             resumed = json.loads(second.stdout)
             self.assertEqual(resumed["review"], 1)
-            self.assertEqual(resumed["requests"], 1)
-            self.assertEqual(len(teacher.calls), 1, "completed candidate should resume without another teacher call")
+            self.assertEqual(resumed["requests"], 2)
+            self.assertEqual(len(teacher.calls), 2, "completed candidate should resume without another teacher call")
 
     def test_help_and_input_dry_run(self):
         help_result = subprocess.run(

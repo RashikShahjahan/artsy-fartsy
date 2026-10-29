@@ -15,3 +15,38 @@ label,.field-label{display:block;font-size:12px;font-weight:550;margin:0 0 9px}i
 .candidates-page .attempt-list{list-style:none;padding:0;margin:16px 0 0;display:grid;gap:10px}.candidates-page .attempt-card{border:1px solid var(--border);border-radius:9px;background:white;overflow:hidden}.candidates-page .attempt-card>summary{display:flex;align-items:center;gap:10px;list-style:none;padding:13px 15px}.candidates-page .attempt-card>summary::-webkit-details-marker{display:none}.candidates-page .attempt-number{flex:none;width:25px;height:25px;line-height:25px;text-align:center;border-radius:50%;background:#e8f0eb;color:#21583f;font-size:12px;font-weight:700}.candidates-page .attempt-title{flex:1;font-weight:650}.candidates-page .attempt-state{font-size:12px;padding:3px 8px;border-radius:20px;background:#edf4ef;color:#28674c}.candidates-page .attempt-card.failed .attempt-state{background:#fbece7;color:#9a4935}.candidates-page .attempt-card.incomplete .attempt-state{background:#f7f0dd;color:#745f28}.candidates-page .attempt-body{border-top:1px solid var(--border);padding:0 15px 15px}.candidates-page .attempt-body h4{font-size:13px;margin:16px 0 6px}.candidates-page .attempt-body pre{margin:6px 0;max-height:360px;font-size:12px;line-height:1.55}.candidates-page .attempt-body .error-text{background:#fbece7;color:#853e2e}.candidates-page .attempt-meta{display:flex;flex-wrap:wrap;gap:5px 14px;font-size:12px;color:var(--muted);margin:10px 0}.candidates-page .attempt-body p{margin:6px 0;line-height:1.5}.candidates-page .attempt-body figure{margin:12px 0}.candidates-page .attempt-body img{max-height:360px}.candidates-page .trace-heading{margin-bottom:3px}.candidates-page .trace-summary{margin-top:0;color:var(--muted);font-size:13px}.candidates-page .trace-empty{color:var(--muted)}.candidates-page .attempt-card details{margin:10px 0}.candidates-page .attempt-card details summary{font-size:12px;color:#316e52}.candidates-page .attempt-card details pre{max-height:260px}
 
 .review-scope{display:flex;gap:8px;margin-bottom:22px}.review-scope a{font-size:12px;padding:8px 12px;text-decoration:none;border-radius:6px;color:var(--muted)}.review-scope a[aria-current=true]{background:#e6eddf;color:var(--accent);font-weight:600}
+
+/* Candidate review involves long prompts, feedback and source records. */
+.candidates-page{font-size:16px;line-height:1.6;--muted:#526257}
+.candidates-page .workspace-header #overview{font-size:15px}
+.candidates-page .workspace-header #status{font-size:14px;overflow-wrap:anywhere}
+.candidates-page .workspace-header .controls{gap:12px}
+.candidates-page .review-workspace article{font-size:16px;line-height:1.65;padding:20px;overflow-wrap:anywhere}
+.candidates-page .meta,.candidates-page small,.candidates-page .attempt-meta,.candidates-page .trace-summary{font-size:14px;line-height:1.65;overflow-wrap:anywhere}
+.candidates-page article .meta{margin-top:10px}
+.candidates-page #detail{padding:26px;overflow-wrap:anywhere}
+.candidates-page #detail h2{font-size:21px;line-height:1.5;font-weight:600;white-space:pre-wrap}
+.candidates-page #detail h3{font-size:18px;line-height:1.5}
+.candidates-page #detail h4{font-size:15px;line-height:1.5;margin-top:20px}
+.candidates-page #detail pre{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:14px;line-height:1.75;color:#27352f;background:#f2f5ef;padding:18px;tab-size:4}
+.candidates-page #detail .error-text{background:#fbece7;color:#853e2e}
+.candidates-page .attempt-body{padding:0 20px 20px}
+.candidates-page .attempt-body p{line-height:1.65}
+.candidates-page .attempt-card>summary{padding:16px 20px;flex-wrap:wrap}
+.candidates-page .attempt-card details summary{font-size:15px;line-height:1.6}
+.candidates-page .attempt-state{font-size:13px}
+.candidates-page #detail>details{margin-top:20px}
+@media(max-width:700px){.candidates-page #detail{padding:20px}.candidates-page #detail h2{font-size:19px}.candidates-page .attempt-body{padding:0 14px 16px}.candidates-page .attempt-card>summary{padding:14px}.candidates-page #detail pre{padding:14px}}
+
+/* Interactive candidate inspector */
+.candidates-page .candidate-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--border);padding-bottom:12px;margin:24px 0 20px}
+.candidates-page .candidate-tabs [aria-selected=true],.candidates-page button[aria-pressed=true]{background:#e6eddf;border-color:#385b43;color:#284b33;font-weight:600}
+.candidates-page button.primary[aria-pressed=true]{background:#294831;color:white}
+.candidates-page .code-view{min-width:0;margin:12px 0}.candidates-page .code-view>.controls{gap:8px;margin-bottom:6px}.candidates-page .code-view button{font-size:13px;padding:5px 10px}
+.candidates-page #detail pre.no-wrap{white-space:pre;overflow-wrap:normal}
+.candidates-page #detail .error-text pre{color:#853e2e;background:#fbece7}
+.candidates-page .field-list{padding-left:14px;border-left:2px solid var(--border);margin:12px 0;min-width:0}.candidates-page .field-list details{padding:8px 0}
+.candidates-page .record-field{display:grid;grid-template-columns:minmax(100px,30%) minmax(0,1fr);gap:12px;padding:10px 0;border-bottom:1px solid #edf0e9}.candidates-page .record-field>span{white-space:pre-wrap}
+.candidates-page .message-card{margin:14px 0;border:1px solid var(--border);border-radius:8px;padding:16px}.candidates-page .message-card>summary{font-weight:600;text-transform:capitalize}
+.candidates-page .image-dialog{width:min(95vw,1200px);max-height:95vh;border:1px solid var(--border);border-radius:12px;padding:20px}.candidates-page .image-dialog::backdrop{background:#182a21b3}.candidates-page .image-dialog img{display:block;max-width:100%;height:auto;margin:16px auto 0}.candidates-page figure>button{display:block;margin-top:8px}
+@media(max-width:700px){.candidates-page .record-field{grid-template-columns:minmax(0,1fr);gap:4px}.candidates-page .candidate-tabs button{flex:1}.candidates-page .field-list{padding-left:8px}}

@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config import LIMITS
+from .config import LIMITS, MODEL_CONTEXT_WINDOW
 from .renderer import LocalRenderer, RUNTIME_VERSION, validate_png
 
 ENVIRONMENT_CONFIG = {
@@ -20,11 +20,10 @@ ENVIRONMENT_CONFIG = {
     "width": 1920,
     "height": 1200,
     "maxCalls": LIMITS["maxCalls"],
-    "maxAttempts": LIMITS["maxAttempts"],
     "renderSeconds": LIMITS["renderSeconds"],
     "episodeMs": LIMITS["episodeMs"],
     "sourceBytes": LIMITS["sourceBytes"],
-    "maxPolicyTokens": 32768,
+    "maxPolicyTokens": MODEL_CONTEXT_WINDOW,
     "pngBytes": 8 * 1024 * 1024,
     "feedbackBytes": 8192,
 }
@@ -184,8 +183,6 @@ class DrawingEnvironment:
     async def _render(self, final: bool) -> dict[str, Any]:
         if not self.source:
             return {"ok": False, "outcome": self.outcome, "error": "Write code first"}
-        if not final and self.attempts >= self.config["maxAttempts"]:
-            return {"ok": False, "outcome": self.outcome, "error": "Preview budget exhausted; submit final code"}
         if not final:
             self.attempts += 1
         directory = self._require_directory()

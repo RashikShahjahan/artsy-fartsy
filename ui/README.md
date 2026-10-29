@@ -18,8 +18,8 @@ Run all three with one command:
 
 ```sh
 python3 -m ui.server \
-  --dataset datasets/validation-v8-50-2026-10-28/prompts.jsonl \
-  --candidates datasets/sft-v1/candidates.jsonl
+  --dataset datasets/sft-v2/prompts.jsonl \
+  --candidates datasets/sft-v2/candidates.jsonl
 ```
 
 Open http://127.0.0.1:4173. No separate inspector servers are needed. Without

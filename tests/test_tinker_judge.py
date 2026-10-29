@@ -31,6 +31,7 @@ class TinkerJudgeTests(unittest.IsolatedAsyncioTestCase):
         client = self.client()
         result = await client.complete([{"role": "user", "content": "Grade"}], 16384, temperature=0)
         self.assertEqual(result["text"], '{"score":0.8,"reason":"Matches"}')
+        self.assertEqual(result["reasoning"], "Check the drawing carefully.")
         self.assertEqual(result["usage"]["prompt_tokens"], 100)
         params = client.sampler.sample_async.call_args.kwargs["sampling_params"]
         self.assertEqual(params.max_tokens, 16384)

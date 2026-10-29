@@ -91,7 +91,7 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
     rel = lambda p: os.path.relpath(str(p), str(output))
     record: dict[str, Any] = {
         "version": DATASET_VERSION, "id": f"{spec['id']}-c{index}", "spec": spec, "candidate": index,
-        "status": "rejected", "reason": "Repair budget exhausted",
+        "status": "rejected", "reason": "Model turn budget exhausted",
         "artifacts": {"directory": rel(episode_dir), "trajectory": rel(episode_dir / "trajectory.jsonl")},
         "trace": [], "evaluations": [], "teacher": _provenance(options["teacher"]),
         "runtimeVersion": config["runtimeVersion"], "apiDocHash": sha256(api_doc), "humanReviewed": False,
@@ -105,11 +105,12 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
           "Return complete revised code to fix visible mistakes, or {\"submit\":true} only after inspecting a satisfactory preview. "
           "Import ArtCanvas from artcanvas, use only its documented drawing API plus math/random, and save output.png in the working directory. "
           "Do not load files, use external images, access the network, or execute commands. Canvas size must be "
-          f"{config['width']}x{config['height']}. The renderer seeds random with {spec['seed']}. Source limit: {config['sourceBytes']} bytes; "
+          f"{config['width']}x{config['height']}. The renderer seeds random with {spec['seed']}. "
+          f"Budget: {config['maxCalls']} environment operations and {config['maxPolicyTokens']} generated tokens. "
+          f"Source limit: {config['sourceBytes']} bytes; "
           f"render timeout: {config['renderSeconds']} seconds.\n\n{api_doc}")},
         {"role": "user", "content": compact_json({"prompt": spec["prompt"], "candidate": index})},
     ]
-    repairs = options.get("repairs", 2)
     reused = None
     for directory in options.get("draftsFrom") or []:
         path = Path(directory) / "records" / f"{spec['id']}-c{index}.json"
@@ -130,10 +131,9 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
             break
 
     last_preview = None
-    code_attempts = 0
     try:
-        # Reserve a response for inspecting and submitting the final preview.
-        for attempt in range(repairs + 2):
+        # Bound malformed replies too; code repairs have no separate attempt cap.
+        for attempt in range(config["maxCalls"]):
             completion = reused["completion"] if attempt == 0 and reused else await options["teacher"].complete(messages, options.get("maxTokens", 4096))
             trace: dict[str, Any] = {"attempt": attempt, "completion": completion}
             if attempt == 0 and reused:
@@ -180,10 +180,6 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
                     record["reason"] = feedback.get("error") or feedback.get("outcome"); break
                 record.update(status="review", reason="Teacher refusal; human review pending")
                 break
-            if code_attempts >= repairs + 1:
-                record["reason"] = "Visual repair budget exhausted without teacher submission"
-                break
-            code_attempts += 1
             last_preview = None
             record["code"] = target["code"]
             trace["executedCode"] = target["code"]
@@ -221,12 +217,11 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             and not supports_image_input(teacher_client.model, teacher_client.baseUrl)):
         raise ValueError("SFT generation requires a teacher model with image input support")
     output = Path(options["output"]).resolve()
-    candidates, repairs = options.get("candidates", 2), options.get("repairs", 2)
+    candidates = options.get("candidates", 2)
     max_tokens, workers = options.get("maxTokens", 4096), options.get("workers", 1)
     if type(workers) is not int or not 1 <= workers <= 8: raise ValueError("workers must be an integer from 1 to 8")
     if type(candidates) is not int or candidates < 1: raise ValueError("candidates must be a positive integer")
     if max_tokens is not None and (type(max_tokens) is not int or max_tokens < 1): raise ValueError("maxTokens must be positive when supplied")
-    if type(repairs) is not int or not 0 <= repairs <= 2: raise ValueError("repairs must be 0, 1, or 2 (the environment permits three previews)")
     output.mkdir(parents=True, exist_ok=True)
     lock_path = output / ".generation.lock"
     try:
@@ -246,7 +241,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         config = options.get("config") or _default_config()
         teacher = _provenance(options["teacher"]) if options.get("teacher") else None
         manifest: dict[str, Any] = {"version": DATASET_VERSION, "promptVersion": "artsy-specs-v1", "specs": specs,
-            "candidates": candidates, "repairs": repairs, "maxTokens": max_tokens,
+            "candidates": candidates, "maxTokens": max_tokens,
             "teacher": teacher,
             "config": config, "apiDocHash": sha256(api_doc), "runtimeHashes": runtime_hashes}
         if options.get("promptGenerator"):

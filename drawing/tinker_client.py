@@ -107,7 +107,12 @@ class TinkerChatClient:
             text = get_text_content(message)
             if not text.strip():
                 raise ValueError("Correctness judge returned no final answer")
+            content = message.get("content", [])
+            reasoning = "\n".join(part["thinking"] for part in content
+                                  if isinstance(part, dict) and part.get("type") == "thinking"
+                                  and isinstance(part.get("thinking"), str)) if isinstance(content, list) else ""
             return {"text": text, "model": self.model, "finishReason": "stop",
+                    **({"reasoning": reasoning} if reasoning.strip() else {}),
                     "usage": {"prompt_tokens": prompt.length,
                               "completion_tokens": len(sequence.tokens)}}
 

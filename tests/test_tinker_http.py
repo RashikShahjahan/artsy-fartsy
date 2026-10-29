@@ -33,6 +33,7 @@ class TinkerHTTPTests(unittest.IsolatedAsyncioTestCase):
             client = chat_client({"model": DEFAULT_DATA_MODEL, "baseUrl": TINKER_MODEL_URL})
             result = await client.complete([{"role": "user", "content": "Check code"}], 8192)
         self.assertEqual(result["text"], '{"ok":true}')
+        self.assertEqual(result["reasoning"], "private reasoning")
         body = json.loads(post.call_args.kwargs["content"])
         self.assertTrue(body["separate_reasoning"])
         self.assertEqual(body["reasoning_effort"], "low")

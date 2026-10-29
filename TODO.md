@@ -1,5 +1,7 @@
 # Artsy: drawing-model training environment
 
+Current local SFT collection: `datasets/sft-v2/` (25 pilot prompts plus 200 new prompts). Older generated datasets, evaluation outputs and local checkpoints were retired. Prior-release results and evidence paths below are historical.
+
 Build an environment that trains a small language model to turn drawing instructions into editable, reproducible Python code, using supervised fine-tuning (SFT) for the agent workflow, direct preference optimization (DPO) for visual quality, and reinforcement learning (RL) for adherence and safety.
 
 The starting point is the compact Cairo-backed `ArtCanvas` interface described in [Can an AI Learn to Draw?](https://blog.rashik.sh/tech/can-ai-learn-to-draw/). The central artifact is the program together with its rendered image.
@@ -38,7 +40,7 @@ Evidence: `checkpoints/sft-v1/training-manifest.json`, `checkpoints/sft-v1/final
 - [x] Isolate Mini SWE evaluation and Cookbook RL rollouts in per-sample Docker containers with no outbound network or host mounts, CPU/memory limits, command timeouts, and a separate fresh final render.
 - [ ] Extend isolation to dataset generation and the standalone renderer; harden Docker with a read-only runtime and explicit process/file-size limits. Import/AST checks are additional validation, not the isolation boundary.
 - [ ] Restrict the drawing program to the documented API and approved utilities. Prevent external image downloads, arbitrary file access, and loading pre-rendered images as a substitute for drawing.
-- [x] Bound episode execution and model interaction. The independent episode core permits three previews; Mini SWE/Cookbook use their configured turn, token, and command limits. Define outcomes for submission, refusal, invalid calls, timeouts, and budget exhaustion.
+- [x] Bound episode execution and model interaction. The independent episode core permits repairs within twenty tool calls; Mini SWE/Cookbook use their configured turn, token, and command limits. Define outcomes for submission, refusal, invalid calls, timeouts, and budget exhaustion.
 - [x] Re-run submitted code in a fresh worker with the same seed. Score that render so stale previews or modified artifacts cannot earn credit.
 - [x] Store the full observable trajectory, source, images, errors, seed, and runtime version. Ensure reset removes all state between episodes.
 - [x] Add local regression tests for cleanup, seeded rendering, timeouts, oversized output, fresh final rendering, and recovery after execution/startup failures.

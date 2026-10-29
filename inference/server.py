@@ -48,7 +48,7 @@ def native_message(message):
 def parse_tools(text, tools=None):
     """Decode Qwen's function/parameter tags without evaluating generated code."""
     text = text.replace("<|im_end|>", "").replace("<|endoftext|>", "")
-    # Thinking is disabled in the prompt, but never execute calls inside reasoning.
+    # Never execute calls inside reasoning.
     if text.lstrip().startswith("<think>"):
         _, end, answer = text.partition("</think>")
         if not end:
@@ -137,6 +137,10 @@ def template_messages(messages, preprocess_image=None):
                 function["arguments"] = json.loads(args) if isinstance(args, str) else args
                 calls.append({**call, "function": function})
             message["tool_calls"] = calls
+        reasoning = message.get("reasoning_content") or message.get("reasoning")
+        if message.get("role") == "assistant" and isinstance(reasoning, str) and reasoning.strip():
+            content = ([{"type": "thinking", "thinking": reasoning}]
+                       + (content if isinstance(content, list) else [{"type": "text", "text": content}]))
         message["content"] = content
         result.append(message)
     return result
@@ -226,6 +230,11 @@ def complete(body: dict):
         # Preserve malformed output for the harness to ask the model to correct.
         text, calls = (raw if isinstance(raw, str) else json.dumps(raw, default=str)), []
     message = {"role": "assistant", "content": text or None}
+    if isinstance(raw, dict) and isinstance(raw.get("content"), list):
+        reasoning = "\n".join(part["thinking"] for part in raw["content"]
+                              if part.get("type") == "thinking" and isinstance(part.get("thinking"), str))
+        if reasoning:
+            message["reasoning_content"] = reasoning
     if calls:
         message["tool_calls"] = calls
     effective_budget = min(budget, context_window - count)

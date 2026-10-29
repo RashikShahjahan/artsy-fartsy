@@ -58,6 +58,10 @@ class ToolProtocolTest(unittest.TestCase):
             sequences=[SimpleNamespace(tokens=[1, 2])])
         self.assertEqual(backend.generate([], None, 8, 100), (message, 12, 2))
         backend.renderer.parse_response.assert_called_once_with([1, 2])
+        backend.renderer.parse_response.return_value = (message, SimpleNamespace(is_clean=False))
+        malformed, _, _ = backend.generate([], None, 8, 100)
+        self.assertNotIn('tool_calls', malformed)
+        self.assertIn('malformed', malformed['content'])
 
     def test_extended_context_selector_is_preserved_when_loading_saved_weights(self):
         from drawing.config import IMAGE_SIZE, MODEL_REVISION, TINKER_SAMPLING_MODEL_ID
@@ -264,6 +268,18 @@ class CompletionTest(unittest.TestCase):
         self.assertEqual(choice["message"]["tool_calls"][0]["function"], {"name": "submit", "arguments": "{}"})
         self.assertEqual(response["usage"], {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5})
         self.assertEqual(models()["data"][0]["id"], "Qwen/Qwen3.5-4B")
+
+    def test_completion_preserves_reasoning_for_transcript_replay(self):
+        from tinker_cookbook.renderers import ToolCall
+        thought = 'The preview looks ready; submit it.'
+        app.state.tinker.generate.return_value = ({'role': 'assistant', 'content': [
+            {'type': 'thinking', 'thinking': thought}, {'type': 'text', 'text': ''}],
+            'tool_calls': [ToolCall(id='submit', function={'name': 'submit', 'arguments': '{}'})]}, 3, 2)
+        message = complete(self.body)['choices'][0]['message']
+        self.assertEqual(message['reasoning_content'], thought)
+        self.assertEqual(message['tool_calls'][0]['function']['name'], 'submit')
+        replay = template_messages([message])[0]
+        self.assertEqual(replay['content'][0], {'type': 'thinking', 'thinking': thought})
 
     def test_completion_honors_modern_and_legacy_token_limits(self):
         for limits, expected in (({"max_tokens": 4096}, 4096),

@@ -67,8 +67,8 @@ class HostAgentTests(unittest.TestCase):
             return next(outputs)
 
         async def execute(cmd, **kwargs):
-            self.assertEqual(cmd[:5], ["timeout", "--signal=KILL", "10", "bash", "-c"])
-            self.assertEqual(kwargs, {"cwd": "/workspace", "timeout": 12, "timeout_retry": False})
+            self.assertEqual(cmd[:5], ["timeout", "--signal=KILL", "65", "bash", "-c"])
+            self.assertEqual(kwargs, {"cwd": "/workspace", "timeout": 67, "timeout_retry": False})
             stdout = ('{"ok":false,"exitCode":1}\n' if cmd[-1] == "preview bad" else "")
             if cmd[-1] == "preview fixed":
                 stdout = ('{"ok":true,"exitCode":0}\n'

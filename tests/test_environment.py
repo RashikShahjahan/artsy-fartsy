@@ -63,6 +63,23 @@ class EnvironmentTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await env.refuse("Unsupported request"))["outcome"], "refused")
             self.assertEqual((await env.run_code())["outcome"], "refused")
 
+    async def test_repairs_use_full_call_budget_without_preview_cap(self):
+        self.assertEqual(ENVIRONMENT_CONFIG['renderSeconds'], 60)
+        self.assertEqual(ENVIRONMENT_CONFIG['maxCalls'], 20)
+        self.assertEqual(ENVIRONMENT_CONFIG['maxPolicyTokens'], 262144)
+        with tempfile.TemporaryDirectory() as root:
+            env = DrawingEnvironment(root, config=CONFIG, renderer=FakeRenderer())
+            await env.reset('circle')
+            for _ in range(9):
+                self.assertTrue((await env.write_code(GOOD))['ok'])
+                self.assertTrue((await env.run_code())['ok'])
+            self.assertEqual((await env.submit())['outcome'], 'submitted')
+            await env.reset('circle')
+            await env.charge_tokens(32768)
+            self.assertTrue((await env.write_code(GOOD))['ok'])
+            await env.charge_tokens(262144 - 32768)
+            self.assertEqual((await env.submit())['outcome'], 'budget_exhausted')
+
     async def test_dimensions_attempt_call_token_and_deadline_limits(self):
         with tempfile.TemporaryDirectory() as root:
             renderer = FakeRenderer()
@@ -71,12 +88,12 @@ class EnvironmentTests(unittest.IsolatedAsyncioTestCase):
             await wrong_size.write_code(GOOD)
             self.assertIn("Expected 1920", (await wrong_size.submit())["error"])
 
-            config = {**CONFIG, "maxAttempts": 1, "maxCalls": 5}
+            config = {**CONFIG, "maxCalls": 5}
             env = DrawingEnvironment(root, config=config, renderer=renderer)
             await env.reset("circle")
             await env.write_code(GOOD)
             await env.run_code()
-            self.assertIn("Preview budget", (await env.run_code())["error"])
+            self.assertTrue((await env.run_code())["ok"])
             self.assertEqual((await env.submit())["outcome"], "submitted")
 
             await env.reset("circle")

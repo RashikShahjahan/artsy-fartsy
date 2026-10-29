@@ -129,9 +129,13 @@ flowchart TD
     N --> O[Use adapter with base model<br/>for trained-checkpoint evaluation]
 ```
 
-The v9 conversion separates each executed attempt into a write-only assistant turn,
+The v11 conversion separates each executed attempt into a write-only assistant turn,
 a clearly synthesized write acknowledgment, a preview-only assistant turn, and its
-recorded execution feedback. Both assistant actions receive loss.
+recorded execution feedback. Both assistant actions receive loss. Provider-exposed
+reasoning is preserved before the corresponding write action, and final preview
+review reasoning is preserved before submission. These reasoning tokens also
+receive loss through the `qwen3_5_preserve_thinking` renderer; opaque provider
+reasoning details remain inspection metadata only.
 Training includes hash-checked preview PNGs in tool observations, so visual repairs
 can condition on the image that preceded the correction. All converted assistant
 actions receive loss, including attempts that failed before recovery. Instructions,

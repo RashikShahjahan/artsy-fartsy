@@ -270,7 +270,7 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
             await sandbox().write_file(f"{work}/render.py", (ROOT / "evaluation/render.py").read_bytes())
             rendered = await sandbox().exec(
                 ["python", f"{work}/render.py", "--seed", str(state.metadata["seed"]),
-                 "--output", f"{work}/submission"], input=source, timeout=20, timeout_retry=False,
+                 "--output", f"{work}/submission"], input=source, timeout=70, timeout_retry=False,
             )
             if not rendered.success:
                 raise RuntimeError(f"Scoring renderer failed: {rendered.stderr[-8192:]}")
@@ -353,7 +353,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=config,
-        turn_limit=16,
+        turn_limit=20,
         token_limit=TokenLimit(tokens=token_limit, type=token_limit_type) if token_limit is not None else None,
         time_limit=1000,
         fail_on_error=False,

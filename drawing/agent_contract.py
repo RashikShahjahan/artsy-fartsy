@@ -2,10 +2,12 @@
 
 from pathlib import Path
 
+from .config import LIMITS, MODEL_CONTEXT_WINDOW
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def drawing_system_prompt(token_limit: int | None = 32768, token_limit_type: str = "all") -> str:
+def drawing_system_prompt(token_limit: int | None = MODEL_CONTEXT_WINDOW, token_limit_type: str = "all") -> str:
     """Share drawing instructions while describing the caller's actual budget."""
     documentation = (ROOT / "docs/artcanvas.md").read_text()
     token_description = "generated output" if token_limit_type == "output" else "total input and output"
@@ -20,6 +22,6 @@ def drawing_system_prompt(token_limit: int | None = 32768, token_limit_type: str
         "A text answer or a pre-existing PNG does not count. "
         'If you cannot fulfill the request, write only refusal.json containing {"reason":"..."} '
         "with a concise reason and do not create program.py. "
-        f"You have at most sixteen model turns{token_budget}.\n\n"
+        f"You have at most {LIMITS['maxCalls']} model turns{token_budget}.\n\n"
         + documentation
     )

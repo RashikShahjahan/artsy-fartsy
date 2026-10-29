@@ -332,6 +332,24 @@ class NativeContextTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(calls, [(length, expected)])
 
 
+class ToolBudgetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_training_stops_at_twenty_calls_and_blocks_more_commands(self):
+        from training.cookbook_env import DockerSession
+        with tempfile.TemporaryDirectory() as root:
+            session = DockerSession({'prompt': 'Draw a disk', 'seed': 1}, Path(root), {})
+            session.container = 'fake-container'
+            reply = SimpleNamespace(stdout=b'', stderr=b'', returncode=0)
+            with patch('training.cookbook_env._docker', new=AsyncMock(return_value=reply)) as docker:
+                for index in range(20):
+                    _, done = await session.execute('true')
+                    self.assertEqual(done, index == 19)
+                observation, done = await session.execute('true')
+                self.assertTrue(done)
+                self.assertIn('budget exhausted', observation)
+                self.assertEqual(docker.await_count, 20)
+                self.assertFalse(session.submitted)
+
+
 class RolloutPromptTests(unittest.TestCase):
     def test_initial_messages_describe_turn_limit_without_aggregate_token_limit(self):
         from training.cookbook_env import initial_messages
@@ -339,7 +357,7 @@ class RolloutPromptTests(unittest.TestCase):
         with patch('training.cookbook_env.encoder', return_value=SimpleNamespace(renderer=renderer)):
             messages = initial_messages({'prompt': 'Draw a disk', 'seed': 1}, [])
         content = messages[-1]['content']
-        self.assertIn('sixteen model turns', content)
+        self.assertIn('20 model turns', content)
         self.assertNotIn('32768', content)
         self.assertNotIn('total input and output', content)
 

@@ -5,11 +5,11 @@ agent:
     Shell state does not persist between commands; files do persist.
     Finish by calling bash with exactly: echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT
   instance_template: "{{task}}"
-  step_limit: 16
+  step_limit: 20
   cost_limit: 0
   mode: yolo
 environment:
-  timeout: 10
+  timeout: 65  # Allow the 60-second renderer time to clean up and return feedback.
 model:
   cost_tracking: ignore_errors
   multimodal_regex: '(?m)^<MSWEA_MULTIMODAL_CONTENT><CONTENT_TYPE>(image_url)</CONTENT_TYPE>(data:image/png;base64,[A-Za-z0-9+/]+={0,2})</MSWEA_MULTIMODAL_CONTENT>$'

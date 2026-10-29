@@ -21,7 +21,6 @@ HELP = """Python dataset generation
   --drafts-from DIR     Reuse unmodified model drafts (repeatable)
   --candidates N        Programs per prompt (default: 2)
   --workers N           Independent prompts processed concurrently, 1–8
-  --repairs N           Repairs per candidate, 0–2 (default: 2)
   --max-tokens N        Optional teacher output-token limit (default: no limit)
   --prompt-model ID     Prompt-writing LLM (defaults to teacher model)
   --prompt-url URL      Prompt-writing endpoint (defaults to teacher URL)
@@ -85,7 +84,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers")
     parser.add_argument("--drafts-from", action="append")
     parser.add_argument("--candidates")
-    parser.add_argument("--repairs", default="2")
     parser.add_argument("--max-tokens")
     parser.add_argument("--prompt-model")
     parser.add_argument("--prompt-url")
@@ -256,7 +254,7 @@ async def main(argv: list[str] | None = None) -> int:
         raise ValueError("timeout-ms must be an integer from 1 to 300000")
     teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms}) if model else None
     options = {"output": output, "candidates": int(args.candidates or 2),
-        "repairs": int(args.repairs), "maxTokens": int(args.max_tokens) if args.max_tokens is not None else None,
+        "maxTokens": int(args.max_tokens) if args.max_tokens is not None else None,
         "workers": int(args.workers or 1),
         "retryErrors": args.retry_errors,
         "draftsFrom": args.drafts_from, "teacher": teacher,

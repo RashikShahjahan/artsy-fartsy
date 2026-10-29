@@ -72,24 +72,80 @@ function render() {
   if($('automatic').value && x.status!==$('automatic').value)continue;
   const d=(reviews[x.id] || {}).decision || 'pending';
   if($('decision').value && d!==$('decision').value)continue;
-  const c=node('article');if(current===x.id)c.className='selected';
+  const c=node('article');if(current===x.id)c.className='selected';c.tabIndex=0;c.setAttribute('role','button');c.setAttribute('aria-label',x.prompt);c.setAttribute('aria-pressed',String(current===x.id));c.onkeydown=e=>{if(e.key==='Enter' || e.key===' '){e.preventDefault();openRecord(x.id);}};
   c.append(node('div',x.prompt),node('div',x.id+' · '+x.family+' · generated: '+x.status+' · manual: '+d,'meta'));
   if(x.score!==null)c.append(node('div','Judge score: '+x.score,'meta'));
   c.onclick=()=>openRecord(x.id);$('items').append(c);
  }
  status();
 }
+function button(text, action) {
+ const b=node('button',text);b.type='button';b.onclick=action;return b;
+}
+function codeView(value) {
+ const text=typeof value==='string'?value:JSON.stringify(value,null,2);
+ const wrap=node('div',undefined,'code-view'), bar=node('div',undefined,'controls'), pre=node('pre',text);
+ const toggle=button('Wrap lines',()=>{const on=toggle.getAttribute('aria-pressed')!=='true';toggle.setAttribute('aria-pressed',String(on));pre.classList.toggle('no-wrap',!on);});
+ toggle.setAttribute('aria-pressed','true');
+ const copy=button('Copy',async()=>{try{await navigator.clipboard.writeText(text);copy.textContent='Copied';}catch{copy.textContent='Copy unavailable';}});
+ bar.append(toggle,copy);wrap.append(bar,pre);return wrap;
+}
+function valueView(value) {
+ if(value===null || typeof value!=='object')return node('p',String(value),'field-value');
+ const list=node('div',undefined,'field-list');
+ for(const [key,val] of Object.entries(value)) {
+  if(val!==null && typeof val==='object') {
+   const d=node('details'), summary=node('summary',key+' · '+Object.keys(val).length+' '+(Array.isArray(val)?'items':'fields'));
+   let loaded=false;d.append(summary);d.ontoggle=()=>{if(d.open && !loaded){loaded=true;d.append(valueView(val));}};list.append(d);
+  } else {
+   const field=node('div',undefined,'record-field');field.append(node('strong',key),typeof val==='string' && val.includes('\\n')?codeView(val):node('span',String(val)));list.append(field);
+  }
+ }
+ return list;
+}
 function section(title, value) {
- const d=node('details');const sum=node('summary',title);d.append(sum,node('pre',typeof value==='string'?value:JSON.stringify(value,null,2)));return d;
+ const d=node('details');d.append(node('summary',title),valueView(value));return d;
+}
+function tabs(entries) {
+ const wrap=node('div'), bar=node('div',undefined,'candidate-tabs');bar.setAttribute('role','tablist');bar.setAttribute('aria-label','Candidate details');
+ const buttons=[], panels=[];
+ entries.forEach(([title,content],i)=>{
+  const panel=node('section');panel.id='candidate-panel-'+i;panel.setAttribute('role','tabpanel');panel.setAttribute('aria-labelledby','candidate-tab-'+i);panel.tabIndex=0;panel.append(content);
+  const tab=button(title,()=>select(i));tab.id='candidate-tab-'+i;tab.setAttribute('role','tab');tab.setAttribute('aria-controls',panel.id);
+  tab.onkeydown=e=>{let next;if(e.key==='ArrowRight')next=(i+1)%entries.length;if(e.key==='ArrowLeft')next=(i+entries.length-1)%entries.length;if(e.key==='Home')next=0;if(e.key==='End')next=entries.length-1;if(next!==undefined){e.preventDefault();select(next);buttons[next].focus();}};
+  buttons.push(tab);panels.push(panel);bar.append(tab);
+ });
+ function select(index){buttons.forEach((b,i)=>{b.setAttribute('aria-selected',String(i===index));b.tabIndex=i===index?0:-1;panels[i].hidden=i!==index;});}
+ wrap.append(bar,...panels);select(0);return wrap;
+}
+function conversationView(example) {
+ const wrap=node('div');
+ if(!example){wrap.append(node('p','No converted conversation is available for this candidate.'));return wrap;}
+ const label=node('label','Show messages '), filter=node('select');filter.setAttribute('aria-label','Filter conversation by role');
+ for(const role of ['all',...new Set(example.messages.map(m=>m.role))]){const option=node('option',role);option.value=role;filter.append(option);}label.append(filter);
+ const list=node('div');
+ function renderMessages(){list.replaceChildren();example.messages.forEach((message,index)=>{
+  if(filter.value!=='all' && filter.value!==message.role)return;
+  const card=node('details',undefined,'message-card');card.open=message.role!=='system';
+  card.append(node('summary',(index+1)+'. '+message.role+(example.trainable_message_indices?.includes(index)?' · supervised action':'')));
+  if(typeof message.content==='string')card.append(codeView(message.content));
+  else for(const part of message.content || []){if(part.type==='text' && part.text)card.append(codeView(part.text));else if(part.type!=='text')card.append(valueView(part));}
+  for(const call of message.tool_calls || []){card.append(node('h4','Tool call: '+(call.function?.name || call.id)),valueView(call.function?.arguments || call));}
+  if(message.tool_call_id)card.append(node('p','Response to '+message.tool_call_id,'meta'));
+  list.append(card);
+ });}
+ filter.onchange=renderMessages;wrap.append(label,list,section('Conversation metadata',Object.fromEntries(Object.entries(example).filter(([key])=>key!=='messages'))));renderMessages();return wrap;
 }
 function imageSection(images) {
  const group=node('div');
- for(const image of images) {const d=node('figure');d.append(node('figcaption',image.label,'meta'));const i=document.createElement('img');i.src=image.url;i.alt=image.label;i.loading='lazy';d.append(i);group.append(d);}
+ for(const image of images) {const d=node('figure');d.append(node('figcaption',image.label,'meta'));const i=document.createElement('img');i.src=image.url;i.alt=image.label;i.loading='lazy';
+ const zoom=button('Enlarge '+image.label,()=>{const dialog=node('dialog',undefined,'image-dialog'), full=document.createElement('img');full.src=image.url;full.alt=image.label;dialog.setAttribute('aria-label',image.label);dialog.append(button('Close preview',()=>dialog.close()),full);dialog.onclose=()=>{dialog.remove();zoom.focus();};document.body.append(dialog);dialog.showModal();});
+ d.append(i,zoom);group.append(d);}
  return group;
 }
 function appendText(parent, heading, value, cls) {
  if(value===undefined || value===null || value==='')return;
- parent.append(node('h4',heading),node('pre',typeof value==='string'?value:JSON.stringify(value,null,2),cls));
+ const content=codeView(value);if(cls)content.classList.add(cls);parent.append(node('h4',heading),content);
 }
 function appendReason(parent, heading, value) {
  if(!value)return;
@@ -102,7 +158,9 @@ function attemptTimeline(record, images) {
  const rendered=trace.filter(step=>step.feedback?.ok).length;
  const failed=trace.filter(step=>step.feedback?.ok===false || step.error).length;
  wrap.append(node('p',trace.length+' attempt'+(trace.length===1?'':'s')+' · '+rendered+' rendered · '+failed+' with errors','trace-summary'));
- const list=node('ol');list.className='attempt-list';
+ const controls=node('div',undefined,'controls'), list=node('ol');list.className='attempt-list';
+ controls.append(button('Expand all attempts',()=>list.querySelectorAll('.attempt-card').forEach(c=>c.open=true)),button('Collapse all attempts',()=>list.querySelectorAll('.attempt-card').forEach(c=>c.open=false)));
+ const errors=button('Errors only',()=>{const active=errors.getAttribute('aria-pressed')!=='true';errors.setAttribute('aria-pressed',String(active));list.querySelectorAll(':scope > li').forEach(li=>li.hidden=active && !li.querySelector('.failed'));});errors.setAttribute('aria-pressed','false');controls.append(errors);wrap.append(controls);
  trace.forEach((step,index)=>{
   const feedback=step.feedback || null, completion=step.completion || {};
   const state=feedback?.ok===false || step.error?'failed':feedback?.ok===true?'success':'incomplete';
@@ -131,8 +189,8 @@ function attemptTimeline(record, images) {
    appendReason(body,'Safety:',evaluation.safety?.reason);
   }
   appendText(body,'Tool output',feedback?.stdout);
-  if(completion.text){const raw=node('details');raw.append(node('summary','Full model response'),node('pre',completion.text));body.append(raw);}
-  const raw=node('details');raw.append(node('summary','Raw attempt record'),node('pre',JSON.stringify(step,null,2)));body.append(raw);
+  if(completion.text){const raw=node('details');raw.append(node('summary','Full model response'),codeView(completion.text));body.append(raw);}
+  body.append(section('Inspect attempt fields',step));
   card.append(body);item.append(card);list.append(item);
  });
  wrap.append(list);return wrap;
@@ -148,22 +206,24 @@ async function openRecord(id) {
   box.append(node('p','Candidate '+id+' · '+x.record.status+' · '+(x.record.reason || ''),'meta'));
   const bar=node('div');bar.className='controls';
   for(const choice of ['approved','rejected','pending']) {
-   const b=node('button',choice);if(choice==='approved')b.className='primary';
+   const b=node('button',choice);if(choice==='approved')b.className='primary';b.setAttribute('aria-pressed',String(d.decision===choice));
    b.onclick=()=>{decision(id,choice);openRecord(id);};bar.append(b);
   }
   box.append(bar);
-  const notes=node('textarea');notes.placeholder='Manual review notes';notes.value=d.notes || '';
+  const notes=node('textarea');notes.placeholder='Manual review notes';notes.setAttribute('aria-label','Manual review notes');notes.value=d.notes || '';
   notes.oninput=()=>{reviews[id]={decision:(reviews[id] || {}).decision || 'pending',notes:notes.value};changed=true;status();};
   box.append(notes);
+  const overview=node('div');
   const finalImage=x.images.filter(image=>image.label==='Final rendered image');
-  if(finalImage.length)box.append(node('h3','Final image'),imageSection(finalImage));
-  box.append(attemptTimeline(x.record,x.images));
+  if(finalImage.length)overview.append(node('h3','Final image'),imageSection(finalImage));
+
   const otherImages=x.images.filter(image=>!image.label.startsWith('Attempt ') && image.label!=='Final rendered image');
-  if(otherImages.length)box.append(node('h3','Other judge renders'),imageSection(otherImages));
-  if(x.conversionError)box.append(node('p','Not SFT-convertible: '+x.conversionError,'bad'));
-  else box.append(node('p','Structurally SFT-convertible after manual approval.','good'));
-  if(x.example)box.append(section('Complete SFT conversation (messages, tool calls, image references, loss indices)',x.example));
-  box.append(section('Raw generation record (all attempts, judge feedback, code, metadata)',x.record));
+  if(otherImages.length)overview.append(node('h3','Other judge renders'),imageSection(otherImages));
+  if(x.conversionError)overview.append(node('p','Not SFT-convertible: '+x.conversionError,'bad'));
+  else overview.append(node('p','Structurally SFT-convertible after manual approval.','good'));
+  if(x.record.refusal)overview.append(node('h3','Refusal'),node('p',x.record.refusal));
+  const fields=node('div'), raw=node('details');raw.append(node('summary','Raw JSON'),codeView(x.record));fields.append(valueView(x.record),raw);
+  box.append(tabs([['Overview',overview],['Attempts',attemptTimeline(x.record,x.images)],['Conversation',conversationView(x.example)],['Record fields',fields]]));
  } catch(e) {if(current===id)$('detail').replaceChildren(node('p',e.message,'bad'));}
 }
 async function post(path, body) {

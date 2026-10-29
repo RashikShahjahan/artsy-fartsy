@@ -133,7 +133,7 @@ class EvaluationTest(unittest.TestCase):
             prompts = {json.loads(line)["spec"]["prompt"] for line in training.read_text().splitlines()}
             self.assertFalse(prompts.intersection(row["prompt"] for row in specs))
         task = drawing_task(specs, "/tmp/artsy-test-artifacts")
-        self.assertEqual(task.turn_limit, 16)
+        self.assertEqual(task.turn_limit, 20)
         self.assertIsNone(task.token_limit)
         self.assertIsNone(task.token_limit_type)
         self.assertEqual(task.config.max_tokens, 8192)
@@ -154,7 +154,7 @@ class EvaluationTest(unittest.TestCase):
 
     def test_unknown_model_costs_are_disabled_and_mini_config_loads(self):
         config = yaml.safe_load((ROOT / "evaluation/mini.yaml").read_text())
-        self.assertEqual(config["agent"]["step_limit"], 16)
+        self.assertEqual(config["agent"]["step_limit"], 20)
         self.assertEqual(config["model"]["cost_tracking"], "ignore_errors")
 
     def test_model_uses_the_local_chat_endpoint_without_global_key_mutation(self):

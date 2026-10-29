@@ -185,7 +185,7 @@ def parser():
     p.add_argument("--batch-size", type=int, default=4, help="Preference pairs per update")
     p.add_argument("--learning-rate", type=float, default=1e-5)
     p.add_argument("--beta", type=float, default=0.1)
-    p.add_argument("--max-length", type=int, default=32768)
+    p.add_argument("--max-length", type=int, default=MODEL_CONTEXT_WINDOW)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--save-every", type=int, default=20)
     p.add_argument("--resume-from-checkpoint", type=Path)

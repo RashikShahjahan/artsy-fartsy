@@ -5,13 +5,20 @@ Qwen/Qwen3.5-4B → Mini SWE Agent → Python/ArtCanvas → PNG + editable sourc
 Includes the Qwen model adapter, a versioned drawing API, a model-independent
 episode environment, an Inspect SWE write → run → fix → submit loop, and a base-model evaluation script.
 
+The active SFT collection is `datasets/sft-v2/`: the 25-prompt pilot plus 200 new prompts,
+with complete batch provenance and artifacts. `candidates.jsonl` retains all outcomes;
+`training-ready.jsonl` contains structurally valid trajectories with their review status
+preserved. Review and export `accepted.jsonl` in the UI before training. Generated data,
+evaluation outputs and checkpoints remain local and Git-ignored. Older generated
+artifacts have been retired; references to earlier releases below describe historical runs.
+
 ## Unified UI
 
 Launch Studio, prompt and safety review, and SFT candidate inspection in one app:
 
 ```sh
-python3 -m ui.server --dataset datasets/validation-v8-50-2026-10-28/prompts.jsonl \
-  --candidates datasets/sft-v1/candidates.jsonl
+python3 -m ui.server --dataset datasets/sft-v2/prompts.jsonl \
+  --candidates datasets/sft-v2/candidates.jsonl
 ```
 
 Open http://127.0.0.1:4173. Studio shares one generation workspace for freeform
@@ -66,7 +73,7 @@ That server uses Tinker's **native `SamplingClient`** for hosted inference while
 performing tokenization and image processing locally, requiring public Hugging
 Face model metadata (not a local model weight download). It translates Qwen's
 tool-call tags into OpenAI tool calls and uses
-the `qwen3_5_disable_thinking` renderer. It accepts inline base64 PNG previews
+the `qwen3_5_preserve_thinking` renderer. It accepts inline base64 PNG previews
 and limits their visual-token resolution; the original preview is kept intact.
 Set `ARTSY_TINKER_MODEL_PATH` in `.env` to serve a `tinker://` sampler checkpoint.
 The local bridge is a development server, not a public API service.
@@ -107,7 +114,7 @@ The container has no outbound network or host mounts. Inspect proxies model call
 through the host to the native Tinker bridge (or another configured endpoint).
 Inspect and its OpenAI SDK run in the host environment; Mini SWE and LiteLLM run
 in the container, keeping their SDK dependency requirements separate.
-`evaluation/mini.yaml` sets sixteen model turns, ten-second command timeouts,
+`evaluation/mini.yaml` sets twenty model turns, 65-second command timeouts (60-second renders plus cleanup),
 8,192 tokens per response, and disabled local-model cost lookup. Inspect sets
 a 1,000-second sample limit and no aggregate token budget by default.
 Use `--max-tokens` to change the per-response output cap. `--token-limit N`
@@ -127,8 +134,8 @@ Set `ARTSY_PYTHON` to select the Python interpreter (defaults to `.venv/bin/pyth
 when present, otherwise `python3`). Install Cairo with `sudo apt-get install
 libcairo2 fonts-dejavu-core` on Debian/Ubuntu, or `brew install cairo` on macOS.
 
-The separate `DrawingEnvironment` limits in `drawing/environment.py` include three preview
-renders, sixteen operations, a five-minute deadline, 64 KiB source, and 8 MiB PNG.
+The separate `DrawingEnvironment` limits in `drawing/environment.py` include unlimited preview
+repairs within twenty operations, a five-minute deadline, 64 KiB source, and 8 MiB PNG.
 Rendering success establishes code validity, not instruction accuracy or image
 safety. The dataset generator below supports teacher generation and an independent
 visual evaluator. Reward calibration and held-out validation remain checklist items; SFT, visual preference DPO, and RL training adapters are implemented.
@@ -162,8 +169,8 @@ async def render():
 asyncio.run(render())
 ```
 
-`ENVIRONMENT_CONFIG` versions the defaults: 1920×1200 output, three previews,
-sixteen operations, a five-minute episode deadline, 32,768 generated tokens,
+`ENVIRONMENT_CONFIG` versions the defaults: 1920×1200 output, no separate preview cap,
+twenty operations, a five-minute episode deadline, 262,144 generated tokens,
 64 KiB source, and 8 MiB PNG. Supply a config copy to choose dimensions or budgets.
 Training adapters report generated tokens through `charge_tokens(count)`; the core
 does not tokenize model output. The Mini SWE adapter has its own model-turn/token
@@ -354,8 +361,9 @@ setup and supply `OPENROUTER_API_KEY` for dataset generation and
 Benchmark correctness, image safety, code safety, and the default pairwise
 preference evaluator use `thinkingmachines/Inkling:peft:262144` at
 `https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1`.
-The HTTP client separates reasoning from the final answer and uses low reasoning
-effort for Inkling. Judge roles make separate calls with their own prompts.
+The HTTP client saves provider-exposed reasoning separately from the final answer
+and uses low reasoning effort for Inkling. OpenRouter requests reasoning with its
+text included in the response. Judge roles make separate calls with their own prompts.
 
 ```sh
 # Use GPT-6 Luna through OpenRouter (requires OPENROUTER_API_KEY).
@@ -439,12 +447,19 @@ for human review. Only parsing, execution budgets, PNG validity and artifact int
 checks remain. After each successful preview render, the drawing teacher receives the actual PNG
 in its conversation and can revise its Python to fix visible mistakes. It must return
 `{"submit":true}` after inspecting a satisfactory preview before the final fresh render.
-`--repairs` bounds code revisions; an additional response is reserved for preview
-confirmation. Preview paths and hashes, code revisions, and the submission response
-are recorded for inspection and SFT conversion. Vision-capable teacher models are
+Code revisions have no separate repair cap; the 20-operation budget covers writes, previews and final submission.
+There is also a 20-response cap for malformed teacher replies. Preview paths and hashes, code revisions, the submission response,
+and any provider-exposed reasoning are recorded for inspection and SFT conversion.
+SFT supervises each attempt's reasoning before its write action and the final
+review reasoning before submission; synthesized preview calls add no reasoning.
+Opaque reasoning details are saved for inspection but are not training targets.
+Providers that return no reasoning still yield valid code-only examples. Previously
+discarded reasoning cannot be recovered from existing records. Training and default
+Qwen3.5 inference use `qwen3_5_preserve_thinking`, retaining earlier reasoning turns.
+Vision-capable teacher models are
 required for drawing candidates. Use a new output directory for v7 generation;
 existing candidates are not retroactively reviewed by the teacher.
-Code that fails to execute can still be repaired within `--repairs`.
+Code that fails to execute can be repaired within the episode budgets.
 Evaluation judges remain available for benchmark scoring, independently of datagen.
 
 The v12 prompt planner independently balances length bands (8–25, 35–70, 90–150,
@@ -474,7 +489,7 @@ export ARTSY_TEACHER_MODEL=openai/gpt-6-luna
 export ARTSY_TEACHER_URL=https://openrouter.ai/api/v1
 # Set OPENROUTER_API_KEY for authentication.
 # ARTSY_PROMPT_MODEL/URL are optional here; they default to the teacher.
-.venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --repairs 2 --output datasets/llm-pilot
+.venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --output datasets/llm-pilot
 ```
 
 The prompt writer generates **one prompt per LLM request**, with up to eight
@@ -509,13 +524,12 @@ and does not filter candidates into training exports. All outcomes remain in
 For higher-difficulty training data, use `--difficulty hard` or
 `--difficulty very-hard` with a fresh output directory. Full generation saves the teacher's
 natural write-run-fix trajectory for ordinary drawing requests whenever a task
-needs correction; successful initial attempts remain valuable one-shot examples. `--repairs` sets the
-per-candidate retry budget, not a quota of repair prompts. The historical
+needs correction; successful initial attempts remain valuable one-shot examples. Repairs continue within the 20-operation, 20-response, token and time budgets. The historical
 `--curriculum repair` and `--warmup-from` have been removed.
 
 The teacher endpoint must support non-streaming OpenAI-compatible
 `POST /chat/completions`. Candidate replies contain `code` or `refusal`.
-The renderer repairs execution failures with at most two retries and validates a
+The renderer permits repairs within the episode budgets and validates a
 fresh final PNG. It does not grade images or monitor source with an LLM.
 All drawings and refusals await human review; failed attempts are retained too.
 Legacy evaluation judge environment variables have no effect on dataset generation.
@@ -667,7 +681,7 @@ combined-write-preview, selective-action, text-only or per-action-prefix checkpo
 training input. Start a fresh run for the agent SFT baseline.
 
 Sequences are never packed or truncated. Preflight checks every full trajectory against
-`--max-length` (default 32,768) before creating a hosted training client.
+`--max-length` (default 262,144) before creating a hosted training client.
 `--dry-run` and `--check-batch` make no Tinker API calls. The latter may download
 Hugging Face tokenizer and image-processor metadata. Training defaults to one epoch, eight
 complete trajectories per optimizer step, LoRA rank 32, and learning rate
@@ -732,7 +746,7 @@ the inference bridge (`make serve`) is not needed during training.
 
 The default policy is `Qwen/Qwen3.5-4B`, initialized from
 `checkpoints/dpo-v1/final.json` with LoRA rank inherited from that checkpoint
-(rank 32 for the bundled SFT release). It uses the `qwen3_5_disable_thinking`
+(rank 32 for the bundled SFT release). It uses the `qwen3_5_preserve_thinking`
 renderer. Training runs on Tinker; local tokenization and image processing run
 on the host.
 
@@ -747,7 +761,7 @@ system prompt, bash tool, ArtCanvas documentation, and actual PNG previews.
 The agent writes, previews, repairs, and explicitly submits its program or
 structured refusal. Final source is rendered again in a separate fresh Docker
 container and must produce a 1920×1200 PNG. Containers have 2 GiB memory and two
-CPUs; bash commands have a ten-second timeout.
+CPUs; renders have a one-minute limit and bash commands have a 65-second timeout.
 
 ### Independent reward signals
 
@@ -831,7 +845,7 @@ make grpo ARGS="--output-dir checkpoints/grpo-v2"
 | PPO ratio clipping | 0.8–1.2 |
 | Reference-KL coefficient | 0.01, against the initial DPO sampler |
 | Epochs | 1 (100 updates / 800 episodes on 200 prompts) |
-| Model turns per trajectory | 16 |
+| Model turns per trajectory | 20 |
 | Generated tokens per turn | 8,192 |
 | Context per request, including history and preview images | 262,144 |
 | Separate aggregate generated-token budget | None |

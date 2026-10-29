@@ -12,15 +12,15 @@ from pathlib import Path
 import random
 
 from training.data import LOSS_POLICY, ROOT, digest, load_examples
-from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
+from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION, MODEL_CONTEXT_WINDOW
 
-RENDERER = "qwen3_5_disable_thinking"
+RENDERER = "qwen3_5_preserve_thinking"
 
 
 class DrawingEncoder:
     """Encode a complete trajectory once, with assistant-only loss."""
 
-    def __init__(self, renderer, max_length: int = 32768, image_processor=None):
+    def __init__(self, renderer, max_length: int = MODEL_CONTEXT_WINDOW, image_processor=None):
         self.renderer = renderer
         self.max_length = max_length
         self.image_processor = image_processor
@@ -67,8 +67,10 @@ class DrawingEncoder:
                     parts.append(self.preview(part))
                 elif part["type"] == "text":
                     parts.append(part)
+                elif part["type"] == "thinking" and msg["role"] == "assistant" and isinstance(part.get("thinking"), str):
+                    parts.append(part)
                 else:
-                    raise ValueError(f"{example['id']}: only text and tool preview images are supported")
+                    raise ValueError(f"{example['id']}: only text, assistant thinking, and tool preview images are supported")
             msg["content"] = parts
             if "tool_calls" in msg:
                 for call in msg["tool_calls"]:
@@ -230,7 +232,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--lr-schedule", choices=("constant", "cosine"), default="constant",
                    help="Learning-rate schedule; --learning-rate is the initial/peak rate")
     p.add_argument("--lora-rank", type=int, default=32)
-    p.add_argument("--max-length", type=int, default=32768)
+    p.add_argument("--max-length", type=int, default=MODEL_CONTEXT_WINDOW)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--save-every", type=int, default=50, help="Save optimizer state every N steps and at the end")
     p.add_argument("--resume-from-checkpoint", type=Path, help="Local checkpoint-NNNNNN.json containing a Tinker state path")
@@ -241,9 +243,9 @@ def main(argv=None):
     p = parser()
     args = p.parse_args(argv)
     if (args.epochs < 1 or args.max_steps == 0 or args.max_steps < -1 or args.batch_size < 1
-        or not math.isfinite(args.learning_rate) or args.learning_rate <= 0 or args.max_length < 1
+        or not math.isfinite(args.learning_rate) or args.learning_rate <= 0 or not 1 <= args.max_length <= MODEL_CONTEXT_WINDOW
         or args.lora_rank < 1 or args.save_every < 1):
-        p.error("epochs, batch size, learning rate, max length, rank and save interval must be positive; max steps is -1 or positive")
+        p.error("epochs, batch size, learning rate, max length, rank and save interval must be positive; max steps is -1 or positive; max length cannot exceed the model context window")
     examples, manifest = load_examples(args.dataset)
     if args.export:
         if args.export.resolve() == args.dataset.resolve():
@@ -266,7 +268,7 @@ def main(argv=None):
     if not args.check_batch and not args.resume_from_checkpoint and args.output_dir.exists() and any(args.output_dir.iterdir()):
         p.error("Output directory is not empty; choose a fresh directory or --resume-from-checkpoint")
     if not args.model.startswith("Qwen/Qwen3.5-") or "Base" in args.model:
-        p.error("Use a Qwen3.5 vision chat model with the Qwen3.5 disabled-thinking renderer")
+        p.error("Use a Qwen3.5 vision chat model with the Qwen3.5 preserve-thinking renderer")
 
     encoder = create_encoder(args.model.split(":", 1)[0], args.max_length)
     data = [datum for example in examples for datum in encoder(example)]

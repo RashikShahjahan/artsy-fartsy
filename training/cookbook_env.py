@@ -19,7 +19,7 @@ from uuid import uuid4
 
 from PIL import Image
 
-from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_CONTEXT_WINDOW
+from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_CONTEXT_WINDOW, LIMITS
 from drawing.agent_contract import drawing_system_prompt
 from drawing.judges import (JUDGE_MAX_TOKENS, CODE_SAFETY_MAX_TOKENS, adherence_rubric_prompt,
     parse_adherence_rubric, code_safety_judge_prompt, parse_code_safety_judgment,
@@ -155,6 +155,8 @@ class DockerSession:
     async def execute(self, command: str):
         if self.submitted:
             return "Submission already requested.", False
+        if len(self.commands) >= LIMITS["maxCalls"]:
+            return "Tool call budget exhausted.", True
         await self.start()
         self.commands.append(command)
         try:
@@ -163,13 +165,13 @@ class DockerSession:
                  str(agent_settings()["environment"]["timeout"]), "bash", "-c", command],
                 timeout=agent_settings()["environment"]["timeout"] + 2)
         except subprocess.TimeoutExpired:
-            return "Return code: 124\nCommand timed out.", False
+            return "Return code: 124\nCommand timed out.", len(self.commands) >= LIMITS["maxCalls"]
         if command.strip() == SUBMIT and result.returncode == 0:
             self.submitted = True
         observation, preview = _preview_observation(result.stdout, result.stderr, result.returncode)
         if preview:
             self.previews.append(preview)
-        return observation, self.submitted
+        return observation, self.submitted or len(self.commands) >= LIMITS["maxCalls"]
 
     async def _read_source(self) -> str:
         if not self.container:

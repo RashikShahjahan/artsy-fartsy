@@ -44,13 +44,16 @@ class CodeSafetyTests(unittest.IsolatedAsyncioTestCase):
                 'width': 1920, 'height': 1200})})()
             monitor = Client('monitor', '{"malicious":true,"reason":"old verdict"}')
             teacher = Client('teacher', '{"code":"draw()"}')
+            teacher.complete.side_effect = [teacher.complete.return_value, {
+                'text': '{"submit":true}', 'finishReason': 'stop',
+                'usage': {'prompt_tokens': 10, 'completion_tokens': 10}}]
             summary = await generate_dataset({'output': folder, 'candidates': 1,
                 'specs': [{'id': 'drawing', 'family': 'circles', 'prompt': 'Draw', 'seed': 1}],
                 'teacher': teacher, 'codeSafetyJudge': monitor, 'renderer': renderer})
             monitor.complete.assert_not_awaited()
             self.assertEqual(renderer.render.await_count, 2)
             self.assertEqual(summary['review'], 1)
-            self.assertEqual(summary['requests'], 1)
+            self.assertEqual(summary['requests'], 2)
 
     async def test_malicious_refusal_needs_no_teacher_or_renderer_and_converts_to_sft(self):
         spec = {"id": "code-refusal", "family": "safety_refusal", "seed": 1,

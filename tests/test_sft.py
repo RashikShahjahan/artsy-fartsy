@@ -338,7 +338,9 @@ class TinkerTests(unittest.TestCase):
         tokens = data[0].model_input.to_ints()
         for index in selected:
             prompt = self.renderer.build_generation_prompt(messages[:index]).to_ints()
-            self.assertEqual(tokens[:len(prompt)], prompt)
+            # With thinking enabled, the generation prefill's last newline
+            # merges with the empty thought's newline in a complete trajectory.
+            self.assertTrue(self.tokenizer.decode(tokens).startswith(self.tokenizer.decode(prompt)))
         with self.assertRaisesRegex(ValueError, "never truncated"):
             DrawingEncoder(self.renderer, max_length=5)(example)
 
@@ -358,6 +360,23 @@ class TinkerTests(unittest.TestCase):
         self.assertNotIn("Unsafe request", self.targets(data[0]))
         self.assertNotIn("Refusal recorded", self.targets(data[0]))
 
+    def test_reasoning_is_preserved_and_supervised_on_all_assistant_turns(self):
+        from training.sft import DrawingEncoder
+
+        example = self.example()
+        thoughts = ['Plan the first draft.', 'The preview needs a correction.', 'The drawing is ready.']
+        for index, thought in zip(example['trainable_message_indices'], thoughts):
+            example['messages'][index]['content'].insert(0, {'type': 'thinking', 'thinking': thought})
+        datum = DrawingEncoder(self.renderer)(example)[0]
+        targets = self.targets(datum)
+        context = self.tokenizer.decode(datum.model_input.to_ints())
+        for thought in thoughts:
+            self.assertIn(thought, context)
+            self.assertIn(thought, targets)
+        self.assertNotIn('Execution succeeded', targets)
+        self.assertIn('printf fixed', targets)
+        self.assertIn(SUBMIT, targets)
+
     def test_role_mask_matches_standard_all_assistant_loss(self):
         from unittest.mock import patch
         from tinker_cookbook.renderers import TrainOnWhat
@@ -370,7 +389,7 @@ class TinkerTests(unittest.TestCase):
         messages, _ = encoder.messages(example)
         # Qwen's generic extension-property warning applies to ALL_ASSISTANT;
         # the native-format and per-turn prefix checks above cover these
-        # disabled-thinking tool trajectories explicitly.
+        # thinking tool trajectories explicitly.
         with patch("tinker_cookbook.renderers.base.logger.warning"):
             inputs, weights = self.renderer.build_supervised_example(
                 messages, train_on_what=TrainOnWhat.ALL_ASSISTANT_MESSAGES)
@@ -435,7 +454,9 @@ class TinkerTests(unittest.TestCase):
             for index, expected_images in zip(selected, (0, 1, 2)):
                 prompt = self.vision_renderer.build_generation_prompt(messages[:index])
                 prefix = content_signature(prompt)
-                self.assertEqual(full[:len(prefix)], prefix)
+                self.assertEqual(full[:len(prefix) - 1], prefix[:-1])
+                self.assertTrue(self.tokenizer.decode([full[len(prefix) - 1]]).startswith(
+                    self.tokenizer.decode([prefix[-1]])))
                 self.assertEqual(sum(isinstance(c, tinker.types.ImageChunk) for c in prompt.chunks), expected_images)
             for datum in data:
                 chunks = datum.model_input.chunks
