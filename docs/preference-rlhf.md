@@ -4,6 +4,73 @@ Visual quality is learned in a DPO stage between SFT and RL. RL then optimizes i
 
 ## Prepare visual preferences for DPO
 
+### Collection size for the first experiment
+
+There is no required DPO-to-SFT dataset ratio. Count SFT data in trajectories and
+DPO data in non-tie preference pairs; a pair contains two trajectories and may
+share a candidate with another comparison. Unique prompts, coverage and label
+quality matter alongside the pair count.
+
+For this project's first experiment, collect **100 drawing prompts with two
+candidates each: 200 generated trajectories and at most 100 preference pairs**.
+Use a **50/50 mix: 50 reused SFT prompts and 50 freshly authored prompts**.
+Fresh prompts follow the same drawing skills and difficulty distribution and are
+checked for exact, normalized and close lexical overlap with SFT and benchmark
+prompts. Reused prompts preserve their original wording and rendering seeds.
+This is the agreed collection budget, not an established sample-efficiency
+result. The current SFT v2 collection has
+224 structurally convertible records, including 179 drawings and 45 refusals;
+human approval is still required. Use the drawing count as the relevant baseline
+for visual DPO.
+
+Keep entire prompt families in one split before labeling; aim for approximately
+80 training prompts and 20 held-out prompts, adjusting for uneven family sizes.
+This gives at most about 80 training pairs and 20 held-out comparisons. Failed
+eligibility checks and ties reduce those counts; do not force a preference or
+expand the agreed collection automatically. Reusing SFT training prompts is
+allowed; keep evaluation prompts held out.
+
+Train a small pilot, compare it blindly against SFT on held-out prompts, and
+expand the collection only if visual preference improves without regressions in
+adherence, safety or render success. The preference-pair formulation follows the
+[DPO paper](https://arxiv.org/abs/2305.18290); the counts above are our project plan.
+
+### Create the collection in the UI
+
+Start the unified UI with training prompts and an output directory:
+
+```bash
+.venv/bin/python -m ui.server --dataset datasets/sft-v2/prompts.jsonl \
+  --candidates datasets/sft-v2/candidates.jsonl --dpo-output datasets/dpo-v1
+```
+
+Open **DPO dataset**. Configure the native bridge to serve your SFT sampler
+checkpoint, or select a verified saved SFT alias from its catalog, before generating
+candidates. Prepare the mixed prompt file with
+`python -m ui.prepare_dpo_mix --output datasets/dpo-mixed-v1`, then start the UI
+with `--dataset datasets/dpo-mixed-v1/prompts.jsonl`. The preparation step uses
+the configured prompt-writing model and saves its provenance. Use **Select 100 prompts** to apply the
+100-prompt, two-candidate plan, then click **Generate candidates**. Custom prompt
+selections and 2–4 candidates per prompt remain available. Generation uses model
+credits. The collection worker records the checkpoint and runs the native
+Inspect bash-tool drawing agent in Docker. It retains actual tool actions,
+reasoning, preview observations and final-render results; it does not ask the
+SFT policy to produce teacher-format JSON. Frozen benchmark prompts are excluded.
+
+When collection finishes, use **Approve candidates** to inspect trajectories in
+the existing candidate reviewer and save approvals. Then use **Compare candidates**
+to view same-prompt, same-seed images side by side. Confirm both are safe,
+render-valid and prompt-adherent before choosing A, B or Tie. Set the prompt-family
+group and train/validation/test split, save decisions, and export the dataset.
+Skip pairs that cannot support an aesthetic comparison.
+
+Exports contain `labels.jsonl`, `accepted.jsonl` and copied artifacts. Each
+collection has its own export directory under the configured DPO output, and the
+UI displays the resulting path. The exporter validates the files with the policy
+trainer's loader before publication. It does not train a model or change the
+source candidate file. Existing candidate JSONL files can also be opened using
+`--dpo-candidates`; their referenced artifacts must be present beside the file.
+
 Collect at least two approved, safe, render-valid drawing trajectories for each training request, preferably sampled from the SFT policy. Retain their recorded dataset JSONL and all source/preview/final-image artifacts in the existing dataset format used by `training.sft`. Judge the final images on composition, coherence, color, balance, craftsmanship and expressive appeal. Both candidates should satisfy the request so aesthetic labels do not encode adherence or safety differences.
 
 Store A/B/Tie labels in JSONL. Image paths are relative to this labels file. `record_a` and `record_b` identify the corresponding entries in the recorded trajectory dataset:

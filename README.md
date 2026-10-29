@@ -14,17 +14,23 @@ artifacts have been retired; references to earlier releases below describe histo
 
 ## Unified UI
 
-Launch Studio, prompt and safety review, and SFT candidate inspection in one app:
+Launch Studio, prompt and safety review, SFT candidate inspection, and DPO dataset
+creation in one app:
 
 ```sh
-python3 -m ui.server --dataset datasets/sft-v2/prompts.jsonl \
-  --candidates datasets/sft-v2/candidates.jsonl
+.venv/bin/python -m ui.server --dataset datasets/sft-v2/prompts.jsonl \
+  --candidates datasets/sft-v2/candidates.jsonl --dpo-output datasets/dpo-v1
 ```
 
 Open http://127.0.0.1:4173. Studio shares one generation workspace for freeform
 and dataset prompts; Prompt review and SFT candidates use the same navigation.
 See [UI setup and review outputs](ui/README.md). Docker and `make serve` are needed
 for generation; browsing and review work independently.
+The DPO workspace collects multiple outputs from the configured SFT checkpoint,
+opens candidate approval and image comparison, and exports validated preference
+pairs with their full native tool trajectories. The initial collection uses 50
+reused SFT prompts and 50 fresh prompts, with two candidates per prompt. See the
+[collection plan and size guidance](docs/preference-rlhf.md).
 
 ## Setup
 

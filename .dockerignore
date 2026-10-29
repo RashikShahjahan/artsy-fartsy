@@ -1,0 +1,9 @@
+# Only the isolated renderer's Dockerfile and COPY inputs enter the build context.
+**
+!evaluation/
+!evaluation/Dockerfile
+!evaluation/render.py
+!runtime/
+!runtime/**
+!training/
+!training/score_rl.py

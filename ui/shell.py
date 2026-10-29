@@ -5,7 +5,7 @@ import re
 
 def navigation(current):
     links = [('studio', '/', 'Studio'), ('review', '/review', 'Prompt review'),
-             ('candidates', '/candidates', 'SFT candidates')]
+             ('candidates', '/candidates', 'SFT candidates'), ('dpo', '/dpo', 'DPO dataset')]
     return '<header class="app-header"><a class="brand" href="/">Artsy<span class="brand-dot">.</span></a><nav aria-label="Main navigation">' + ''.join(
         f'<a href="{url}"' + (' aria-current="page"' if key == current else '') + f'>{label}</a>'
         for key, url, label in links) + '</nav><span class="prototype">Drawing workspace</span></header>'
@@ -26,7 +26,7 @@ def review_page(page, current):
                          ('slice', 'Prompt category'), ('filter', 'Review decision'),
                          ('automatic', 'Generation outcome'), ('decision', 'Manual decision')]:
         page = page.replace(f'id="{ident}"', f'id="{ident}" aria-label="{label}"')
-    title = 'Prompt review' if current == 'review' else 'SFT candidates'
+    title = {'review': 'Prompt review', 'candidates': 'SFT candidates', 'dpo': 'DPO dataset'}[current]
     return (f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<title>Artsy · {title}</title><link rel="stylesheet" href="/style.css"></head>'

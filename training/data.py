@@ -7,6 +7,7 @@ successful episode. Instructions, tool feedback, and preview images are context.
 Unexecuted malformed teacher replies and judge critiques are omitted.
 """
 
+import copy
 import hashlib
 import json
 from pathlib import Path
@@ -102,12 +103,131 @@ def system_prompt() -> str:
     )
 
 
+def native_trajectory_hash(trajectory: dict) -> str:
+    return digest(json.dumps(trajectory, sort_keys=True, separators=(",", ":")).encode())
+
+
+def native_prefix(spec: dict, config: dict) -> tuple[str, str]:
+    """Reproduce the recorded host-agent framing without importing Inspect."""
+    import yaml
+    from drawing.agent_contract import drawing_system_prompt
+    limit, kind = config.get("token_limit"), config.get("token_limit_type", "output")
+    if (limit is not None and (type(limit) is not int or limit < 1)) or kind not in ("output", "all"):
+        raise ValueError("Invalid native trajectory token budget")
+    system = yaml.safe_load((ROOT / "evaluation/mini.yaml").read_text())["agent"]["system_template"]
+    user = ("System instructions:\n" + drawing_system_prompt(limit, kind) + "\n\nTask:\n"
+            + spec["prompt"] + "\n\nPreview with: "
+            + f"python /opt/artsy/render.py --seed {spec['seed']} "
+              "--output /workspace/preview --preview < /workspace/program.py")
+    return system, user
+
+
+def convert_native_record(record: dict, root: Path) -> dict:
+    """Validate and preserve actual Inspect assistant actions and observations."""
+    rid = record["id"]
+    if record["spec"].get("kind") == "refusal" or record.get("refusal"):
+        raise ValueError(f"{rid}: native visual trajectories must be drawings")
+    trajectory = record.get("nativeTrajectory")
+    if not isinstance(trajectory, dict) or native_trajectory_hash(trajectory) != record.get("nativeTrajectoryHash"):
+        raise ValueError(f"{rid}: native trajectory hash mismatch")
+    if trajectory.get("tools") != TOOLS:
+        raise ValueError(f"{rid}: native trajectory requires the bash tool schema")
+    messages = trajectory.get("messages")
+    if not isinstance(messages, list) or len(messages) < 4:
+        raise ValueError(f"{rid}: missing native conversation")
+    system, user = native_prefix(record["spec"], record.get("nativeTrajectoryConfig") or {})
+    if messages[:2] != [message("system", system), message("user", user)]:
+        raise ValueError(f"{rid}: native prompt or system framing mismatch")
+    indices = [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "assistant"]
+    mask = trajectory.get("trainable_message_indices")
+    if not indices or mask != indices or any(type(i) is not int for i in mask):
+        raise ValueError(f"{rid}: native assistant supervision mask mismatch")
+    source = artifact(root, record["artifacts"]["source"]).read_text()
+    normalized = lambda value: value.replace("\r\n", "\n").strip()
+    if normalized(source) != normalized(record["code"]) or digest(normalized(source).encode()) != record["sourceHash"]:
+        raise ValueError(f"{rid}: final source does not match recorded code/hash")
+    artifact(root, record["artifacts"]["image"], record["imageHash"])
+    if not (record.get("submission") or {}).get("feedback", {}).get("ok"):
+        raise ValueError(f"{rid}: missing successful native submission render")
+    native_result = record.get("nativeResult") or {}
+    if (native_result.get("outcome") != "submitted" or native_result.get("submitted") is not True
+            or native_result.get("scores", {}).get("render_valid") != 1
+            or native_result.get("sourceHash") != digest(source.encode())
+            or native_result.get("imageHash") != record["imageHash"]):
+        raise ValueError(f"{rid}: native scorer did not record a matching successful submission")
+    result = copy.deepcopy(messages)
+    pending, seen = [], set()
+    submitted = False
+    preview_count = 0
+    correction = 'Every response must contain a bash tool call with {"command":"..."}.'
+    for index, m in enumerate(result[2:], 2):
+        if not isinstance(m, dict) or m.get("role") not in ("assistant", "tool", "user"):
+            raise ValueError(f"{rid}: unexpected native message role")
+        role = m["role"]
+        content = m.get("content")
+        if not isinstance(content, list):
+            raise ValueError(f"{rid}: native content must use explicit parts")
+        for part in content:
+            if not isinstance(part, dict):
+                raise ValueError(f"{rid}: invalid native content")
+            kind = part.get("type")
+            if kind == "text" and isinstance(part.get("text"), str):
+                continue
+            if kind == "thinking" and role == "assistant" and isinstance(part.get("thinking"), str):
+                continue
+            if kind == "image" and role == "tool":
+                image = artifact(root, part["image"], part["imageHash"])
+                part["image"] = str(image)
+                preview_count += 1
+                continue
+            raise ValueError(f"{rid}: unsupported native content part")
+        if submitted:
+            raise ValueError(f"{rid}: messages after terminal submission")
+        if role == "assistant":
+            if pending:
+                raise ValueError(f"{rid}: native tool calls lack observations")
+            calls = m.get("tool_calls") or []
+            if not isinstance(calls, list):
+                raise ValueError(f"{rid}: invalid native tool calls")
+            for call in calls:
+                function = call.get("function", {})
+                arguments = function.get("arguments")
+                call_id = call.get("id")
+                if (not isinstance(call_id, str) or not call_id or call_id in seen
+                        or call.get("type") != "function" or function.get("name") != "bash"
+                        or not isinstance(arguments, dict) or set(arguments) != {"command"}
+                        or not isinstance(arguments["command"], str) or not arguments["command"].strip()):
+                    raise ValueError(f"{rid}: invalid native bash action")
+                seen.add(call_id)
+                command = arguments["command"]
+                if command.strip() == SUBMIT and (len(calls) != 1 or index != len(result) - 2):
+                    raise ValueError(f"{rid}: submission must be the final single action")
+                pending.append((call_id, command))
+        elif role == "tool":
+            if not pending or m.get("tool_call_id") != pending[0][0] or m.get("tool_calls"):
+                raise ValueError(f"{rid}: native tool observation ID/order mismatch")
+            _, command = pending.pop(0)
+            if command.strip() == SUBMIT:
+                text = "\n".join(p["text"] for p in content if p["type"] == "text")
+                if not text.startswith("Return code: 0\n") or "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" not in text:
+                    raise ValueError(f"{rid}: terminal submission did not succeed")
+                submitted = True
+        else:
+            if pending or m != message("user", correction) or index == 2 or result[index - 1].get("role") != "assistant" or result[index - 1].get("tool_calls"):
+                raise ValueError(f"{rid}: unexpected native user intervention")
+    if pending or not submitted or not preview_count:
+        raise ValueError(f"{rid}: native trajectory requires observed previews and terminal submission")
+    return {"id": rid, "messages": result, "trainable_message_indices": indices, "tools": TOOLS}
+
+
 def convert_record(record: dict, root: Path) -> dict:
     rid = record["id"]
     if record.get("runtimeVersion") != "artcanvas-v2":
         raise ValueError(f"{rid}: incompatible drawing runtime")
     if record.get("apiDocHash") != digest((ROOT / "docs/artcanvas.md").read_bytes()):
         raise ValueError(f"{rid}: API documentation changed since generation")
+    if record.get("trajectoryFormat") == "inspect-bash-v1":
+        return convert_native_record(record, root)
     spec = record["spec"]
     seed = spec["seed"]
     preview_command = (f"python /opt/artsy/render.py --seed {seed} "

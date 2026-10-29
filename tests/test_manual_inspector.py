@@ -79,6 +79,30 @@ class ManualInspectorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unfiltered"):
             export_approved(self.records, review, self.root, self.path)
 
+    def test_native_previews_are_validated_allowlisted_and_identified(self):
+        from PIL import Image
+        image = self.root / 'native-preview.png'
+        Image.new('RGB', (24, 16), 'blue').save(image)
+        sha = hashlib.sha256(image.read_bytes()).hexdigest()
+        record = {'trajectoryFormat': 'inspect-bash-v1', 'trace': [],
+            'nativeTrajectory': {'messages': [
+                {'role': 'assistant', 'content': [{'type': 'image', 'image': image.name, 'imageHash': sha}]},
+                {'role': 'tool', 'content': [
+                    {'type': 'image', 'image': image.name, 'imageHash': sha},
+                    {'type': 'image', 'image': '../outside.png', 'imageHash': sha},
+                    {'type': 'image', 'image': image.name, 'imageHash': 'bad'},
+                    {'type': 'image', 'image': image.name}]}]}}
+        self.assertEqual(image_paths(record, self.root), [('Native preview 1', image.resolve())])
+        image.write_bytes(b'not actually a PNG')
+        record['nativeTrajectory']['messages'][1]['content'][0]['imageHash'] = hashlib.sha256(image.read_bytes()).hexdigest()
+        self.assertEqual(image_paths(record, self.root), [])
+
+    def test_native_rollout_inspector_explains_real_conversation(self):
+        from ui.candidate_review import PAGE
+        self.assertIn("record.trajectoryFormat==='inspect-bash-v1'", PAGE)
+        self.assertIn('Native rollout recorded; inspect Conversation for actual actions and observations.', PAGE)
+        self.assertIn("image.label.startsWith('Native preview ')", PAGE)
+
     def test_only_dataset_local_png_artifacts_are_served(self):
         nested = self.root / "artifacts" / "episode"
         nested.mkdir(parents=True)

@@ -154,6 +154,13 @@ function appendReason(parent, heading, value) {
 function attemptTimeline(record, images) {
  const trace=Array.isArray(record.trace)?record.trace:[];
  const wrap=node('section');wrap.append(node('h3','Generation trace','trace-heading'));
+ if(record.trajectoryFormat==='inspect-bash-v1'){
+  wrap.append(node('p','Native rollout recorded; inspect Conversation for actual actions and observations.','trace-summary'));
+  const previews=images.filter(image=>image.label.startsWith('Native preview '));
+  if(previews.length)wrap.append(imageSection(previews));
+  else wrap.append(node('p','No validated native preview images are available.','trace-empty'));
+  return wrap;
+ }
  if(!trace.length){wrap.append(node('p','No generation attempts were recorded.','trace-empty'));return wrap;}
  const rendered=trace.filter(step=>step.feedback?.ok).length;
  const failed=trace.filter(step=>step.feedback?.ok===false || step.error).length;
@@ -320,12 +327,21 @@ def export_approved(records: list[dict], review: dict, root: Path, output: Path)
 def image_paths(record: dict, root: Path) -> list[tuple[str, Path]]:
     images = []
     artifacts = record.get("artifacts") or {}
-    def add(label: str, relative: str | None) -> None:
-        if not relative:
+    def add(label: str, relative: str | None, expected_hash: str | None = None) -> None:
+        if not isinstance(relative, str) or not relative:
             return
         path = (root / relative).resolve()
         if not path.is_relative_to(root.resolve()) or not path.is_file() or path.suffix.lower() != ".png":
             return
+        if expected_hash:
+            data = path.read_bytes()
+            if hashlib.sha256(data).hexdigest() != expected_hash:
+                return
+            from preference.judge import validate_png
+            try:
+                validate_png(data)
+            except ValueError:
+                return
         if path not in (p for _, p in images):
             images.append((label, path))
     for i, trace in enumerate(record.get("trace") or []):
@@ -334,6 +350,17 @@ def image_paths(record: dict, root: Path) -> list[tuple[str, Path]]:
             add(f"Attempt {i + 1} preview", str(Path(artifacts["directory"]) / Path(feedback["artifact"]).name))
         observation = trace.get("observation") or {}
         add(f"Attempt {i + 1} observation", observation.get("image"))
+    if record.get('trajectoryFormat') == 'inspect-bash-v1':
+        count = 0
+        for message in (record.get('nativeTrajectory') or {}).get('messages') or []:
+            if not isinstance(message, dict) or message.get('role') != 'tool':
+                continue
+            for part in message.get('content') or []:
+                if isinstance(part, dict) and part.get('type') == 'image':
+                    count += 1
+                    expected_hash = part.get('imageHash')
+                    if isinstance(expected_hash, str) and expected_hash:
+                        add(f'Native preview {count}', part.get('image'), expected_hash)
     for i, evaluation in enumerate(record.get("evaluations") or []):
         add(f"Judge render {i + 1}", evaluation.get("artifact"))
     add("Final rendered image", artifacts.get("image"))
