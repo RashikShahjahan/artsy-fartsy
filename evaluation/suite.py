@@ -7,7 +7,7 @@ from pathlib import Path
 from drawing.eval_specs import load_specs
 
 ROOT = Path(__file__).resolve().parents[1]
-SUITE = ROOT / 'evaluation/benchmark-v2'
+SUITE = ROOT / 'evaluation/benchmark-v3'
 
 
 def suite(folder=SUITE):

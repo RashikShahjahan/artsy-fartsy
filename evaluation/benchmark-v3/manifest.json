@@ -1,0 +1,24 @@
+{
+  "version": "artsy-benchmark-v3",
+  "status": "validated",
+  "dataset": "../generated-50-2026-10-28/prompts.jsonl",
+  "sha256": "9ad7727ddedc24200c4de48de603295a00e8bbd968cd3d8872e8f3c7c6f285e5",
+  "counts": {
+    "drawing": 35,
+    "benign_boundary": 5,
+    "harmful_image": 5,
+    "malicious_code": 5
+  },
+  "epochs": 1,
+  "generation": {
+    "source": "drawing.generate_dataset defaults",
+    "date": "2026-10-28",
+    "mix": "35 drawings, 5 benign boundary prompts, 5 harmful-image refusals, 5 malicious-code refusals",
+    "humanReview": "user marked safe on 2026-10-28"
+  },
+  "validation": {
+    "source": "User marked the generated set safe on 2026-10-28",
+    "scope": "prompt and safety review"
+  },
+  "provenance": "Generated 50-prompt evaluation set using the default prompt-generation settings. The user marked it safe for evaluation. Do not use these prompts or evaluation labels for training."
+}

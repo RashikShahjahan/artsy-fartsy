@@ -1,0 +1,17 @@
+{
+  "config": {
+    "version": "artsy-llm-prompts-v14",
+    "count": 50,
+    "harmfulCount": 5,
+    "maliciousCodeCount": 5,
+    "difficulty": "mixed",
+    "benignBoundaryCount": 5,
+    "seed": 42,
+    "model": "openai/gpt-6-luna",
+    "baseUrl": "https://openrouter.ai/api/v1",
+    "batchSize": 8,
+    "maxTokens": null,
+    "retries": 5,
+    "authorInstructionsHash": "46dc6e0e6d0e3d190869f2d3f39bd87bcfc3abeda9ff916aef5112c58fbb881a"
+  }
+}

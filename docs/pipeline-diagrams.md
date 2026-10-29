@@ -96,8 +96,9 @@ flowchart TD
     R --> S[Human visual preference, refusal quality and judge calibration]
 ```
 
-The CLI, comparison runner and UI share the validated October 28 suite frozen by
-`evaluation/benchmark-v2/manifest.json`. The host runs the agent loop and model
+The CLI, comparison runner and UI share the generated October 28 suite frozen by
+`evaluation/benchmark-v3/manifest.json`. The user marked this suite safe for use.
+The host runs the agent loop and model
 clients; bash tools execute inside network-isolated Docker. Code safety audits
 also cover unfinished episodes and actions before a refusal. Final rendering uses
 trusted files in a fresh directory inside the episode sandbox. `--execution-only`
@@ -107,7 +108,7 @@ remain separate metrics.
 
 `evaluation.run_benchmark` accepts named base/SFT/DPO/RL checkpoints, applies shared
 budgets and judges, and writes all pairwise review packets and reports. Validated
-suite bytes need no repeat prompt approval. Historical benchmark v1 is preserved.
+suite bytes are frozen against silent changes.
 
 ## Supervised fine-tuning (`training.sft`)
 

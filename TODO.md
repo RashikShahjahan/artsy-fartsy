@@ -167,7 +167,7 @@ reward. Image safety reviews final renders; per-preview safety gating remains op
 ## 8. Evaluate and package the environment
 
 - [ ] Freeze a test set covering unseen combinations, precise counts and relationships, negative constraints, long prompts, procedural patterns, and repair tasks. Keep it separate from reward tuning.
-- [x] Add harmful-image refusal cases and `evaluation/malicious-code-10.jsonl`, combined with drawing tasks in `evaluation/generated-110.jsonl`.
+- [x] Add harmful-image and malicious-code refusal cases to the historical evaluation prompt sets (now retired).
 - [ ] Audit safety-evaluation coverage, add indirect requests and allowed neighboring cases, and document semantic separation from training data. Use controlled access for sensitive artifacts.
 - [x] Implement Inspect summaries for render validity, execution-repair behavior, authored difficulty, refusal categories, code-safety judgments, usage, and incomplete/error accounting.
 - [ ] Publish comparable first-attempt/bounded-repair and per-category adherence/validity/safety/refusal/latency/cost results with sample counts and uncertainty; distinguish execution recovery from visual correction.

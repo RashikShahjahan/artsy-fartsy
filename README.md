@@ -200,12 +200,10 @@ cross-platform pixel identity is not guaranteed.
 
 The drawing CLI and evaluation use the same host-side Inspect agent, Docker bash
 sandbox, model endpoint, API documentation, limits and trusted final-render scorer.
-The shared default is the validated `evaluation/validation-80-2026-10-28.jsonl`:
-64 drawing tasks, eight harmful-image requests and eight malicious-code requests.
-`evaluation/benchmark-v2/manifest.json` freezes the exact dataset bytes. Keep these
-prompts out of training. The older 110-prompt suite remains available with
-`--dataset evaluation/generated-110.jsonl`; benchmark v1 remains selectable with
-`--suite evaluation/benchmark-v1` on benchmark commands.
+The shared default is `evaluation/generated-50-2026-10-28/prompts.jsonl`, frozen by
+`evaluation/benchmark-v3/manifest.json`: 35 drawings, five benign boundary prompts,
+five harmful-image refusals and five malicious-code refusals. The user marked this
+set safe for evaluation on 2026-10-28. Keep these prompts out of training.
 
 Evaluation requires successful explicit submission and uses the same integer 0–4
 adherence rubric as RL, normalized to 0–1. Refusal protocol success and human
@@ -482,11 +480,9 @@ that file with `training.sft --dataset`. `datasets/sft-v1/code-safety-release.js
 records the original file hash, added training IDs, and ten held-out eval IDs.
 The 50 new pairs are also tracked as `training/malicious-code-refusals-50.jsonl`;
 they contain refusal targets only and require no external artifacts.
-`evaluation/malicious-code-10.jsonl` contains the new eval prompts;
-`evaluation/generated-110.jsonl` combines them with the previous 100-prompt set.
-The original frozen files remain unchanged. Existing drawing records have not
-been retroactively reviewed by the new monitor. Eval summaries report refusal
-success separately under `refusal_by_category` for each unsafe class.
+The current default evaluation set contains five malicious-code and five
+harmful-image refusal prompts. Evaluation summaries report refusal success
+separately under `refusal_by_category` for each unsafe class.
 
 **Generate training programs using a stronger teacher:**
 

@@ -71,10 +71,10 @@ class BenchmarkTests(unittest.TestCase):
                 selected_models(values, catalog)
 
     def test_frozen_mix_and_difficulty(self):
-        manifest, rows=suite(Path(__file__).resolve().parents[1]/"evaluation/benchmark-v1")
-        self.assertEqual(manifest['counts'],dict(drawing=56,benign_boundary=8,harmful_image=8,malicious_code=8))
-        for level in ('easy','medium','hard','very-hard'):
-            self.assertEqual(sum(r['benchmarkSlice']=='drawing' and r['difficulty']==level for r in rows),14)
+        manifest, rows=suite()
+        self.assertEqual(manifest['counts'],dict(drawing=35,benign_boundary=5,harmful_image=5,malicious_code=5))
+        self.assertEqual(len(rows),50)
+        self.assertEqual({r['difficulty'] for r in rows}, {'easy','medium','hard','very-hard'})
 
     def test_frozen_bytes_cannot_be_silently_replaced(self):
         from evaluation.suite import dataset_path

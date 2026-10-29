@@ -1,0 +1,57 @@
+{
+  "index": 6,
+  "spec": {
+    "id": "4ac84217a80d61b2c7c9e307",
+    "family": "rows",
+    "prompt": "Design the front panel of a 1920×1200 pouch for energetic dogs and their active owners. I first imagined a resting fox, but have changed direction: show one fox leaping toward the right, placed left of center against a deep navy ground. Use vivid neon coral and cyan so its motion reads instantly, leaving the upper-right open for product details.",
+    "seed": 4143694520,
+    "skills": [
+      "positioning"
+    ],
+    "difficulty": "easy",
+    "benchmarkSlice": "drawing",
+    "contentTheme": "animals in motion",
+    "format": "packaging design",
+    "primarySkill": "positioning",
+    "artStyle": "high-contrast neon on a dark ground",
+    "voice": "professional: explain the audience, purpose and design priorities as a client would",
+    "generatorVersion": "artsy-llm-prompts-v14"
+  },
+  "attempts": 1,
+  "completion": {
+    "text": "{\"items\":[{\"index\":6,\"prompt\":\"Design the front panel of a 1920×1200 pouch for energetic dogs and their active owners. I first imagined a resting fox, but have changed direction: show one fox leaping toward the right, placed left of center against a deep navy ground. Use vivid neon coral and cyan so its motion reads instantly, leaving the upper-right open for product details.\",\"skills\":[\"positioning\"]}]}",
+    "reasoning_details": [
+      {
+        "type": "reasoning.encrypted",
+        "data": "gAAAAABq4reoSZiLfAnI6HHpiWzOPVtGI9_asBYlxxwIRZ6NT87NHxVk94GgebIFn3DN8gm0Fcmsqb74vHmmr_X7RGOMmqXWKoVJZ8SSXYcAkBKALe9EbaibswtxgnLklVLs9ZEqawDn73o1NzvJOXhsb8DmLln9IHey0eQVXwcdW-6g-P4i0pOO2Jw_6Lo7D1v9V0mW9EIPZ9VtCeeHYRZ3JL2XV8GnEy3NnbyTfsiMH8-yfEZ6iMpFqNYfYa46TUfCk6DSPSY_cyQIrNo8K7JsBmidBiP6MKuT6RS0GtmeOyOvbOE5jcJfab0O852IGUqjqEm54YCayOl6GZP_5NCC45HPasrlSOt_hdRBcBwkQzqeLgYjMEQyPSONOiK1TRbvsXiXVW-7k8csN9wiOKXQuzKHDgHH_muaOK9_KzZeNbDPvv11ih3czN1tK4bUjWj8a88VNoGTjHwPAlCbKfTBOBmDKvsJkXmsTSH0E1jADBJH0ORq9B8fC2gZgIUUQGiqELKxG53NHOADxwqwsGQk_ebylfDD9jiAGYhENFZWH2q6DpCqkjME7Ql_QUr3eZ9STmtq5Ez021mZTD5Et1G9lMI6VG9XYSOHzloUN4ist2339eERZS_rM0N79E9E_AUwesNSc1PK6wJ4jDigiXbHRgZaCShMlsGzlnY7wJ-SpSuWJ1A8JStr3dI_tmEvr5N_uNrrvS4UrBJItHGzx_6fjmDihTJ8e0N_SpUOySmMNhNmLU_i_hHUvjELYB_C15u8jfElLtPLDFqiTtrEBKCMwi-13705KQ9sPeKGH7S5rX71FHMJrIgicHddOObojGV9RB-ANHNuqZazX0VVab6yp0SZHzg8jjCl3SP9mkTXr83AFr_Col4RqdjALZrtTSCPbep39V1EMRhVm8N0Z_P_of3vLc68sMwDGTYTOUA3Lii9d_Hwk9eu2lZK-b3B2q0ib2OrZ-EYFAuCeJnEkOFXdXI_feM_gemwVp7_kVnCwGBbqfXjJQktkxqoTXqURi5yqgdBLgCTTOWOxLAlKxfxdlLxjpZts0GvYMdEafe_c8tP27Z5Snor8Zn--oPVusDM3xOZzwAyFtwYJsd8TcqVz2UFvUEjBCDVcLqomPKNndAB5DIhGWzZFfwMn7roWOEbvNON9_OkJ0a0nQp_oyxov53uS0Pu2qw2cijpxN95rKEQZeLtTpqz-Xamz7pfjy2PSEUMUCx8DqCHKI6NXKVcY7i7MNuRYI7jjsiqnS2VLeBSdqOH0mkEQYxYtDMMz_EoViGcYlRuHi0eEVx1xj5YixfBwJLU2O6E3ZzONMkAf8CN-JMb4o2c49Mm_4XzMyCvGV8Y3PkNAK_XS9w-ePZl44aZejenzgqkU2llQnYrnUZfGSz25iqrlqplCdrcGNSE2TNM7NDDGsxSjdUPg9rCm7rJkB-yjZg9XA_6fJyg0zaPipAxYMq4Stx8hQQdQVMT_wNlZNhWlDkUSCeAArtT5z2VWGWxCtig9YgvR--5mzFY3B6atoou2v8TEJQKuAjijETyIkUbwsFL5SwYU_KkXonWPK60e1s5mudbTPL8IaGhIadqXej_9jpfQPUfsqSQSRvFP1BOjVUh-RaUCo5UqUZ60MBVE7kTSmvJFgCJRlP6b1qwazz9RMhTuP5Yf6AiHDGMKOXxZhvoaJJx1n9DXwnl_3mCu8WWcws5dUeHZhu_K9mXkCz7gBM2yl96RqQZkrVVym88NfK0QRnJ7dh93wJKvARosQfBk-YXzRaZ4SUspIIsO_y0Wc4pp78t_DSy_Ily1VMlgtjzt8sPUtaX0HbT9Qfs5XvW6VoCT9SnIora0fEpOrqP-lg5QuRiCp6U16FVXDU2qugOw9zl4j129pAiH0PT4HQxDMhS2dbvyIAvL06tBDTeMJMhnHO0YXEIPYbpePFrt39AKx4y_ad-y3iFdt1WZH1YUnBi-VxYZ9VuD0dGyYKu1BFYL1_pPeGqUkdQOKPHDEBLESHfCuDqCAfJBkzQDkxbB_1WBf9RJb3oDiLr5Gx6sjguNnHy2m7NXFjXgdMt2Xb-LGcS5FuF4G3k8SSTcn--g4m8rBqYV90I9w8jNgTUdFqpchI7jxbM7iU3UOmijSJAfzqn-a92ZxgqdqX4vo_3-ojzsnFGE9Kya0C7pZV1cOauQXf8YaYIpcQuGhaT5AwHRVNUBn8rdKqrt1HUmjGgc-UHGnPz39874dXtxRJu2R0-6GZYViFyijHDT6vJQNjr4WD3e1_dSyDY16Mqni7g4gRteq8-K_-HNYY5RMWnKybsvXnSee4GvgoY382m31yvhZNmpN5mN2d4rCMZQ-p-f5NwJ45Fzz7VgzdSgWSz7-uxqeZEW_7ep1VMj_yGHOFjdZBYIJYty95qB1HEbTBLKUGcWtvev0Wj4dwh0pNEE1tw3AUBEBIcTE29xrbBiU0W-T1irGp5rnxs1IhVT5cdwCxaU-dwS3NMOkpzCMi1O2Of-TieEqh7W_S4yTFeDwrN37m_zfGY3SCyGHQlSlIkTMuzUGo6CH7oz_DXy33VJttpR5W5m3MHkuFQXNZbIktYCtwroMIYTdplfRUP1o1X9faUUeqFc-janJa02lgDobdUAoX_ZmuirlAfxkSdSKDlXZfMTAaA1l9JPBZJDn1SBpl02TvgmWNMnXDrfv7QH44Xc9NcmoM5ay7uwofUVp7N6JKaZbbNQwrYn7WVANEHa1vKIG03JLlEeFVwr_lyx0wXpqWRlx6VLG1NqUSoJ5cRsDGkLhK4_pvmCfXLeUyLcqJBSLmpzGtsOw0E8O4gTsfTPy6bm9gJ6TKzXD7i4ckRgP3DjMH9BFexsc8QMmnADAcrPQn7zH1cEKM2xTLkaUvmdhhOaCwxHbmaov2mD1j2dCiy4mtYWAtcTw6CrCvePGslc5sWC5XzwEOapFDjRbAexe2DfxBOUEHWlr03uznPW8HgQiQsZaa6Di935Ede9fPrjd7cZRY4wqIYmtVIWJvxaO4DceB27s72xWWZZnfxwAwbwtcUHbLijtyyGI_xhd4lgesCe8r-YqjemDTG-hooTgVj8batGkEuxOTMlZQvk4MP88z_VtRd770XHoTYjVWoIS9rff_4l5aBv8xDX7vtYAvFNI1DcmSDqMxayMLbwshH3q4KeiBxfbZWWK0MiTge0d5dG4MdkAQmFyiIsqW1c6eqAElNFYDItT4SDSp_JaHpDv6wfbNyTADa2ihJ2ZhqXEJ2tnajQ4FgmO0YfnbbzAWJpQ54_WnZFvIltAYgFoen7gbX1hK_3w2M_rL22IOMw2DyVulWzfhzjPLGaNUsK-Qnggln8lb5GW2dMEqI3_9IWXJYzV5VzlF9V3Wqy9CU_NFe6wCfbIOgvrU-HeMTMpv2MY94q25DFGLPONlXek2fj8WmjLkZ5dyxCT3z8BX8qWIuHNYjqN7RffYiimAEZ9seGHMOpcYJ9c5OWHvKFLkTEuja_gPSv2YlNowgD-azkSJs9mR6SrfMZVn3cGYJrAqxcPanodT4EU9xwhgcQOHy7X30rJ76Pa2hS7eLrUGuVzZzuM6nqrn6aoULi_cDTRqlZdniAYY7pACkXzKM1JEbsK36-UsjCx180LnYxK9F62W3el3n83jeX7nxCrieHGO208l9O5pO7Qxhwa1jq8B3ZM9lLf-9G5GHnhvaVNZRrr-WeBQGAKgNMePYAK1ceCcVXEF3_RRas9bV0kpj96w_W8TJkQAN4TQZ4RIaiJAFJj-TWM700R4mi2wcVygRUDCz9g01zJ2xUu07rAtRLkHp516HvTSHWLulq3LC_Anm8DP1gCq5AgK0yzXoLeCCN6Ho3KcxbSISWB-rfvxFj8qE5eNNx6joBygyKIOlPPYY0mtHDLJSfapmgo0Xja776BpXTS_cpTjSMYL7Fb01akfi925J5rFN1NMe9HPFDnmBgwsnNcLOAFHkP8Ht0LnFRT0wLvLrJdMhWn7b27Lf4V0ebLC3n-GeTAI0BpdtSSRm-69nHPBwz0aQljanov4loCH3pEyb3XlIaia2WiRQYA5H2N4dD0C9ogygLMh8vCYj1cAN1VjA4nVUFjAR-6XrEf2pEePRraB_u345M73cmqghS_XWFWqbCH0s0yTXT7Pl4V9rg5ky_HxbZIoS8btWFIzNpTavTWVTncP7LvIVp-L6vYMP9AUDijAi0NWMuS0QOvpjh0QZkpc6ya5YCUJ9wI0AjBYJ-mI9FlseCz8GenFjwy6hMywOOLuu-q58q2h8XWtJ1HP2vnDRtUKspqSNQ0c_UhwrcOgHgFYm1Lzn-KSzjoZkGbVmOTi1MeTOw6Zf66SNcPwqekGJu9GFSQsgpHAlyigcCiwTBr4I1o1AMpWhiMWLOBLjWaARcCXHy8dSRMi-wB2dhvB6EZ726fg7utPwVHEnWiqMwTfl0ruj6pFbG6_59tHfS38GMkHmhDZ1AGFUW1IWlpdB5NgBIaE9PpYGaRCormfgi5S72BiCLf-7R7qUYmL3x83vU847wafX9SHFbuZVSxkzB0ZkwUGmpVGZHO6ldavYrsPJ-73hgnMyfYdI22dYaiFhFidslkC4yiPwg6j226B9My8Ux42_Q75DZV7RC9SU_uKH9XsCNjGrsu2jnMcC1JCaV7TNIeIWtoudHlTJmxxvXbXA76r1w-ogOZMiNOoIetwAqjhMqDNIS9jtFxsJExtjy1WZOJFajn4E_u7ae3xpWcQ5VIXa3KKC-TeLVfg52lXE1FoGp13Dd3Ex3ObT1fd8eOIqKqSpF8zFCAW_o-kjDDm6u8Kn7zUhLix56_2WvCtAuvy1pt0OTJy8Wv2oIug93g8e1tjl3ShjzfCmKE9-WMgGy0aukRoAuFICBJnO4wzFvpTyYLhc0CwOHCCkxZwUU8sv32K3njS2jyvXYc5MkfZiL4wHOB8LBhnMYUG_IlJfDVXoWd3n4idN1AHC_PegV5lRxAAbF-QlRP76PKl8KVu1XgrqiR3G5NjmQ38INGeeN6kKZexNmZfbY3ZrW64ADb9O8ZUZlxor7PYu5qI4flzWK6czahFEsK93k2D46Kbsmzj5FCgDl4iQbniR0oYSa5adW-7FqNz_Pw7Wv5IXAWViROCR0-oBeDxtjNdTmkIgSouzVZem7J0srrRCmoZ0BdkOmJN9dR4PeVuLHj1rYwkpXC6llhzXReNWGOXjkqZVRbbPEMQ8ZZpl84BWmZT62Gc7aVuleOpY4IcoIiQgYp7gdZmxctDbyRn8R7m7PWOITxDvY-BUisxeS3rZf86EPAv5cTpj1sndH4hDHzdJFSyT7jEFkOjBh7FHSzcfCReP6Ec6oNcFMPbFoIp466VW9iIv5vZdvmbuIF4dYbjX6XitT1CyhCQoAy3_cDqN5o99ujAapKZMndrjAz-lK7pFcC3bDCiEXdjF9Zy1Zu8HjesvV9csLOu3WmTWJ8_5X-TDWOHqBN57lBrNHn0fhId5ztiu3uopwOrMAkSbWtWBcVH6fw0ecygpGll-3g1NZVSCHkA6SgBqch7axPwwFq7FGeGjE_60HPcWiYYBWdYH_12Z8jHsP2aYjkLXq91oUAIjJhO24RTfNr1XUnZt7BiSHQMoIYq_bbQIgdlkfywzTICvO8Q7YVLqCrVwAJTK920M7SU0kDKfT73ULOlM1k542an0nKbfT_0OnepSa_8rMjXsQvqem_FcYuLIr7soLl8ksHXJcAVK3O7ytB7MhoZg8zUSJTKTh-Mxuy_Wxg1RCsF7DnnEydcUYJBL3j17rVMHhBbnMMzdT3RiQ5oBXJeZ67m6m-yusVMRI0WElQxTIz6s_MhtugaV5KSR2prd2NVpakinpf6QQ_9DdD2CGd5hkv_yAViuo4xmJQLZ02HHsYjT_Am3dcUtRBgy04aDmv_dfo860G5Fr_Zpyc9ym9zD5AaQR8jzdjx5mNWKwyMKEC3GgDaq8Ifn5PzJx_gqq6Eis613dMu8GIFQUcJHntZmw5NXuOHhh3Gh82Mx2lXT4OSirREZnJ-NNztwlv33V8bD.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC02LWx1bmEtMjAyNjA5MjJ8b3BlbmFpIn0",
+        "format": "openai-responses-v1",
+        "id": "rs_023ac2e80a704f97016ae2b7a3505c87d19bc0ba09bec6e24b",
+        "index": 0
+      }
+    ],
+    "model": "openai/gpt-6-luna",
+    "usage": {
+      "prompt_tokens": 1780,
+      "completion_tokens": 437
+    },
+    "finishReason": "stop"
+  },
+  "slot": {
+    "family": "rows",
+    "primarySkill": "positioning",
+    "difficulty": "easy",
+    "contentTheme": "animals in motion",
+    "format": "packaging design",
+    "wordRange": [
+      35,
+      70
+    ],
+    "benchmarkSlice": "drawing",
+    "artStyle": "high-contrast neon on a dark ground",
+    "voice": "professional: explain the audience, purpose and design priorities as a client would",
+    "requestStructure": "a self-contained request with a change of mind: describe the initial idea and its replacement",
+    "detailLevel": "specified: use the suggested format and art style, with explicit composition and visual priorities",
+    "index": 6
+  },
+  "recentPromptsToAvoid": []
+}

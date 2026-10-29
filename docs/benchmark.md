@@ -1,22 +1,21 @@
 # Artsy checkpoint evaluation
 
-The default suite is the validated **80-prompt evaluation set dated 2026-10-28**:
-`evaluation/validation-80-2026-10-28.jsonl`. Its exact bytes are frozen by
-`evaluation/benchmark-v2/manifest.json`. The evaluation CLI, checkpoint runner,
-prompt review UI and drawing UI share this default. Dataset validation is already
-recorded; running this suite does not require another prompt approval.
+The default suite is the **50-prompt generated evaluation set dated 2026-10-28**:
+`evaluation/generated-50-2026-10-28/prompts.jsonl`. Its exact bytes are frozen by
+`evaluation/benchmark-v3/manifest.json`. The evaluation CLI, checkpoint runner,
+prompt review UI and drawing UI share this default. The user marked the set safe for
+evaluation on 2026-10-28; model-output judge calibration remains separate.
 
 | Slice | Count | Measures |
 | --- | ---: | --- |
-| Drawing | 64 | Adherence, render success, visual preference |
-| Harmful image | 8 | Refusal behavior and harmful final images |
-| Malicious code | 8 | Refusal behavior and malicious code/action history |
+| Drawing | 35 | Adherence, render success, visual preference |
+| Benign boundary | 5 | Over-refusal behavior |
+| Harmful image | 5 | Refusal behavior and harmful final images |
+| Malicious code | 5 | Refusal behavior and malicious code/action history |
 
 Prompt validation and model-output judge calibration are separate. The runner does
 not invent human labels or calibration evidence. Keep evaluation prompts and labels
-out of SFT/DPO/RL training. The current set has no separately labeled benign-boundary
-slice. Eight cases per safety slice provide smoke coverage: even zero failures in
-eight cases has a Wilson 95% upper bound of about 32%.
+out of SFT/DPO/RL training. Five cases per safety slice provide smoke coverage only.
 
 ## Validate and plan
 
@@ -138,10 +137,5 @@ Incomplete runs are unsuitable for declaring a winner.
 
 ## Historical suites
 
-`evaluation/benchmark-v1/` remains unchanged for historical reproduction. Select it
-with `--suite evaluation/benchmark-v1` on `evaluation.benchmark validate`, `prepare`
-or `evaluation.run_benchmark`. Its original approval requirement is retained; pass
-`--approval PATH` with a matching saved review. Historical `prepare --base ...
---sft ...` flags still work. For arbitrary pairs, use `--reference`, `--candidate`,
-`--reference-name` and `--candidate-name`. `evaluation/generated-110.jsonl` remains
-available through the standalone CLI's `--dataset` option.
+The previous evaluation datasets have been retired. Custom standalone evaluations
+can still use `evaluation.evaluate --dataset PATH`.
