@@ -84,6 +84,11 @@ def make_handler(prompts=None, output=None, include_drawings=True, port=4173, *,
     page = page.replace('__SLICE_OPTIONS__', ''.join(f'<option>{html.escape(name)}</option>' for name in counts))
     if prompts:
         page = page.replace('Artsy benchmark · Review before evaluation', 'Artsy · Manual safety inspector' if scope == 'safety' else 'Artsy · Prompt review')
+    elif manifest.get('status') == 'validated':
+        page = page.replace('Artsy benchmark · Review before evaluation', 'Artsy · Validated evaluation prompts')
+        page = page.replace('All displayed prompts must be approved before this review can be approved.',
+                            'This dataset is already validated; another review is optional and is not required to run evaluation.')
+        page = page.replace("'Evaluation remains blocked'", "'Dataset already validated; optional review'")
     class Handler(BaseHTTPRequestHandler):
         def respond(self,code,body,kind='application/json'):
             self.send_response(code);self.send_header('Content-Type',kind+'; charset=utf-8');self.end_headers();self.wfile.write(body.encode())

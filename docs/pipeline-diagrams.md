@@ -72,35 +72,42 @@ datasets are left intact; new candidate generation uses dataset v6.
 
 ```mermaid
 flowchart TD
-    A[evaluation/generated-110.jsonl or custom dataset] --> B[Validate specs<br/>select limit and epochs]
-    B --> C[Inspect task and Mini SWE Agent]
-    D[Qwen model endpoint<br/>bundled server or ARTSY_MODEL_URL] <--> C
-    C --> E[Docker sandbox<br/>write program.py, preview, repair]
-    F[ArtCanvas docs and trusted preview renderer] --> E
-    E --> G{Final program or refusal?}
-    G -- Program --> CS{Audit Python and reported bash actions}
-    CS -- Malicious --> CB[Block final render, zero adherence]
-    CS -- Safe --> H[Fresh trusted render<br/>in sandbox]
-    H --> I{Valid 1920x1200 PNG?}
-    I -- No --> J[render_valid = 0<br/>no image to judge]
-    I -- Yes --> K[Save source, PNG, hashes,<br/>execution feedback]
-    K --> L{Full visual evaluation?}
-    L -- No --> M[render_valid score only]
-    L -- Yes --> N[Correctness vision judge<br/>prompt match and adherence]
-    L -- Yes --> O[Independent safety vision judge]
-    N --> P[Record adherence and<br/>harmfulness scores]
-    O --> P
-    G -- Refusal / no program --> J
-    J --> Q[Inspect logs, per-sample artifacts,<br/>summary.json]
-    M --> Q
+    A[Validated 80-prompt suite or custom dataset] --> B[Validate specs and frozen suite hash]
+    B --> C[Host-side Inspect agent]
+    D[Policy endpoint and selected checkpoint] <--> C
+    C --> E[Docker bash sandbox: write, preview PNG, repair]
+    E --> F[Audit final Python and bash action history]
+    F --> G{Malicious?}
+    G -- Yes --> H[Block final render]
+    G -- No --> I{Explicit successful submission?}
+    I -- No --> J[Incomplete: no positive score]
+    I -- Yes --> K{Program or structured refusal?}
+    K -- Refusal --> L[Refusal protocol check]
+    K -- Program --> M[Trusted render in a fresh directory]
+    M --> N{Valid 1920x1200 PNG?}
+    N -- No --> J
+    N -- Yes --> O[Independent adherence 0–4 and image-safety calls]
+    O --> P[Normalize adherence to 0–1]
+    H --> Q[Artifacts, Inspect logs and summary]
+    J --> Q
+    L --> Q
     P --> Q
+    Q --> R[Pairwise blind review for selected checkpoints]
+    R --> S[Human visual preference, refusal quality and judge calibration]
 ```
 
-The benchmark agent runs in Docker; its calls to the model are proxied through the
-host endpoint. The final scorer re-runs the latest source with the trusted renderer,
-so a preview image alone cannot pass. Full evaluation needs separate correctness
-and safety judge roles plus a code-safety role. The latter audits actions that
-already ran in Docker and gates the final render; `--execution-only` skips all three.
+The CLI, comparison runner and UI share the validated October 28 suite frozen by
+`evaluation/benchmark-v2/manifest.json`. The host runs the agent loop and model
+clients; bash tools execute inside network-isolated Docker. Code safety audits
+also cover unfinished episodes and actions before a refusal. Final rendering uses
+trusted files in a fresh directory inside the episode sandbox. `--execution-only`
+skips judges while retaining the submission requirement. Inspect and RL share the
+0–4 adherence rubric. Protocol refusal success and human semantic refusal quality
+remain separate metrics.
+
+`evaluation.run_benchmark` accepts named base/SFT/DPO/RL checkpoints, applies shared
+budgets and judges, and writes all pairwise review packets and reports. Validated
+suite bytes need no repeat prompt approval. Historical benchmark v1 is preserved.
 
 ## Supervised fine-tuning (`training.sft`)
 
@@ -175,7 +182,7 @@ See [stage configuration and commands](preference-rlhf.md).
 
 Dataset generation uses the model-independent `DrawingEnvironment` and the
 local ArtCanvas/Cairo renderer. SFT converts its recorded artifacts without
-re-rendering them. Benchmark evaluation uses the Inspect SWE Mini SWE agent in a
-fresh Docker container with image previews, then invokes its own trusted renderer
+re-rendering them. Benchmark evaluation uses the host-side Inspect agent with bash tools and image
+previews in a fresh Docker sandbox, then invokes its own trusted renderer
 for final scoring. The base-model serving endpoint is separate from the hosted
 Tinker training client.

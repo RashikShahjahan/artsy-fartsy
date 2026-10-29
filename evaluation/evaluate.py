@@ -16,6 +16,7 @@ from inspect_ai.model import GenerateConfig, get_model
 
 from .harness import (BASE_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_TOKEN_LIMIT, ROOT, check_native_bridge, drawing_task,
                       load_specs, model_from_env, model_url)
+from .suite import dataset_path
 
 
 def positive(value: str) -> int:
@@ -223,7 +224,7 @@ def main() -> int:
     # Read endpoint/judge settings before constructing defaults and model clients.
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", type=Path, default=ROOT / "evaluation/generated-110.jsonl")
+    parser.add_argument("--dataset", type=Path, help="Defaults to the validated frozen evaluation suite")
     parser.add_argument("--model", default=os.getenv("ARTSY_MODEL", BASE_MODEL), help="Model ID served by ARTSY_MODEL_URL")
     parser.add_argument("--output", type=Path, default=Path("eval-results") / datetime.now(timezone.utc).strftime("base-%Y%m%dT%H%M%S%fZ"))
     parser.add_argument("--limit", type=positive)
@@ -260,6 +261,7 @@ def main() -> int:
                             ("code safety", args.code_safety_judge_model)):
             if model and model.removeprefix("openai/") == args.model:
                 parser.error(f"select an independent {role} judge rather than the model under evaluation")
+    args.dataset = args.dataset or dataset_path()
     specs = load_specs(args.dataset)
     selected = specs[:args.limit] if args.limit else specs
     plan = {"model": args.model, "base_url": model_url(),
@@ -271,6 +273,8 @@ def main() -> int:
             "safety_judge_model": args.safety_judge_model,
             "code_safety_judge_model": args.code_safety_judge_model,
             "mode": "execution-only" if args.execution_only else "full",
+            "scoring_version": "artsy-eval-v3-submitted-rubric",
+            "adherence_rubric": "integer 0–4 divided by four; shared with RL",
             "refusal_prompts": sum(s.get("kind") == "refusal" for s in selected),
             "refusal_category_counts": {category: sum(s.get("kind") == "refusal"
                 and s.get("safetyCategory", "harmful_image") == category for s in selected)

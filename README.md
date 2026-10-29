@@ -1,6 +1,6 @@
 # Artsy drawing environment
 
-Qwen/Qwen3.5-4B → Mini SWE Agent → Python/ArtCanvas → PNG + editable source.
+Qwen/Qwen3.5-4B → host-side Inspect agent → Docker bash → Python/ArtCanvas → PNG + editable source.
 
 Includes the Qwen model adapter, a versioned drawing API, a model-independent
 episode environment, an Inspect SWE write → run → fix → submit loop, and a base-model evaluation script.
@@ -101,19 +101,20 @@ size up to 4096×4096. A fixed Python random seed is injected for every render.
 
 ## Harness and execution
 
-`inspect_swe.mini_swe_agent()` runs Mini SWE Agent 2.2.3 inside a fresh Docker
-container per request. Its bash tool writes `/workspace/program.py`, runs previews,
+`evaluation.host_agent.drawing_agent()` runs the tool loop on the host with a
+fresh Docker sandbox per request. Its bash tool writes `/workspace/program.py`, runs previews,
 and repairs errors. The supplied preview command returns execution feedback and
 the actual PNG as a multimodal observation. The agent finishes with
 `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`; the scorer then executes its latest
 source again in a fresh directory and validates a 1920×1200 PNG. A textual claim
 or stale preview cannot count as a submission. A structured refusal is represented
-by `refusal.json` containing a concise `reason`, with no `program.py`.
+by `refusal.json` containing a concise `reason`, with no `program.py`. Both outputs require the explicit
+submission command to pass.
 
 The container has no outbound network or host mounts. Inspect proxies model calls
 through the host to the native Tinker bridge (or another configured endpoint).
-Inspect and its OpenAI SDK run in the host environment; Mini SWE and LiteLLM run
-in the container, keeping their SDK dependency requirements separate.
+Inspect and model clients run on the host. The container contains the drawing
+runtime and tools; it has no agent framework or model SDK.
 `evaluation/mini.yaml` sets twenty model turns, 65-second command timeouts (60-second renders plus cleanup),
 8,192 tokens per response, and disabled local-model cost lookup. Inspect sets
 a 1,000-second sample limit and no aggregate token budget by default.
@@ -197,13 +198,19 @@ cross-platform pixel identity is not guaranteed.
 
 ## Evaluate the base model
 
-The drawing CLI and evaluation use the same Inspect SWE Mini SWE harness, model
-endpoint, API documentation, limits, and fresh final-render scorer.
-The checked-in `evaluation/generated-110.jsonl` is the full evaluation suite: 110
-specifications with 90 drawing requests and 20 refusal requests, split across the
-easy, medium, hard, and very-hard difficulty levels. Keep these out of SFT data;
-the old pilot splits were partly consumed by warmup selection. This suite is not a
-calibrated benchmark or a claim of template-family separation from training.
+The drawing CLI and evaluation use the same host-side Inspect agent, Docker bash
+sandbox, model endpoint, API documentation, limits and trusted final-render scorer.
+The shared default is the validated `evaluation/validation-80-2026-10-28.jsonl`:
+64 drawing tasks, eight harmful-image requests and eight malicious-code requests.
+`evaluation/benchmark-v2/manifest.json` freezes the exact dataset bytes. Keep these
+prompts out of training. The older 110-prompt suite remains available with
+`--dataset evaluation/generated-110.jsonl`; benchmark v1 remains selectable with
+`--suite evaluation/benchmark-v1` on benchmark commands.
+
+Evaluation requires successful explicit submission and uses the same integer 0–4
+adherence rubric as RL, normalized to 0–1. Refusal protocol success and human
+semantic refusal quality are reported separately. See [checkpoint comparisons,
+blind review and calibration](docs/benchmark.md).
 
 ```sh
 # Validate the test set and show the plan without model requests or Docker:
@@ -212,7 +219,7 @@ calibrated benchmark or a claim of template-family separation from training.
 # With `make serve` running, check execution on one sample:
 .eval-venv/bin/python -m evaluation.evaluate --execution-only --limit 1 --output eval-results/base-smoke
 
-# Full evaluations use two independent Inspect grader roles:
+# Full evaluations use separate adherence, image-safety and code-safety roles:
 export ARTSY_CORRECTNESS_JUDGE_MODEL=thinkingmachines/Inkling:peft:262144
 export ARTSY_SAFETY_JUDGE_MODEL=thinkingmachines/Inkling:peft:262144
 # For separately hosted OpenAI-compatible endpoints, also set:
@@ -234,9 +241,8 @@ those comparisons; raw Inspect aggregate scores include both prompt kinds.
 Set `ARTSY_MODEL_URL` and optionally `ARTSY_MODEL_API_KEY` to select a different
 chat-completions endpoint. The drawing and evaluation CLIs load settings from the
 repository's `.env` before reading model and judge defaults; exported variables take
-precedence. The Inspect SWE bridge temporarily supplies this model
-key (or `local-no-auth` for the bundled server) when recreating the OpenAI-compatible
-client, then restores `OPENAI_API_KEY`. A real OpenAI key is not needed to evaluate
+precedence. The host constructs a dedicated model client with this key (or `local-no-auth`
+for the bundled server), independently of the judge clients. A real OpenAI key is not needed to evaluate
 local Qwen. `--model` overrides the default `Qwen/Qwen3.5-4B`.
 
 ### Native Tinker sampling (default)
@@ -253,7 +259,7 @@ ARTSY_MODEL=Qwen/Qwen3.5-4B
 In a separate terminal, start `make serve`. The server authenticates to Tinker
 via `TINKER_API_KEY` (or the configured Tinker CLI credentials); the evaluation
 client only talks to the local bridge and needs no OpenAI key. Before a real
-evaluation, verify the two Mini SWE prerequisites—tool calling and inline PNG
+evaluation, verify tool calling and inline PNG
 input—with two small paid requests:
 
 ```sh
@@ -710,8 +716,8 @@ can be increased for constant-rate runs. `final.json` records both the training 
 weights path. Use Tinker's sampling client or
 [adapter export workflow](https://tinker-docs.thinkingmachines.ai/cookbook/deployment/lora-adapter/)
 for inference. No local full-model `final/` directory is produced.
-Use `evaluation/generated-110.jsonl` for full behavioral evaluation with sufficient
-generation limits in both the serving endpoint and harness.
+Use the default validated 80-prompt suite for full behavioral evaluation with
+sufficient generation limits in both the serving endpoint and harness.
 
 ## Visual preference DPO between SFT and RL
 
@@ -765,11 +771,13 @@ CPUs; renders have a one-minute limit and bash commands have a 65-second timeout
 
 ### Independent reward signals
 
-The [80-prompt base/SFT benchmark](docs/benchmark.md) covers 56 drawing tasks,
-8 benign safety-boundary tasks, 8 harmful-image requests, and 8 malicious-code
-requests. It includes a frozen manifest, blind A/B human review packets, and
-reports for adherence, safety, visual preference, and judge calibration.
-Run it with `python -m evaluation.run_benchmark --output eval-results/benchmark-v1-base-sft`.
+The [validated 80-prompt checkpoint benchmark](docs/benchmark.md) covers 64 drawing
+tasks, eight harmful-image requests and eight malicious-code requests. It compares
+base, SFT, DPO and RL checkpoints with shared budgets, and creates blind A/B human
+review packets and per-pair reports. Run
+`python -m evaluation.run_benchmark --output eval-results/checkpoint-comparison` to
+compare base with all available completed adapters, or repeat `--model NAME=MODEL_ID`
+to select checkpoints. The validated dataset needs no repeat prompt approval.
 
 The policy and adherence/safety judges use separate clients. Visual quality is
 optimized in DPO and contributes no score or reward to RL.

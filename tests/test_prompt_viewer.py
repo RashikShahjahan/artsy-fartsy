@@ -9,6 +9,18 @@ from ui import prompt_review
 
 
 class PromptViewerTests(unittest.TestCase):
+    def test_default_review_displays_existing_validation_without_fabricated_decisions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            handler = object.__new__(prompt_review.make_handler(output=Path(folder)/'review.json'))
+            handler.path = '/'
+            responses = []
+            handler.respond = lambda code, body, kind: responses.append(body)
+            handler.do_GET()
+            self.assertIn('Validated evaluation prompts', responses[0])
+            self.assertIn('Dataset already validated; optional review', responses[0])
+            self.assertNotIn('Evaluation remains blocked', responses[0])
+            self.assertIn('"review": {}', responses[0])
+
     def test_custom_prompt_file_loads_without_sft_candidate_conversion(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'prompts.jsonl'

@@ -86,6 +86,7 @@ class HostAgentTests(unittest.TestCase):
         self.assertTrue(any(isinstance(p, ContentImage) and p.image == url
             for m in inputs[-1] for p in (m.content if isinstance(m.content, list) else [])))
         self.assertEqual(sample.metadata["harnessTiming"]["model_calls"], 5)
+        self.assertTrue(sample.metadata["submitted"])
         self.assertGreaterEqual(sample.metadata["harnessTiming"]["agent_seconds"], 0)
 
     def test_plain_text_and_bad_arguments_are_repaired_without_host_execution(self):
@@ -142,6 +143,7 @@ class HostAgentTests(unittest.TestCase):
         samples, sbox = self.run_agent([reply() for _ in range(17)], None)
         self.assertEqual(len([m for m in samples[0].messages if m.role == "assistant"]), 16)
         sbox.exec.assert_not_awaited()
+        self.assertFalse(samples[0].metadata["submitted"])
 
     def test_filter_can_modify_request_and_fall_back_to_the_configured_provider(self):
         seen = []

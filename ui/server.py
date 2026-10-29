@@ -15,6 +15,7 @@ from urllib.request import urlopen
 
 from drawing.config import MODEL_ID
 from drawing.dataset_client import OPENROUTER_MODEL_URL
+from evaluation.suite import dataset_path
 
 DIRECT_MODELS = [
     {"id": "openai/gpt-6-luna", "label": "GPT-6 Luna", "direct": True},
@@ -41,7 +42,7 @@ MOUNTED_HANDLERS = {}
 
 
 def drawing_dataset():
-    path = Path(DRAWING_DATASET).resolve() if DRAWING_DATASET else ROOT / 'evaluation/benchmark-v1/prompts.jsonl'
+    path = Path(DRAWING_DATASET).resolve() if DRAWING_DATASET else dataset_path()
     raw = path.read_bytes()
     rows = validate_specs([json.loads(line) for line in raw.splitlines() if line.strip()])
     drawings = [row for row in rows if row.get('kind') != 'refusal'

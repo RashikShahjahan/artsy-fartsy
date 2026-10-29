@@ -1,5 +1,5 @@
 PYTHON ?= .venv/bin/python
-EVAL_PYTHON ?= .eval-venv/bin/python
+EVAL_PYTHON ?= $(if $(wildcard .eval-venv/bin/python),.eval-venv/bin/python,$(PYTHON))
 ARGS ?=
 
 .PHONY: ui serve render draw eval eval-base dataset dpo grpo test test-eval check

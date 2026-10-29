@@ -28,7 +28,7 @@ Open http://127.0.0.1:4173. No separate inspector servers are needed. Without
 `ARTSY_DRAWING_DATASET` and `ARTSY_CANDIDATE_DATASET` can supply these paths.
 
 Prompt decisions use the existing `prompts.review.json` beside a custom prompt
-file, or `eval-results/dataset-review/approval.json` for the frozen benchmark.
+file, or `eval-results/dataset-review/approval.json` for historical benchmark v1. The validated default suite is the October 28 80-prompt set; its recorded validation does not require repeat approval for evaluation.
 Candidate decisions default to `manual-review.json` and approved exports to
 `accepted.jsonl` beside the candidates. Override with `--review-output`,
 `--candidate-review`, and `--accepted-output`. The original data is preserved.

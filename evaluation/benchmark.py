@@ -1,4 +1,4 @@
-"""Frozen base/SFT benchmark, blind review packets, and judge calibration reports.
+"""Frozen checkpoint comparisons, blind review packets, and calibration reports.
 
 No model calls are made by this module. Run evaluation.evaluate for each model.
 """
@@ -13,10 +13,7 @@ from pathlib import Path
 import random
 import shutil
 
-from drawing.eval_specs import load_specs
-
-ROOT = Path(__file__).resolve().parents[1]
-SUITE = ROOT / 'evaluation/benchmark-v1'
+from .suite import ROOT, SUITE, suite
 
 
 def digest(data):
@@ -25,17 +22,6 @@ def digest(data):
 
 def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False) + '\n')
-
-
-def suite():
-    manifest = json.loads((SUITE / 'manifest.json').read_text())
-    path = SUITE / manifest['dataset']
-    if digest(path.read_bytes()) != manifest['sha256']:
-        raise ValueError('Benchmark dataset differs from its frozen manifest')
-    specs = load_specs(path)
-    if dict(Counter(s['benchmarkSlice'] for s in specs)) != manifest['counts']:
-        raise ValueError('Benchmark slice counts differ from manifest')
-    return manifest, specs
 
 
 def rate(values):
@@ -70,8 +56,9 @@ def classification(pairs):
 def load_run(path, specs):
     path = Path(path).resolve()
     summary = json.loads((path/'summary.json').read_text())
-    if set(summary['ids']) != {s['id'] for s in specs} or summary['epochs'] != 1:
-        raise ValueError('Run must contain exactly the frozen 80 prompts with one epoch')
+    if (len(summary['ids']) != len(specs) or set(summary['ids']) != {s['id'] for s in specs}
+            or summary['epochs'] != 1):
+        raise ValueError('Run must contain exactly the frozen prompts with one epoch')
     rows = {}
     for spec in specs:
         folder = path/'artifacts'/f"{spec['id']}-1"
@@ -91,7 +78,7 @@ def load_run(path, specs):
 
 
 def validate(args):
-    manifest, specs = suite()
+    manifest, specs = suite(getattr(args, 'suite', SUITE))
     result = {**manifest, 'difficulty_counts':dict(Counter(s['difficulty'] for s in specs)),
               'skill_counts':dict(Counter(k for s in specs for k in s.get('skills',[])))}
     overlaps=[]
@@ -111,14 +98,27 @@ def validate(args):
 
 
 def prepare(args):
-    manifest, specs = suite()
-    runs={name:load_run(path,specs) for name,path in [('base',args.base),('sft',args.sft)]}
-    if runs['base'][0]['model'] != manifest['models'][0] or runs['sft'][0]['model'] != manifest['models'][1]:
+    manifest, specs = suite(getattr(args, 'suite', SUITE))
+    reference = getattr(args, 'reference_name', 'base')
+    candidate = getattr(args, 'candidate_name', 'sft')
+    if reference == candidate:
+        raise ValueError('Comparison names must be distinct')
+    runs={name:load_run(path,specs) for name,path in [(reference,args.base),(candidate,args.sft)]}
+    if (manifest['version'] == 'artsy-benchmark-v1' and (reference, candidate) == ('base', 'sft')
+            and [runs[name][0]['model'] for name in (reference,candidate)] != manifest['models']):
         raise ValueError('Expected the base model and artsy/sft-v1 runs in the corresponding arguments')
+    # Reject accidental comparisons between runs with different scoring or budgets.
+    for key in ('scoring_version', 'max_tokens', 'token_limit', 'token_limit_type',
+                'correctness_judge_model', 'safety_judge_model', 'code_safety_judge_model', 'mode'):
+        if runs[reference][0].get(key) != runs[candidate][0].get(key):
+            raise ValueError(f'Comparison runs differ in {key}')
     evidence=[]; private={}; annotations=[]
     for spec in specs:
-        ident=spec['id']; order=['base','sft']
-        random.Random('benchmark-v1:'+ident).shuffle(order)
+        ident=spec['id']; order=[reference,candidate]
+        shuffle_key = (f'benchmark-v1:{ident}' if manifest['version'] == 'artsy-benchmark-v1'
+                       and (reference,candidate) == ('base','sft') else
+                       manifest['version']+':'+reference+':'+candidate+':'+ident)
+        random.Random(shuffle_key).shuffle(order)
         item={'id':ident,'prompt':spec['prompt'],'slice':spec['benchmarkSlice'],'sides':{}}
         private[ident]={}
         for side, name in zip(('A','B'),order):
@@ -146,6 +146,7 @@ def prepare(args):
         annotations.append({'id':item['id'],'packet_id':packet_id,'reviewer':'','sides':labels,'visual_winner':None,'notes':''})
     write_json(output/'packet.json',{'packet_id':packet_id,'items':evidence})
     write_json(output/'private.json',{'packet_id':packet_id,'manifest':manifest,'mapping':private,
+        'comparison': {'reference': reference, 'candidate': candidate},
         'runs':{name:summary for name,(summary,_) in runs.items()}})
     (output/'labels.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in annotations))
     sections=[]
@@ -195,17 +196,23 @@ def report(args):
             if data and data['image'] and digest((folder/data['image']).read_bytes()) != data['image_sha256']:
                 raise ValueError('Review image changed')
     labels=load_labels(args.labels,packet)
-    result={'version':'artsy-benchmark-report-v1','packet_id':packet['packet_id'],
+    result={'version':'artsy-benchmark-report-v2','packet_id':packet['packet_id'],
             'calibration_status':'human review pending' if not labels else 'human labels supplied; independent adjudication still required',
             'models':{},'visual':{}}
-    for model in ('base','sft'):
-        groups={}; code_pairs=[]; image_pairs=[]; adherence_errors=[]
+    comparison = private.get('comparison', {'reference': 'base', 'candidate': 'sft'})
+    reference, candidate = comparison['reference'], comparison['candidate']
+    result['comparison'] = comparison
+    for model in (reference,candidate):
+        groups={}; code_pairs=[]; image_pairs=[]; adherence_errors=[]; human_refusals=[]
         for item in packet['items']:
             side=next(s for s,v in private['mapping'][item['id']].items() if v['model']==model)
             row=private['mapping'][item['id']][side]['result']; human=labels.get(item['id'],{}).get('sides',{}).get(side,{})
             for group in ('all',item['slice']):groups.setdefault(group,[]).append((row,item['slice']))
             if row is None:continue
             scores=row.get('scores',{}); judgments=row.get('judgments',{})
+            if item['slice'] in ('harmful_image','malicious_code') and row.get('outcome') == 'refused':
+                if type(human.get('refusal_appropriate')) is bool:
+                    human_refusals.append(human['refusal_appropriate'])
             code_pairs.append((judgments.get('codeSafety',{}).get('malicious'),human.get('code_malicious')))
             image_pairs.append((judgments.get('safety',{}).get('harmful'),human.get('image_harmful')))
             if item['slice'] in ('drawing','benign_boundary') and scores.get('render_valid') and human.get('adherence_0_4') is not None:
@@ -226,6 +233,7 @@ def report(args):
                 'benign_adherence_mean':mean([r['scores']['adherence'] for r in benign if 'adherence' in r.get('scores',{})])}
         result['models'][model]={'run_status':private['runs'][model]['status'],
             'sample_errors':private['runs'][model].get('sample_errors'), 'slices':reports,
+            'human_refusal_appropriateness': rate(human_refusals),
             'judge_calibration':{'code':classification(code_pairs),'image':classification(image_pairs),
                 'adherence':{'n':len(adherence_errors),'mae_0_1':mean(adherence_errors)}}}
     wins=[]; eligible=0
@@ -237,17 +245,19 @@ def report(args):
                    human.get('sides',{}).get(s,{}).get('code_malicious') is False and
                    human.get('sides',{}).get(s,{}).get('image_harmful') is False for s,v in mapping.items()):continue
         eligible+=1; winner=human.get('visual_winner')
-        if winner:wins.append(0.5 if winner=='Tie' else float(mapping[winner]['model']=='sft'))
-    result['visual']={'human_safe_pairs':eligible,'labeled_pairs':len(wins),'sft_wins':wins.count(1.),'ties':wins.count(.5),
-        'base_wins':wins.count(0.),'sft_win_fraction_with_half_ties':mean(wins),
+        if winner:wins.append(0.5 if winner=='Tie' else float(mapping[winner]['model']==candidate))
+    result['visual']={'human_safe_pairs':eligible,'labeled_pairs':len(wins),'candidate_wins':wins.count(1.),'ties':wins.count(.5),
+        'reference_wins':wins.count(0.),'candidate_win_fraction_with_half_ties':mean(wins),
         'note':'Conditional on both models rendering human-reviewed safe images. Missing/unsafe pairs are not aesthetic losses.'}
+    if (reference,candidate) == ('base','sft'):
+        result['visual'].update(sft_wins=wins.count(1.),base_wins=wins.count(0.),sft_win_fraction_with_half_ties=mean(wins))
     write_json(Path(args.output),result);print(json.dumps(result,indent=2))
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__); sub=parser.add_subparsers(dest='command',required=True)
-    p=sub.add_parser('validate');p.add_argument('--training',action='append',default=[]);p.set_defaults(func=validate)
-    p=sub.add_parser('prepare');p.add_argument('--base',required=True);p.add_argument('--sft',required=True);p.add_argument('--output',required=True);p.set_defaults(func=prepare)
+    p=sub.add_parser('validate');p.add_argument('--suite',type=Path,default=SUITE);p.add_argument('--training',action='append',default=[]);p.set_defaults(func=validate)
+    p=sub.add_parser('prepare');p.add_argument('--suite',type=Path,default=SUITE);p.add_argument('--base','--reference',dest='base',required=True);p.add_argument('--sft','--candidate',dest='sft',required=True);p.add_argument('--reference-name',default='base');p.add_argument('--candidate-name',default='sft');p.add_argument('--output',required=True);p.set_defaults(func=prepare)
     p=sub.add_parser('report');p.add_argument('--packet',required=True);p.add_argument('--labels');p.add_argument('--output',required=True);p.set_defaults(func=report)
     args=parser.parse_args();return args.func(args) or 0
 

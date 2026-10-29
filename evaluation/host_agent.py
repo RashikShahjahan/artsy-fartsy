@@ -15,7 +15,7 @@ from inspect_ai.util import sandbox
 import yaml
 
 AGENT_NAME = "artsy-host"
-AGENT_VERSION = "1"
+AGENT_VERSION = "2"
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
@@ -70,6 +70,7 @@ def drawing_agent(system_prompt, config, generation_filter=None):
         sample = sample_state()
         if sample is not None:
             sample.metadata["harnessTiming"] = timing
+            sample.metadata["submitted"] = False
         submitted = False
 
         @tool(name="bash", parallel=False)
@@ -130,6 +131,8 @@ def drawing_agent(system_prompt, config, generation_filter=None):
                     break
         finally:
             timing["agent_seconds"] = monotonic() - began
+            if sample is not None:
+                sample.metadata["submitted"] = submitted
         return state
 
     return run

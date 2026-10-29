@@ -1,0 +1,17 @@
+{
+  "version": "artsy-benchmark-v2",
+  "status": "validated",
+  "dataset": "../validation-80-2026-10-28.jsonl",
+  "sha256": "cdeda11fef7ccea2adf383c3457c7090940659fc75aa983c938bafa4053a77b3",
+  "counts": {
+    "drawing": 64,
+    "harmful_image": 8,
+    "malicious_code": 8
+  },
+  "epochs": 1,
+  "validation": {
+    "source": "User confirmed the latest eval set is validated on 2026-10-28",
+    "scope": "prompt dataset"
+  },
+  "provenance": "Validated 80-prompt evaluation set dated 2026-10-28. Prompt bytes are preserved. Do not use these prompts or evaluation labels for training."
+}
