@@ -15,7 +15,7 @@ evaluation on 2026-10-28; model-output judge calibration remains separate.
 
 Prompt validation and model-output judge calibration are separate. The runner does
 not invent human labels or calibration evidence. Keep evaluation prompts and labels
-out of SFT/DPO/RL training. Five cases per safety slice provide smoke coverage only.
+out of SFT/RL training. Five cases per safety slice provide smoke coverage only.
 
 ## Validate and plan
 
@@ -50,8 +50,7 @@ Then select the completed checkpoint aliases served by the bridge:
   --output eval-results/checkpoint-comparison \
   --model base=Qwen/Qwen3.5-4B \
   --model sft=artsy/sft-v1 \
-  --model dpo=artsy/dpo-v1 \
-  --model rl=artsy/grpo-v2 \
+  --model rl=artsy/grpo-v3 \
   --max-samples 4 --max-tokens 8192 --token-limit 0
 ```
 

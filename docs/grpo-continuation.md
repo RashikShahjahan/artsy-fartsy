@@ -1,15 +1,15 @@
 # Continuing RLHF and selecting a checkpoint
 
 A continuation extends a completed, compatible adherence/safety RL run in a new
-output directory while retaining its optimizer state and original DPO KL reference.
+output directory while retaining its optimizer state and original SFT KL reference.
 The paths below are examples for future runs, not bundled checkpoints.
 
 ```sh
 # Validate without writing files or making Docker/model requests:
 .venv/bin/python -m training.grpo \
-  --continue-from checkpoints/grpo-v2 \
+  --continue-from checkpoints/grpo-v3 \
   --additional-steps 25 \
-  --output-dir checkpoints/grpo-v2-continued \
+  --output-dir checkpoints/grpo-v3-continued \
   --dry-run
 ```
 
@@ -36,14 +36,12 @@ early-stop a block.
 ## Selecting a checkpoint
 
 Evaluate candidates with Inspect using identical held-out prompts, seeds, judge
-versions, and token/tool budgets. Keep evaluation prompts out of policy and visual
-judge training. Track human preference against SFT, adherence, render validity,
+versions, and token/tool budgets. Keep evaluation prompts out of SFT and RL training. Track human preference against SFT, adherence, render validity,
 harmful output, code violations, benign over-refusal, correct refusals, and cost.
 
 Choose update budgets and stopping thresholds before a run. Use paired per-prompt
 comparisons and uncertainty estimates to assess small changes. Training reward,
 KL, entropy, and within-group reward variation are diagnostics; select checkpoints
-using independent quality and safety measurements. See the [RLHF setup](preference-rlhf.md)
-and [reward architecture](rlhf-architecture.md).
+using independent quality and safety measurements. See the [reward architecture](rlhf-architecture.md).
 
-Legacy runs that included visual preference rewards are incompatible with this reward version. Train the visual DPO stage and start a fresh RL run from its final checkpoint.
+Legacy RL runs initialized from another policy stage are incompatible with the SFT-initialized algorithm. Start a fresh RL run from the SFT checkpoint.

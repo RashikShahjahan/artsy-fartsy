@@ -282,10 +282,36 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(args.max_samples, 4)
         self.assertEqual(args.max_tokens, 8192)
         self.assertEqual(args.max_length, 262144)
+        self.assertEqual(args.init_checkpoint.name, 'final.json')
+        self.assertEqual(args.init_checkpoint.parent.name, 'sft-v1')
+
+    def test_sft_checkpoint_initializes_rl_and_other_stage_is_rejected(self):
+        from drawing.config import MODEL_ID, MODEL_REVISION
+        from training.data import ROOT, digest
+        from training.sft import RENDERER
+        from training.grpo import load_run
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder)
+            dataset = directory / 'prompts.jsonl'
+            dataset.write_text(json.dumps({'id': 'draw', 'prompt': 'Draw a circle', 'seed': 1}) + '\n')
+            checkpoint = directory / 'final.json'
+            config = {'model': MODEL_ID, 'tokenizer_revision': MODEL_REVISION,
+                      'renderer': RENDERER, 'lora_rank': 32,
+                      'api_doc_sha256': digest((ROOT / 'docs/artcanvas.md').read_bytes())}
+            initial = {'config': config, 'state_path': 'tinker://sft/state',
+                       'sampler_path': 'tinker://sft/sampler'}
+            checkpoint.write_text(json.dumps(initial))
+            args = parser().parse_args(['--dataset', str(dataset), '--init-checkpoint', str(checkpoint)])
+            _, plan, _ = load_run(args)
+            self.assertEqual(plan['initial_state_path'], initial['state_path'])
+            self.assertEqual(plan['reference_sampler_path'], initial['sampler_path'])
+            checkpoint.write_text(json.dumps({**initial, 'config': {**config, 'algorithm': 'another-policy-stage'}}))
+            with self.assertRaisesRegex(ValueError, 'compatible SFT'):
+                load_run(args)
 
     @unittest.skipUnless(importlib.util.find_spec("tinker_cookbook"),
                          "Install the pinned training dependencies")
-    def test_cookbook_uses_ppo_kl_and_dpo_initialization(self):
+    def test_cookbook_uses_ppo_kl_and_sft_initialization(self):
         args = parser().parse_args(["--max-steps", "1", "--clip-epsilon", "0.1"])
         args.output_dir = Path("/tmp/artsy-rl-example")
         plan = {"initial_state_path": "tinker://initial",

@@ -20,11 +20,11 @@ class BenchmarkTests(unittest.TestCase):
         with patch('ui.server.DRAWING_DATASET', None):
             self.assertEqual(drawing_dataset()['sha256'], manifest['sha256'])
 
-    def test_runner_compares_four_checkpoints_and_propagates_equal_budgets(self):
+    def test_runner_compares_three_checkpoints_and_propagates_equal_budgets(self):
         from evaluation.run_benchmark import main
         from drawing.config import MODEL_ID
         from evaluation.suite import dataset_path
-        models = {'base':MODEL_ID, 'sft':'artsy/sft-v1', 'dpo':'artsy/dpo-v1', 'rl':'artsy/grpo-v2'}
+        models = {'base':MODEL_ID, 'sft':'artsy/sft-v1', 'rl':'artsy/grpo-v2'}
         catalog = [{'id': model, 'model_path':None if name == 'base' else 'tinker://'+name}
                    for name, model in models.items()]
         _, specs = suite()
@@ -53,13 +53,13 @@ class BenchmarkTests(unittest.TestCase):
                     'backend':'tinker','model_path':None,'models':catalog}
                 self.assertEqual(main(), 0)
             summary = json.loads((output/'summary.json').read_text())
-            self.assertEqual(len(calls), 4)
-            self.assertEqual(len(summary['comparisons']), 6)
+            self.assertEqual(len(calls), 3)
+            self.assertEqual(len(summary['comparisons']), 3)
             for command in calls:
                 self.assertEqual(command[command.index('--max-tokens')+1], '12000')
                 self.assertEqual(command[command.index('--token-limit')+1], '48000')
-            result = json.loads((output/'comparisons/dpo-vs-rl/report.json').read_text())
-            self.assertEqual(set(result['models']), {'dpo','rl'})
+            result = json.loads((output/'comparisons/sft-vs-rl/report.json').read_text())
+            self.assertEqual(set(result['models']), {'sft','rl'})
             self.assertIsNone(result['visual']['candidate_win_fraction_with_half_ties'])
 
     def test_invalid_and_unavailable_comparison_models_are_rejected(self):

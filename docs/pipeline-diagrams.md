@@ -106,7 +106,7 @@ skips judges while retaining the submission requirement. Inspect and RL share th
 0–4 adherence rubric. Protocol refusal success and human semantic refusal quality
 remain separate metrics.
 
-`evaluation.run_benchmark` accepts named base/SFT/DPO/RL checkpoints, applies shared
+`evaluation.run_benchmark` accepts named base/SFT/RL checkpoints, applies shared
 budgets and judges, and writes all pairwise review packets and reports. Validated
 suite bytes are frozen against silent changes.
 
@@ -155,29 +155,23 @@ Sequences are preflighted rather
 than truncated or packed. Resume uses the local checkpoint metadata to restore the
 remote optimizer state and deterministic data order.
 
-## Policy stages: SFT → visual DPO → RL
+## Policy stages: SFT → RL
 
 ```mermaid
 flowchart TD
-    A[SFT final.json] --> B[DPO policy initialization]
-    A --> C[Frozen SFT reference sampler]
-    D[Approved drawing trajectories and A/B/Tie image labels] --> E[Validate image-to-record bindings,<br/>same request/seed and held-out splits]
-    E --> F[Non-tie training pairs<br/>chosen and rejected full trajectories]
-    F --> G[Encode with assistant-only masks]
-    B --> H[DPO loss on trajectory log probability ratios]
-    C --> H
-    G --> H
-    H --> I[DPO final.json]
-    I --> J[RL policy initialization and frozen KL reference]
-    J --> K[Grouped multi-turn Docker rollouts]
-    K --> L[Fresh final rendering and independent<br/>adherence, image safety and code safety judges]
-    L --> M[Safety/refusal outcomes or normalized adherence reward]
-    M --> N[Cookbook PPO updates and RL checkpoints]
+    A[SFT final.json] --> B[RL policy initialization]
+    A --> C[Frozen SFT KL reference sampler]
+    B --> D[Grouped multi-turn Docker rollouts]
+    D --> E[Fresh final rendering and independent adherence, image safety and code safety judges]
+    E --> F[Safety/refusal outcomes or normalized adherence reward]
+    C --> G[Cookbook PPO updates]
+    F --> G
+    G --> H[RL checkpoints and final.json]
 ```
 
-DPO learns visual quality from offline preferences. Ties and validation/test pairs
-do not receive updates. RL uses no visual preference score or comparison judge.
-See [stage configuration and commands](preference-rlhf.md).
+RL optimizes adherence and safety/refusal outcomes directly from SFT. There is no
+separate visual preference training stage or visual quality reward.
+See [reward architecture](rlhf-architecture.md).
 
 ## Shared execution boundary
 

@@ -23,9 +23,8 @@ from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION, MODEL_CONTEXT_W
 from drawing.eval_specs import load_specs
 from training.data import ROOT, digest
 from training.sft import RENDERER, batches
-from training.dpo import ALGORITHM as DPO_ALGORITHM
 
-ALGORITHM = "tinker-cookbook-rlhf-v2"
+ALGORITHM = "tinker-cookbook-rlhf-v3"
 PROVENANCE_FILES = (
     "docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
     "drawing/agent_contract.py", "drawing/eval_specs.py",
@@ -53,14 +52,14 @@ def load_run(args):
         specs = specs[:args.limit]
     initial = json.loads(args.init_checkpoint.read_text())
     source = initial.get("config", {})
-    if (source.get("algorithm") != DPO_ALGORITHM or source.get("model") != MODEL_ID
+    if (source.get("algorithm") is not None or source.get("model") != MODEL_ID
             or source.get("tokenizer_revision") != MODEL_REVISION
             or source.get("renderer") != RENDERER or type(source.get("lora_rank")) is not int
             or source["lora_rank"] < 1
             or source.get("api_doc_sha256") != digest((ROOT / "docs/artcanvas.md").read_bytes())
             or any(not isinstance(initial.get(key), str) or not initial[key].startswith("tinker://")
                    for key in ("state_path", "sampler_path"))):
-        raise ValueError("Initial checkpoint must contain compatible DPO weights and sampler paths")
+        raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
     config = {
         "algorithm": ALGORITHM, "model": MODEL_ID, "tokenizer_revision": MODEL_REVISION,
         "renderer": RENDERER, "image_size": IMAGE_SIZE, "lora_rank": source["lora_rank"],
@@ -261,8 +260,8 @@ async def train(args, specs, plan, total):
 def parser():
     p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     p.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v1/prompts.jsonl")
-    p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/dpo-v1/final.json")
-    p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v2")
+    p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v1/final.json")
+    p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v3")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
     p.add_argument("--additional-steps", type=int, help="Positive number of extra updates")
@@ -343,7 +342,7 @@ def main(argv=None):
         if not config.get(role, {}).get("model") or not config[role].get("baseUrl"):
             p.error("Set ARTSY_SAFETY_JUDGE_MODEL/URL and ARTSY_CODE_SAFETY_JUDGE_MODEL/URL")
     if args.output_dir.resolve() == args.init_checkpoint.resolve().parent:
-        p.error("RL output must differ from the initial DPO checkpoint directory")
+        p.error("RL output must differ from the initial SFT checkpoint directory")
     manifest = args.output_dir / "training-manifest.json"
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         if not manifest.is_file() or (not args.continue_from and not (args.output_dir / "checkpoints.jsonl").is_file()):

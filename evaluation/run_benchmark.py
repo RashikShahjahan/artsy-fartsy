@@ -1,4 +1,4 @@
-"""Compare base/SFT/DPO/RL checkpoints with equal budgets and shared judges."""
+"""Compare base/SFT/RL checkpoints with equal budgets and shared judges."""
 import argparse
 from itertools import combinations
 import json
@@ -55,7 +55,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--suite', type=Path, default=SUITE)
-    parser.add_argument('--model', action='append', help='NAME=MODEL_ID; repeat for base, SFT, DPO and RL')
+    parser.add_argument('--model', action='append', help='NAME=MODEL_ID; repeat for base, SFT and RL')
     parser.add_argument('--max-samples', type=int, default=4)
     parser.add_argument('--max-tokens', type=int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument('--token-limit', type=int, default=0, help='Shared output-token budget; 0 disables the aggregate cap')

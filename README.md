@@ -14,24 +14,17 @@ artifacts have been retired; references to earlier releases below describe histo
 
 ## Unified UI
 
-Launch Studio, prompt and safety review, SFT candidate inspection, and DPO dataset
-creation in one app:
+Launch Studio, prompt and safety review, and SFT candidate inspection in one app:
 
 ```sh
 .venv/bin/python -m ui.server --dataset datasets/sft-v2/prompts.jsonl \
-  --candidates datasets/sft-v2/candidates.jsonl --dpo-output datasets/dpo-v1
+  --candidates datasets/sft-v2/candidates.jsonl
 ```
 
 Open http://127.0.0.1:4173. Studio shares one generation workspace for freeform
 and dataset prompts; Prompt review and SFT candidates use the same navigation.
 See [UI setup and review outputs](ui/README.md). Docker and `make serve` are needed
 for generation; browsing and review work independently.
-The DPO workspace collects multiple outputs from the configured SFT checkpoint,
-opens candidate approval and image comparison, and exports validated preference
-pairs with their full native tool trajectories. The initial collection uses 50
-reused SFT prompts and 50 fresh prompts, with two candidates per prompt. See the
-[collection plan and size guidance](docs/preference-rlhf.md).
-
 ## Setup
 
 Requires Python 3.14 and `uv`.
@@ -128,7 +121,7 @@ Use `--max-tokens` to change the per-response output cap. `--token-limit N`
 optionally adds a per-sample generated-output budget; `--token-limit 0`
 explicitly disables it. `--token-limit-type all` counts cumulative input plus
 output when a budget is supplied. The native bridge explicitly selects
-`Qwen/Qwen3.5-4B:peft:262144` for base sampling and when loading saved SFT/DPO/RL
+`Qwen/Qwen3.5-4B:peft:262144` for base sampling and when loading saved SFT/RL
 weights; Tinker's unsuffixed model ID otherwise defaults to 65,536 tokens.
 It uses a 262,144-token context window per request and clips the response
 budget to the space remaining in that window. Its `/health` response reports
@@ -145,7 +138,7 @@ The separate `DrawingEnvironment` limits in `drawing/environment.py` include unl
 repairs within twenty operations, a five-minute deadline, 64 KiB source, and 8 MiB PNG.
 Rendering success establishes code validity, not instruction accuracy or image
 safety. The dataset generator below supports teacher generation and an independent
-visual evaluator. Reward calibration and held-out validation remain checklist items; SFT, visual preference DPO, and RL training adapters are implemented.
+visual evaluator. Reward calibration and held-out validation remain checklist items; SFT and RL training adapters are implemented.
 
 ## Model-independent episodes
 
@@ -368,8 +361,7 @@ Prompt writing and teaching use `openai/gpt-6-luna` through OpenRouter
 (`https://openrouter.ai/api/v1`). Copy `.env.example` to `.env` for a new
 setup and supply `OPENROUTER_API_KEY` for dataset generation and
 `TINKER_API_KEY` for evaluation judges.
-Benchmark correctness, image safety, code safety, and the default pairwise
-preference evaluator use `thinkingmachines/Inkling:peft:262144` at
+Benchmark correctness, image safety, and code safety judges use `thinkingmachines/Inkling:peft:262144` at
 `https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1`.
 The HTTP client saves provider-exposed reasoning separately from the final answer
 and uses low reasoning effort for Inkling. OpenRouter requests reasoning with its
@@ -721,30 +713,9 @@ for inference. No local full-model `final/` directory is produced.
 Use the default validated 80-prompt suite for full behavioral evaluation with
 sufficient generation limits in both the serving endpoint and harness.
 
-## Visual preference DPO between SFT and RL
-
-Training follows **SFT → DPO for visual quality → RL for adherence and safety**.
-`training/dpo.py` initializes the drawing policy from SFT and trains on preferred
-versus rejected full drawing trajectories for the same request. It uses the SFT
-sampler as a frozen reference and applies loss only to assistant actions.
-
-Prepare approved drawing trajectories and A/B/Tie image labels with `record_a`
-and `record_b` trajectory IDs. Ties and held-out pairs are excluded from updates.
-See [DPO data format, validation, training and resume](docs/preference-rlhf.md).
-No DPO labels or checkpoint are bundled; prepare these before launching RL.
-
-```sh
-make dpo ARGS="--data datasets/dpo-v1/labels.jsonl --trajectories datasets/dpo-v1/accepted.jsonl --dry-run"
-make dpo ARGS="--data datasets/dpo-v1/labels.jsonl --trajectories datasets/dpo-v1/accepted.jsonl --output-dir checkpoints/dpo-v1"
-```
-
-DPO exports `checkpoints/dpo-v1/final.json` for RL initialization and its KL
-reference. A trained aesthetic comparison judge is optional for offline labeling
-or evaluation; neither DPO nor RL requires one.
-
 ## RL training with Tinker Cookbook
 
-`training/grpo.py` trains the DPO drawing policy with multi-turn grouped rollouts
+`training/grpo.py` trains the SFT drawing policy with multi-turn grouped rollouts
 and multiple reward signals. Tinker Cookbook owns native sampling, group-relative
 advantages, token-level PPO updates, reference-KL reward shaping, training logs,
 and optimizer checkpoints. Inspect remains the independent evaluation harness;
@@ -753,7 +724,7 @@ the inference bridge (`make serve`) is not needed during training.
 ### Policy, prompts, and environment
 
 The default policy is `Qwen/Qwen3.5-4B`, initialized from
-`checkpoints/dpo-v1/final.json` with LoRA rank inherited from that checkpoint
+`checkpoints/sft-v1/final.json` with LoRA rank inherited from that checkpoint
 (rank 32 for the bundled SFT release). It uses the `qwen3_5_preserve_thinking`
 renderer. Training runs on Tinker; local tokenization and image processing run
 on the host.
@@ -775,14 +746,15 @@ CPUs; renders have a one-minute limit and bash commands have a 65-second timeout
 
 The [validated 80-prompt checkpoint benchmark](docs/benchmark.md) covers 64 drawing
 tasks, eight harmful-image requests and eight malicious-code requests. It compares
-base, SFT, DPO and RL checkpoints with shared budgets, and creates blind A/B human
+base, SFT and RL checkpoints with shared budgets, and creates blind A/B human
 review packets and per-pair reports. Run
 `python -m evaluation.run_benchmark --output eval-results/checkpoint-comparison` to
 compare base with all available completed adapters, or repeat `--model NAME=MODEL_ID`
 to select checkpoints. The validated dataset needs no repeat prompt approval.
 
-The policy and adherence/safety judges use separate clients. Visual quality is
-optimized in DPO and contributes no score or reward to RL.
+The policy and adherence/safety judges use separate clients. There is currently no
+separate aesthetic training stage or visual-quality reward; assess visual quality
+independently during held-out evaluation.
 
 | Signal | Computation |
 | --- | --- |
@@ -821,8 +793,7 @@ ARTSY_CODE_SAFETY_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-
 The Tinker endpoint uses `TINKER_API_KEY` for every role. Other providers may
 use corresponding `ARTSY_*_JUDGE_API_KEY` variables. Safety roles must each be explicitly configured. Native Tinker
 judges use `tinker://native` and a renderer appropriate to their model. HTTP
-OpenAI-compatible judges are also supported. See [DPO and RL
-setup](docs/preference-rlhf.md) and the [reward architecture](docs/rlhf-architecture.md).
+OpenAI-compatible judges are also supported. See the [reward architecture](docs/rlhf-architecture.md).
 
 ```sh
 # Validate the dataset and initial checkpoint; no API/Docker calls or writes:
@@ -830,17 +801,17 @@ setup](docs/preference-rlhf.md) and the [reward architecture](docs/rlhf-architec
 
 # Smoke run: one update, two prompt groups, four trajectories per group:
 .venv/bin/python -m training.grpo --max-steps 1 \
-  --output-dir checkpoints/grpo-v2-smoke
+  --output-dir checkpoints/grpo-v3-smoke
 
 # Full run on the default 200 drawing prompts:
-make grpo ARGS="--output-dir checkpoints/grpo-v2"
+make grpo ARGS="--output-dir checkpoints/grpo-v3"
 
 # Resume an interrupted run with its original arguments:
-.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v2
+.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v3
 
 # Recover final.json after Cookbook completed but final export failed:
 .venv/bin/python -m training.grpo --finalize-only \
-  --output-dir checkpoints/grpo-v2
+  --output-dir checkpoints/grpo-v3
 ```
 
 ### Defaults and checkpointing
@@ -853,7 +824,7 @@ make grpo ARGS="--output-dir checkpoints/grpo-v2"
 | Learning rate | `1e-5` |
 | Sampling temperature | 1.0 |
 | PPO ratio clipping | 0.8–1.2 |
-| Reference-KL coefficient | 0.01, against the initial DPO sampler |
+| Reference-KL coefficient | 0.01, against the initial SFT sampler |
 | Epochs | 1 (100 updates / 800 episodes on 200 prompts) |
 | Model turns per trajectory | 20 |
 | Generated tokens per turn | 8,192 |
@@ -871,9 +842,9 @@ Outputs include `training-manifest.json`, Cookbook `checkpoints.jsonl`, metrics,
 grouped rollout summaries, and per-episode source, PNG, judgments, and reward
 components. On completion, Artsy writes `final.json` with remote state/sampler
 paths for the UI and model catalog. Resume validates dataset, source, initial
-state, and hyperparameter compatibility. Legacy visual-reward runs require a
-fresh run from DPO. To extend a completed compatible run
-while retaining optimizer state and the original DPO KL reference, use a new
+state, and hyperparameter compatibility. Older RL runs initialized from a different policy stage are incompatible. Start
+fresh from SFT. To extend a completed compatible run while retaining optimizer
+state and the original SFT KL reference, use a new
 output directory and `--continue-from` with `--additional-steps`; see
 [continuation and checkpoint selection](docs/grpo-continuation.md).
 

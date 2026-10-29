@@ -169,118 +169,18 @@ class JobTests(unittest.TestCase):
         with patch.object(server, 'urlopen', side_effect=OSError('offline')):
             self.assertIsNone(server.bridge_model_catalog())
 
-    def test_collection_selects_only_compatible_local_sft_alias(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            file = root / 'checkpoints' / 'sft-test' / 'final.json'
-            file.parent.mkdir(parents=True)
-            (root / 'docs').mkdir()
-            (root / 'docs' / 'artcanvas.md').write_text('API')
-            checkpoint = {'config': {'model': LARGE_MODEL_ID, 'tokenizer_revision': server.MODEL_REVISION,
-                'renderer': 'qwen3_5_preserve_thinking', 'lora_rank': 32,
-                'api_doc_sha256': server.content_hash(root / 'docs' / 'artcanvas.md')},
-                'state_path': 'tinker://state', 'sampler_path': 'tinker://sft'}
-            file.write_text(json.dumps(checkpoint))
-            catalog = [{'id': LARGE_MODEL_ID, 'model_path': None}, {'id': 'artsy/sft-test', 'model_path': 'tinker://sft'}]
-            with patch.object(server, 'ROOT', root), patch.object(server, 'bridge_model_catalog', return_value=catalog):
-                self.assertEqual(server.collection_profile(), {'model': 'artsy/sft-test', 'model_path': 'tinker://sft'})
-                self.assertEqual(server.collection_checkpoint(), 'tinker://sft')
-                for change in ({'algorithm': 'artsy-visual-dpo-v1'}, {'algorithm': 'rl'}, {'model': 'other/model'}, {'api_doc_sha256': 'stale'}):
-                    file.write_text(json.dumps({**checkpoint, 'config': {**checkpoint['config'], **change}}))
-                    self.assertIsNone(server.collection_profile())
-                file.write_text(json.dumps(checkpoint))
-                catalog[1]['model_path'] = 'tinker://different'
-                self.assertIsNone(server.collection_profile())
-
-    def test_collection_uses_canonical_specs_and_requires_current_checkpoint(self):
-        spec = {'id': 'training', 'family': 'circles', 'prompt': 'Draw a unique training scene.', 'seed': 7}
-        dataset = {'sha256': 'current', 'items': [spec]}
-        body = {'dataset_sha256': 'current', 'prompt_ids': ['training'], 'candidates': 2, 'model_path': 'tinker://sft'}
-        with patch.object(server, 'collection_dataset', return_value=dataset), patch.object(server, 'collection_profile', return_value={'model': LARGE_MODEL_ID, 'model_path': 'tinker://sft'}):
-            request = server.collection_request({**body, 'prompt': 'forged', 'seed': 99})
-            self.assertEqual(request['specs'], [spec])
-            for change in ({'dataset_sha256': 'old'}, {'prompt_ids': ['unknown']}, {'prompt_ids': ['training', 'training']}, {'candidates': True}, {'model_path': 'tinker://other'}):
-                with self.assertRaises(ValueError):
-                    server.collection_request({**body, **change})
-
-    def test_collection_excludes_frozen_prompts_even_with_new_ids(self):
-        frozen = server.drawing_dataset()['items'][0]
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / 'prompts.jsonl'
-            path.write_text(json.dumps({**frozen, 'id': 'renamed'}) + '\n')
-            with patch.object(server, 'DRAWING_DATASET', str(path)):
-                with self.assertRaisesRegex(ValueError, 'training prompts'):
-                    server.collection_dataset()
-        with patch.object(server, 'DRAWING_DATASET', None):
-            with self.assertRaisesRegex(ValueError, 'training prompts'):
-                server.collection_dataset()
-
-    def test_collection_worker_records_failure_and_cleans_shared_active(self):
-        with tempfile.TemporaryDirectory() as folder:
-            directory = Path(folder)
-            (directory / 'request.json').write_text('{}')
-            server.ACTIVE = 'busy'
-            with patch.object(server.subprocess, 'run', side_effect=OSError('worker unavailable')) as run:
-                server.run_dpo_collection(directory, {'dataset_sha256': 'current'})
-            self.assertIsNone(server.ACTIVE)
-            self.assertEqual(json.loads((directory / 'job.json').read_text())['state'], 'failed')
-            self.assertEqual(run.call_args.args[0][-2:], ['ui.dpo_collect', str(directory / 'request.json')])
-
-    def test_collection_post_queues_once_and_respects_shared_lock(self):
-        from io import BytesIO
+    def test_removed_dpo_workspace_and_routes_return_404(self):
+        from ui.shell import navigation
+        self.assertNotIn('/dpo', navigation('studio'))
         handler = object.__new__(server.Handler)
-        handler.path = '/dpo/api/collect'
-        handler.headers = {'Host': f'127.0.0.1:{server.PORT}', 'Content-Length': '2'}
-        handler.rfile = BytesIO(b'{}')
-        request = {'specs': [], 'dataset_sha256': 'current'}
-        with tempfile.TemporaryDirectory() as folder, patch.object(server, 'COLLECTION_JOBS', Path(folder)), patch.object(server, 'collection_request', return_value=request), patch.object(server.threading, 'Thread') as thread, patch.object(handler, 'send_json') as send:
-            server.ACTIVE = 'studio'
-            handler.do_POST()
-            self.assertEqual(send.call_args.args[1], 409)
-            thread.assert_not_called()
-            server.ACTIVE = None
-            handler.rfile = BytesIO(b'{}')
-            handler.do_POST()
-            self.assertEqual(send.call_args.args[1], 202)
-            directory = Path(folder) / send.call_args.args[0]['id']
-            self.assertEqual(json.loads((directory / 'request.json').read_text())['output'], str(directory / 'dataset'))
-            thread.return_value.start.assert_called_once()
-            server.ACTIVE = None
-
-    def test_collection_mount_scopes_candidates_and_export_directory(self):
-        from io import BytesIO
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            ident = 'a' * 32
-            directory = root / 'jobs' / ident
-            (directory / 'dataset').mkdir(parents=True)
-            source = directory / 'dataset' / 'candidates.jsonl'
-            source.write_text('')
-            (directory / 'job.json').write_text(json.dumps({'state': 'failed'}))
-            handler = object.__new__(server.Handler)
-            handler.command = 'GET'
-            handler.path = '/dpo?collection=' + ident
-            handler.headers = {'Host': f'127.0.0.1:{server.PORT}'}
-            handler.wfile = BytesIO()
-            class Mounted:
-                def do_GET(self):
-                    self.wfile.write(self.path.encode())
-            with patch.object(server, 'COLLECTION_JOBS', root / 'jobs'), patch.object(server, 'DPO_OUTPUT', root / 'exports'), patch('ui.dpo_review.make_handler', return_value=Mounted) as factory:
-                server.MOUNTED_HANDLERS.clear()
-                handler.do_GET()
-                args, kwargs = factory.call_args
-                self.assertEqual(args[0], source)
-                self.assertEqual(args[2], root / 'exports' / 'exports' / ident)
-                self.assertEqual(kwargs['base_path'], '/dpo/collections/' + ident)
-                self.assertEqual(handler.wfile.getvalue(), b'/')
-                handler.path = '/dpo/collections/' + ident + '/api/image?id=x'
-                handler.wfile = BytesIO()
-                handler.do_GET()
-                self.assertEqual(handler.wfile.getvalue(), b'/api/image?id=x')
-                source.write_text('changed')
-                handler.do_GET()
-                self.assertEqual(factory.call_count, 2)
-                self.assertEqual(len(server.MOUNTED_HANDLERS), 1)
+        handler.headers = {'Host': f'127.0.0.1:{server.PORT}'}
+        for method, path in (('GET', '/dpo'), ('GET', '/dpo/api/collection'),
+                             ('POST', '/dpo/api/collect')):
+            with self.subTest(path=path):
+                handler.path = path
+                with patch.object(handler, 'send_json') as response:
+                    getattr(handler, 'do_' + method)()
+                    self.assertEqual(response.call_args.args[1], 404)
 
     def test_command_and_completion(self):
         with tempfile.TemporaryDirectory() as temp:
