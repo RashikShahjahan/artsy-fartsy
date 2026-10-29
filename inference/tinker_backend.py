@@ -1,7 +1,8 @@
 """Native hosted sampling with model-specific tokenization, vision and tools."""
 import json
+import os
 
-RENDERER = "qwen3_5_preserve_thinking"
+RENDERER = "qwen3_5_disable_thinking"
 
 
 class TinkerBackend:
@@ -11,8 +12,13 @@ class TinkerBackend:
         from transformers import AutoImageProcessor, AutoTokenizer
         from tinker_cookbook import renderers
 
+        if os.getenv('ARTSY_DISABLE_THINKING') == '1':
+            if model_id.startswith('Qwen/Qwen3.5-'):
+                renderer_name = 'qwen3_5_disable_thinking'
+            elif model_id.startswith('Qwen/Qwen3.8-'):
+                renderer_name = 'qwen3_8_disable_thinking'
         self.model_id = model_id
-        self.native_tools = renderer_name.startswith(('kimi_', 'qwen3_8_')) or renderer_name == RENDERER
+        self.native_tools = renderer_name.startswith(('kimi_', 'qwen3_8_', 'qwen3_5_'))
         self.sampling_model_id = sampling_model_id or model_id
         self.service = tinker.ServiceClient()
         self.client = self.service.create_sampling_client(

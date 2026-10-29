@@ -365,11 +365,12 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                         "--output /workspace/preview --preview < /workspace/program.py", metadata=row)
                  for row in specs],
          solver=drawing_agent(config=config, generation_filter=generation_filter,
-                              system_prompt=drawing_system_prompt(token_limit, token_limit_type)),
+                              system_prompt=drawing_system_prompt(token_limit, token_limit_type, max_calls=None),
+                              max_calls=None),
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=config,
-        turn_limit=LIMITS["maxCalls"],
+        turn_limit=None,
         token_limit=TokenLimit(tokens=token_limit, type=token_limit_type) if token_limit is not None else None,
         time_limit=time_limit,
         fail_on_error=False,
@@ -378,7 +379,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                   "max_tokens_per_response": max_tokens,
                   "sample_token_limit": token_limit,
                   "sample_token_limit_type": token_limit_type if token_limit is not None else None,
-                  "environment_limits": {**LIMITS, "episodeMs": time_limit * 1000},
+                  "environment_limits": {**LIMITS, "maxCalls": None, "episodeMs": time_limit * 1000},
                   "runtime_version": RUNTIME_VERSION,
                   "dataset_sha256": sha256(json.dumps(specs, sort_keys=True).encode()),
                   "runtime_sha256": {name: sha256((ROOT / "runtime" / name).read_bytes())

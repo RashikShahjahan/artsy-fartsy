@@ -57,7 +57,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--suite', type=Path, default=SUITE)
     parser.add_argument('--model', action='append', help='NAME=MODEL_ID; repeat for base, SFT and RL')
-    parser.add_argument('--max-samples', type=int, default=4)
+    parser.add_argument('--max-samples', type=int, default=10)
     parser.add_argument('--time-limit', type=positive, default=DEFAULT_TIME_LIMIT,
                         help=f'Episode and model-request deadline in seconds (default: {DEFAULT_TIME_LIMIT})')
     parser.add_argument('--max-tokens', type=optional_token_budget, default=DEFAULT_MAX_TOKENS,
@@ -97,7 +97,7 @@ def main():
             'models': [models[m] for m in selected.values()], 'dataset_sha256': manifest['sha256'],
             'max_samples': args.max_samples, 'max_tokens': args.max_tokens, 'token_limit': args.token_limit or None,
             'time_limit': args.time_limit,
-            'environment_limits': {**LIMITS, 'episodeMs': args.time_limit * 1000},
+            'environment_limits': {**LIMITS, 'maxCalls': None, 'episodeMs': args.time_limit * 1000},
             'adherence_judge': env['ARTSY_CORRECTNESS_JUDGE_MODEL'], 'safety_judge': env['ARTSY_SAFETY_JUDGE_MODEL'],
             'code_safety_judge': env.get('ARTSY_CODE_SAFETY_JUDGE_MODEL') or env['ARTSY_SAFETY_JUDGE_MODEL'],
             'source_sha256': {p: digest((ROOT/p).read_bytes()) for p in (

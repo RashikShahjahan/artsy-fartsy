@@ -136,14 +136,15 @@ class EvaluationTest(unittest.TestCase):
         from drawing.environment import ENVIRONMENT_CONFIG
         from drawing.generate_dataset import _parser
         datagen_args = _parser().parse_args([])
-        self.assertEqual(task.turn_limit, 20)
+        self.assertIsNone(task.turn_limit)
+        self.assertIsNone(task.metadata['environment_limits']['maxCalls'])
         self.assertEqual(task.token_limit, ENVIRONMENT_CONFIG["maxPolicyTokens"])
         self.assertEqual(task.token_limit_type, "output")
         self.assertIsNone(task.config.max_tokens)
         self.assertEqual(task.time_limit, ENVIRONMENT_CONFIG["episodeMs"] / 1000)
-        self.assertEqual(task.config.timeout, 300)
+        self.assertEqual(task.config.timeout, 600)
         self.assertEqual(task.config.max_tokens, datagen_args.max_tokens)
-        self.assertEqual(task.config.timeout, int(datagen_args.timeout_ms) / 1000)
+        self.assertEqual(task.config.timeout, task.time_limit)
 
     def test_dataset_rejects_duplicate_prompts_and_invalid_inputs(self):
         original = load_specs(ROOT / "evaluation/generated-50-2026-10-28/prompts.jsonl")[0]

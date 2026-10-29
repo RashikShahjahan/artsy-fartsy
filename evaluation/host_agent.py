@@ -58,7 +58,7 @@ def observation(result, image_pattern):
 
 
 @agent(name=AGENT_NAME)
-def drawing_agent(system_prompt, config, generation_filter=None):
+def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMITS["maxCalls"]):
     """Preserve the Mini SWE bash protocol without its container-side harness."""
     settings = yaml.safe_load(Path(__file__).with_name("mini.yaml").read_text())
     image_pattern = re.compile(settings["model"]["multimodal_regex"])
@@ -87,7 +87,7 @@ def drawing_agent(system_prompt, config, generation_filter=None):
                 nonlocal submitted, operations
                 if submitted:
                     return "Submission already requested."
-                if operations >= LIMITS["maxCalls"]:
+                if max_calls is not None and operations >= max_calls:
                     return "Return code: 1\nEpisode operation budget exhausted."
                 operations += 1
                 started = monotonic()
@@ -118,7 +118,9 @@ def drawing_agent(system_prompt, config, generation_filter=None):
                             + state.messages[-1].text),
         ]
         try:
-            for _ in range(LIMITS["maxCalls"]):
+            turns = 0
+            while max_calls is None or turns < max_calls:
+                turns += 1
                 started = monotonic()
                 try:
                     output = await model.generate(state.messages, tools=tools, config=config)
@@ -133,7 +135,7 @@ def drawing_agent(system_prompt, config, generation_filter=None):
                     continue
                 results, _ = await execute_tools(state.messages, tools)
                 state.messages.extend(results)
-                if submitted or operations >= LIMITS["maxCalls"]:
+                if submitted or (max_calls is not None and operations >= max_calls):
                     break
         finally:
             timing["agent_seconds"] = monotonic() - began

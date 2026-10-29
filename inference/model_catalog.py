@@ -12,7 +12,7 @@ FRONTIER_MODEL_ID = 'moonshotai/Kimi-K2.6'
 HOSTED_MODEL_PROFILES = {
     LARGE_MODEL_ID: {
         'revision': '1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0',
-        'renderer': 'qwen3_8_xhigh_reasoning',
+        'renderer': 'qwen3_8_disable_thinking',
         'sampling_model': LARGE_MODEL_ID + ':peft:262144',
         'context_window': 262144,
     },

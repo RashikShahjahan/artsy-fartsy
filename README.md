@@ -72,7 +72,8 @@ That server uses Tinker's **native `SamplingClient`** for hosted inference while
 performing tokenization and image processing locally, requiring public Hugging
 Face model metadata (not a local model weight download). It translates Qwen's
 tool-call tags into OpenAI tool calls and uses
-the `qwen3_5_preserve_thinking` renderer. It accepts inline base64 PNG previews
+the `qwen3_5_disable_thinking` renderer by default (Qwen3.8 uses
+`qwen3_8_disable_thinking`). It accepts inline base64 PNG previews
 and limits their visual-token resolution; the original preview is kept intact.
 Set `ARTSY_TINKER_MODEL_PATH` in `.env` to serve a `tinker://` sampler checkpoint.
 The local bridge is a development server, not a public API service.
@@ -274,8 +275,11 @@ input—with two small paid requests:
 `evaluation.check_tinker` first verifies that the local server is using Tinker
 with the requested model/checkpoint, then checks both capabilities. It avoids the
 beta OpenAI endpoint's model-specific vision limitation by routing messages
-through the native sampling renderer. No `reasoning_effort` request parameter is
-needed: the bridge explicitly uses Qwen's non-thinking renderer.
+through the native sampling renderer. No `reasoning_effort` request parameter or environment override is
+needed: the bridge defaults to Qwen's non-thinking renderer. Evaluation uses
+a 600-second episode and model-request deadline, unlimited tool calls and model
+turns, temperature zero, and a 262,144 generated-output-token budget. Each prompt
+is evaluated once by default, with no explicit per-response token cap.
 Evaluation defaults to ten concurrent samples and ten model connections. Use
 `--max-samples` and `--max-connections` to tune these independently; for example,
 `--max-samples 2 --max-connections 2` limits both to two. Each active sample has
@@ -463,8 +467,8 @@ SFT supervises each attempt's reasoning before its write action and the final
 review reasoning before submission; synthesized preview calls add no reasoning.
 Opaque reasoning details are saved for inspection but are not training targets.
 Providers that return no reasoning still yield valid code-only examples. Previously
-discarded reasoning cannot be recovered from existing records. Training and default
-Qwen3.5 inference use `qwen3_5_preserve_thinking`, retaining earlier reasoning turns.
+discarded reasoning cannot be recovered from existing records. Default Qwen inference
+uses the model family's `disable_thinking` renderer.
 Vision-capable teacher models are
 required for drawing candidates. Use a new output directory for v7 generation;
 existing candidates are not retroactively reviewed by the teacher.

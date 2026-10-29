@@ -70,9 +70,11 @@ class ToolProtocolTest(unittest.TestCase):
         with patch("tinker.ServiceClient") as service, \
              patch("transformers.AutoTokenizer.from_pretrained"), \
              patch("transformers.AutoImageProcessor.from_pretrained"), \
-             patch("tinker_cookbook.renderers.get_renderer"):
+             patch("tinker_cookbook.renderers.get_renderer") as renderer:
             backend = TinkerBackend(MODEL_ID, MODEL_REVISION, IMAGE_SIZE,
                                    sampling_model_id=TINKER_SAMPLING_MODEL_ID)
+            self.assertEqual(renderer.call_args.args[0], 'qwen3_5_disable_thinking')
+            self.assertTrue(backend.native_tools)
             service.return_value.create_sampling_client.assert_called_once_with(
                 base_model="Qwen/Qwen3.5-4B:peft:262144")
             backend.with_model_path("tinker://saved/checkpoint")

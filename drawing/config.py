@@ -13,6 +13,6 @@ MODEL_REQUEST_SECONDS = 300
 LIMITS = {
     "maxCalls": 20,
     "renderSeconds": 60,
-    "episodeMs": 300_000,
+    "episodeMs": 600_000,
     "sourceBytes": 64 * 1024,
 }

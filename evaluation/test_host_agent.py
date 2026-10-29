@@ -35,7 +35,8 @@ def reply(command=None, *, calls=None, usage=20):
 
 
 class HostAgentTests(unittest.TestCase):
-    def run_agent(self, outputs, execute, *, callback=None, token_limit=32768, epochs=1):
+    def run_agent(self, outputs, execute, *, callback=None, token_limit=32768, epochs=1,
+                  max_calls=20, turn_limit=16):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             model = get_model("mockllm/host-test", custom_outputs=outputs, memoize=False)
@@ -45,8 +46,8 @@ class HostAgentTests(unittest.TestCase):
                  patch("inspect_ai._util.appdirs.user_cache_path", side_effect=lambda name: root / "cache" / name):
                 logs = eval(Task(dataset=[Sample(id="drawing", input="Draw a circle")],
                     solver=drawing_agent("Use ArtCanvas.", GenerateConfig(max_tokens=4096,
-                                         temperature=0.8, max_retries=0), callback),
-                    token_limit=token_limit, turn_limit=16),
+                                         temperature=0.8, max_retries=0), callback, max_calls=max_calls),
+                    token_limit=token_limit, turn_limit=turn_limit),
                     model=model, epochs=epochs, max_samples=2, log_dir=str(root / "logs"), display="none")
             self.assertEqual(logs[0].status, "success", logs[0].error)
             return list(read_eval_log(logs[0].location, resolve_attachments=True).samples), sbox
@@ -157,6 +158,23 @@ class HostAgentTests(unittest.TestCase):
         self.assertFalse(samples[0].metadata["submitted"])
         self.assertTrue(any("operation budget exhausted" in m.text
                             for m in samples[0].messages if m.role == "tool"))
+
+    def test_unlimited_calls_can_submit_after_more_than_twenty_turns(self):
+        outputs = [reply(f"write {i}") for i in range(25)] + [reply(SUBMIT)]
+        samples, sbox = self.run_agent(outputs, lambda *a, **k: SimpleNamespace(
+            stdout="", stderr="", returncode=0, success=True), max_calls=None, turn_limit=None)
+        self.assertEqual(sbox.exec.await_count, 26)
+        self.assertTrue(samples[0].metadata["submitted"])
+        self.assertIsNone(samples[0].limit)
+
+    def test_unlimited_calls_allows_more_than_twenty_operations_in_one_turn(self):
+        calls = [ToolCall(id=f"call-{i}", function="bash", arguments={"command": f"write {i}"})
+                 for i in range(25)]
+        calls.append(ToolCall(id="submit", function="bash", arguments={"command": SUBMIT}))
+        samples, sbox = self.run_agent([reply(calls=calls)], lambda *a, **k: SimpleNamespace(
+            stdout="", stderr="", returncode=0, success=True), max_calls=None, turn_limit=None)
+        self.assertEqual(sbox.exec.await_count, 26)
+        self.assertTrue(samples[0].metadata["submitted"])
 
     def test_filter_can_modify_request_and_fall_back_to_the_configured_provider(self):
         seen = []

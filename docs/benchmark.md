@@ -51,19 +51,20 @@ Then select the completed checkpoint aliases served by the bridge:
   --model base=Qwen/Qwen3.5-4B \
   --model sft=artsy/sft-v1 \
   --model rl=artsy/grpo-v3 \
-  --max-samples 4
+  --max-samples 10
 ```
 
 Use actual checkpoint directory names for aliases; unavailable checkpoints fail
 before evaluation starts. Without `--model`, the runner selects base plus every
 completed compatible `artsy/*` checkpoint discovered by the bridge. At least two
 distinct models are required. Execution is sequential by model, with the same
-prompts, seeds, one epoch, token settings and judge configuration. Defaults match
-datagen: no explicit per-response cap, 262,144 generated tokens per episode,
-at most 20 model turns and 20 environment operations, and a 300-second episode
+prompts, seeds, one epoch, token settings and judge configuration. Evaluation defaults
+to thinking disabled for Qwen3.5 and Qwen3.8, temperature zero, ten concurrent samples,
+no explicit per-response cap, 262,144 generated tokens per episode,
+unlimited model turns and environment operations, and a 600-second episode
 deadline. `--max-tokens N` and `--token-limit N` override the per-response and
 episode output budgets for all models; zero disables the corresponding cap.
-`--time-limit 600` extends episode and model-request deadlines to ten minutes.
+`--time-limit N` overrides episode and model-request deadlines in seconds.
 Rendering allows 60 seconds, 64 KiB of source and an 8 MiB PNG. The evaluation
 workspace has no additional Docker CPU or memory quota.
 

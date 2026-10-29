@@ -91,8 +91,10 @@ class BenchmarkTests(unittest.TestCase):
             plan = json.loads((output / 'run-plan.json').read_text())
             self.assertIsNone(plan['max_tokens'])
             self.assertEqual(plan['token_limit'], MODEL_CONTEXT_WINDOW)
-            self.assertEqual(plan['environment_limits'], LIMITS)
-            self.assertEqual(plan['time_limit'], 300)
+            self.assertEqual(plan['environment_limits'], {**LIMITS, 'maxCalls': None})
+            self.assertEqual(plan['time_limit'], 600)
+            self.assertEqual(plan['max_samples'], 10)
+            self.assertIsNone(plan['environment_limits']['maxCalls'])
             self.assertEqual(run.call_count, 2)
             for call in run.call_args_list:
                 command = call.args[0]

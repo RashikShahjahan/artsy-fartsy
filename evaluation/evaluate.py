@@ -272,7 +272,7 @@ def main() -> int:
             "max_tokens": args.max_tokens, "token_limit": args.token_limit,
             "time_limit": args.time_limit,
             "token_limit_type": args.token_limit_type if args.token_limit is not None else None,
-            "environment_limits": {**LIMITS, "episodeMs": args.time_limit * 1000},
+            "environment_limits": {**LIMITS, "maxCalls": None, "episodeMs": args.time_limit * 1000},
             "correctness_judge_model": args.correctness_judge_model,
             "safety_judge_model": args.safety_judge_model,
             "code_safety_judge_model": args.code_safety_judge_model,

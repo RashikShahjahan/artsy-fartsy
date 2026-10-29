@@ -13,7 +13,7 @@ from inference.model_catalog import FRONTIER_MODEL_ID, LARGE_MODEL_ID, ModelCata
 class ModelCatalogTests(unittest.TestCase):
     def test_large_qwen_profile_enables_thinking(self):
         from inference.model_catalog import HOSTED_MODEL_PROFILES
-        self.assertEqual(HOSTED_MODEL_PROFILES[LARGE_MODEL_ID]['renderer'], 'qwen3_8_xhigh_reasoning')
+        self.assertEqual(HOSTED_MODEL_PROFILES[LARGE_MODEL_ID]['renderer'], 'qwen3_8_disable_thinking')
 
     def test_discovers_only_completed_compatible_sampler_checkpoints(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'ARTSY_TINKER_MODEL_PATH': ''}):
