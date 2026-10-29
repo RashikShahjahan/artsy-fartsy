@@ -1,42 +1,58 @@
-"""Native recorded Inspect trajectories preserve genuine bash actions and previews."""
+"""Native Inspect drawing trajectories remain trainable without preference learning."""
 import copy
 import json
+from pathlib import Path
+import tempfile
 import unittest
 
-from training.data import (TOOLS, SUBMIT, action, message, convert_record,
-                           native_prefix, native_trajectory_hash, digest)
-from training.dpo import load_preferences
-from ui import test_dpo_review as review_fixtures
-from ui.dpo_review import make_handler
+from PIL import Image
+
+from training.data import (ROOT, TOOLS, SUBMIT, action, message, convert_record,
+                           load_examples, native_prefix, native_trajectory_hash, digest)
 
 
 class NativeTrajectoryTests(unittest.TestCase):
     def setUp(self):
-        self.fixture = review_fixtures.DPOReviewTests('test_export_loads_real_trajectories_and_remains_portable')
-        self.fixture.setUp()
-        self.addCleanup(self.fixture.doCleanups)
-        self.root = self.fixture.root
-        for r in self.fixture.records:
-            system, user = native_prefix(r['spec'], {'token_limit': None, 'token_limit_type': 'output'})
-            preview = {'type': 'image', 'image': r['id']+'/preview-1.png', 'imageHash': r['imageHash']}
-            messages = [message('system', system), message('user', user),
-                action("cat > /workspace/program.py <<'PY'\n"+r['code']+'PY', 'write', 'Choose shapes and colors.'),
-                message('tool', 'Return code: 0\n', tool_call_id='write'),
-                action('python /opt/artsy/render.py --seed 1 --output /workspace/preview --preview < /workspace/program.py', 'preview'),
-                message('tool', 'Return code: 0\n{"ok":true}', tool_call_id='preview'),
-                action(SUBMIT, 'submit', 'The preview satisfies the request.'),
-                message('tool', 'Return code: 0\nCOMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n', tool_call_id='submit')]
-            messages[5]['content'].append(preview)
-            r.update(trajectoryFormat='inspect-bash-v1', trace=[],
-                     nativeTrajectory={'messages': messages, 'tools': copy.deepcopy(TOOLS),
-                                       'trainable_message_indices': [2, 4, 6]},
-                     nativeTrajectoryConfig={'token_limit': None, 'token_limit_type': 'output'},
-                     submission={'feedback': {'ok': True}},
-                     nativeResult={'outcome': 'submitted', 'submitted': True, 'scores': {'render_valid': 1},
-                                   'sourceHash': digest(r['code'].encode()), 'imageHash': r['imageHash']})
-            self.rehash(r)
-        self.fixture.write()
-        self.record = self.fixture.records[0]
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        directory = self.root / 'drawing'
+        directory.mkdir()
+        code = "draw('red')\n"
+        (directory / 'program.py').write_text(code)
+        for name in ('image.png', 'preview-1.png'):
+            Image.new('RGB', (24, 16), 'red').save(directory / name)
+        image_hash = digest((directory / 'image.png').read_bytes())
+        record = {
+            'id': 'drawing', 'status': 'accepted',
+            'spec': {'prompt': 'Draw a red circle', 'seed': 1},
+            'runtimeVersion': 'artcanvas-v2',
+            'apiDocHash': digest((ROOT / 'docs/artcanvas.md').read_bytes()),
+            'artifacts': {'directory': 'drawing', 'source': 'drawing/program.py',
+                          'image': 'drawing/image.png'},
+            'code': code, 'sourceHash': digest(code.strip().encode()),
+            'imageHash': image_hash, 'trace': [],
+        }
+        system, user = native_prefix(record['spec'], {'token_limit': None, 'token_limit_type': 'output'})
+        preview = {'type': 'image', 'image': 'drawing/preview-1.png', 'imageHash': image_hash}
+        messages = [message('system', system), message('user', user),
+            action("cat > /workspace/program.py <<'PY'\n" + code + 'PY', 'write', 'Choose shapes and colors.'),
+            message('tool', 'Return code: 0\n', tool_call_id='write'),
+            action('python /opt/artsy/render.py --seed 1 --output /workspace/preview --preview < /workspace/program.py', 'preview'),
+            message('tool', 'Return code: 0\n{"ok":true}', tool_call_id='preview'),
+            action(SUBMIT, 'submit', 'The preview satisfies the request.'),
+            message('tool', 'Return code: 0\nCOMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n', tool_call_id='submit')]
+        messages[5]['content'].append(preview)
+        record.update(trajectoryFormat='inspect-bash-v1',
+                      nativeTrajectory={'messages': messages, 'tools': copy.deepcopy(TOOLS),
+                                        'trainable_message_indices': [2, 4, 6]},
+                      nativeTrajectoryConfig={'token_limit': None, 'token_limit_type': 'output'},
+                      submission={'feedback': {'ok': True}},
+                      nativeResult={'outcome': 'submitted', 'submitted': True,
+                                    'scores': {'render_valid': 1},
+                                    'sourceHash': digest(code.encode()), 'imageHash': image_hash})
+        self.rehash(record)
+        self.record = record
 
     @staticmethod
     def rehash(record):
@@ -69,14 +85,17 @@ class NativeTrajectoryTests(unittest.TestCase):
                 r = copy.deepcopy(self.record)
                 mutation(r)
                 self.rehash(r)
-                with self.assertRaises(ValueError): convert_record(r, self.root)
+                with self.assertRaises(ValueError):
+                    convert_record(r, self.root)
         r = copy.deepcopy(self.record)
         r['nativeTrajectory']['messages'][2]['content'][0]['thinking'] = 'Changed without hash update'
-        with self.assertRaisesRegex(ValueError, 'hash mismatch'): convert_record(r, self.root)
+        with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+            convert_record(r, self.root)
 
     def test_genuine_no_tool_assistant_and_harness_correction_preserved(self):
         r = copy.deepcopy(self.record)
-        r['nativeTrajectory']['messages'][2:2] = [message('assistant', 'I will draw this.'),
+        r['nativeTrajectory']['messages'][2:2] = [
+            message('assistant', 'I will draw this.'),
             message('user', 'Every response must contain a bash tool call with {"command":"..."}.')]
         r['nativeTrajectory']['trainable_message_indices'] = [2, 4, 6, 8]
         self.rehash(r)
@@ -84,21 +103,14 @@ class NativeTrajectoryTests(unittest.TestCase):
         self.assertEqual(converted['messages'][2]['content'][0]['text'], 'I will draw this.')
         self.assertEqual(converted['trainable_message_indices'], [2, 4, 6, 8])
 
-    def test_native_portable_export_loads_real_dpo_trajectories(self):
-        f = self.fixture
-        f.handler = make_handler(f.path, 4173, f.output)
-        body = f.body()
-        self.assertEqual(f.request('POST', '/api/review', body)['status'], 200)
-        body['revision'] = f.state()['revision']
-        result = f.request('POST', '/api/export', body)
-        self.assertEqual(result['status'], 200, result)
-        import shutil
-        for rid in ('a', 'b'): shutil.rmtree(self.root/rid)
-        pairs, _ = load_preferences(f.output/'labels.jsonl', f.output/'accepted.jsonl')
-        self.assertEqual(len(pairs), 1)
-        chosen = pairs[0]['chosen']
-        self.assertEqual(chosen['messages'][2]['content'][0]['type'], 'thinking')
-        self.assertTrue(chosen['messages'][5]['content'][1]['image'].startswith(str(f.output.resolve())))
+    def test_native_trajectory_loads_as_sft_example(self):
+        path = self.root / 'accepted.jsonl'
+        path.write_text(json.dumps(self.record) + '\n')
+        examples, manifest = load_examples(path)
+        self.assertEqual(len(examples), 1)
+        self.assertEqual(examples[0]['id'], 'drawing')
+        self.assertEqual(examples[0]['trainable_message_indices'], [2, 4, 6])
+        self.assertEqual(manifest['records'], 1)
 
 
 if __name__ == '__main__':
