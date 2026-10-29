@@ -338,8 +338,7 @@ class TinkerTests(unittest.TestCase):
         tokens = data[0].model_input.to_ints()
         for index in selected:
             prompt = self.renderer.build_generation_prompt(messages[:index]).to_ints()
-            # With thinking enabled, the generation prefill's last newline
-            # merges with the empty thought's newline in a complete trajectory.
+            # Generation uses the same closed, empty thinking prefix as training.
             self.assertTrue(self.tokenizer.decode(tokens).startswith(self.tokenizer.decode(prompt)))
         with self.assertRaisesRegex(ValueError, "never truncated"):
             DrawingEncoder(self.renderer, max_length=5)(example)
@@ -360,19 +359,24 @@ class TinkerTests(unittest.TestCase):
         self.assertNotIn("Unsafe request", self.targets(data[0]))
         self.assertNotIn("Refusal recorded", self.targets(data[0]))
 
-    def test_reasoning_is_preserved_and_supervised_on_all_assistant_turns(self):
+    def test_reasoning_becomes_supervised_regular_text_on_all_assistant_turns(self):
         from training.sft import DrawingEncoder
 
         example = self.example()
         thoughts = ['Plan the first draft.', 'The preview needs a correction.', 'The drawing is ready.']
         for index, thought in zip(example['trainable_message_indices'], thoughts):
             example['messages'][index]['content'].insert(0, {'type': 'thinking', 'thinking': thought})
-        datum = DrawingEncoder(self.renderer)(example)[0]
+        encoder = DrawingEncoder(self.renderer)
+        messages, _ = encoder.messages(example)
+        self.assertFalse(any(p['type'] == 'thinking' for m in messages
+                             if m['role'] == 'assistant' for p in m['content']))
+        datum = encoder(example)[0]
         targets = self.targets(datum)
         context = self.tokenizer.decode(datum.model_input.to_ints())
         for thought in thoughts:
             self.assertIn(thought, context)
             self.assertIn(thought, targets)
+            self.assertIn('</think>\n\n' + thought, context)
         self.assertNotIn('Execution succeeded', targets)
         self.assertIn('printf fixed', targets)
         self.assertIn(SUBMIT, targets)
@@ -495,7 +499,7 @@ class TinkerAPITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp)
             args = parser().parse_args(["--dataset", "accepted.jsonl", "--output-dir", temp,
-                                       "--batch-size", "1", "--max-steps", "1"])
+                                       "--batch-size", "1", "--max-steps", "1", "--lr-schedule", "constant"])
             client = MagicMock()
             client.forward_backward.return_value.result.return_value = SimpleNamespace(metrics={"loss:sum": 1.25})
             client.save_state.return_value.result.return_value = SimpleNamespace(path="tinker://run/weights/state")
@@ -590,6 +594,13 @@ class TinkerAPITests(unittest.TestCase):
 
 
 class TrainingCLITests(unittest.TestCase):
+    def test_defaults_use_cosine_and_non_thinking_renderers(self):
+        from training.sft import parser, renderer_for_model
+        self.assertEqual(parser().parse_args(['--dataset', 'accepted.jsonl']).lr_schedule, 'cosine')
+        for model, renderer in [('Qwen/Qwen3.5-4B', 'qwen3_5_disable_thinking'),
+                                ('Qwen/Qwen3.8-27B', 'qwen3_8_disable_thinking')]:
+            self.assertEqual(renderer_for_model(model + ':peft:262144'), renderer)
+
     def test_preflight_does_not_create_a_service_client(self):
         import contextlib
         import io

@@ -62,8 +62,13 @@ class NativeTrajectoryTests(unittest.TestCase):
         original = copy.deepcopy(self.record)
         example = convert_record(self.record, self.root)
         self.assertEqual(example['trainable_message_indices'], [2, 4, 6])
-        self.assertEqual(example['messages'][2], original['nativeTrajectory']['messages'][2])
-        self.assertEqual(example['messages'][6], original['nativeTrajectory']['messages'][6])
+        for index in (2, 6):
+            expected = copy.deepcopy(original['nativeTrajectory']['messages'][index])
+            for part in expected['content']:
+                if part['type'] == 'thinking':
+                    part['type'] = 'text'
+                    part['text'] = part.pop('thinking')
+            self.assertEqual(example['messages'][index], expected)
         self.assertTrue(example['messages'][5]['content'][1]['image'].startswith(str(self.root.resolve())))
         self.assertEqual(self.record, original)
 

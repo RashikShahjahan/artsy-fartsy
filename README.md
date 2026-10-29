@@ -683,11 +683,14 @@ attention prevents a correction from reading later feedback or the final image.
 User/system messages, tool feedback,
 and assistant headers also receive zero weight. Judge scores and critiques
 are excluded from model input. Image context also receives zero loss. The Cookbook
-Qwen3.5 renderer supplies the bash tool schema, native tool-call format, and
+Qwen3.5 or Qwen3.8 renderer supplies the bash tool schema, native tool-call format, and
 disabled-thinking prefix. The encoder verifies image hashes, loads local PNGs,
 and uses the same RGB conversion and bounded image sizing as inference. Tokenizer
 and image-processor metadata are loaded locally; model weights remain hosted.
-The v10 human-curated trajectory conversion version and `assistant-only` loss policy prevent resuming earlier
+Teacher thinking summaries are preserved as ordinary assistant text before the
+corresponding tool calls, and receive loss. They are not placed in the thinking channel.
+Both model families use their `disable_thinking` renderer.
+The v12 summary-text conversion version and `assistant-only` loss policy prevent resuming earlier
 combined-write-preview, selective-action, text-only or per-action-prefix checkpoints with this changed
 training input. Start a fresh run for the agent SFT baseline.
 
@@ -696,14 +699,15 @@ Sequences are never packed or truncated. Preflight checks every full trajectory 
 `--dry-run` and `--check-batch` make no Tinker API calls. The latter may download
 Hugging Face tokenizer and image-processor metadata. Training defaults to one epoch, eight
 complete trajectories per optimizer step, LoRA rank 32, and learning rate
-2e-4. The default learning rate is constant; `--lr-schedule cosine` decays from
+2e-4. The default cosine learning-rate schedule decays from
 the configured initial rate toward zero across the planned optimizer steps,
 using Tinker Cookbook's schedule. Each update uses the rate at the start of its
 step, so the final update retains a small positive rate. Every metrics row records
 the applied learning rate and actual trajectory batch size. Cosine checkpoints pin
 the total schedule length: resume with the same epochs/max-steps so completed
 updates keep the same decay curve. Constant-rate runs may still extend their
-total epochs/max-steps. Loss weights are normalized across all supervised tokens in each batch.
+total epochs/max-steps; select `--lr-schedule constant` explicitly for those runs.
+Loss weights are normalized across all supervised tokens in each batch.
 For the 903-record release, `--batch-size 32 --epochs 1` produces 29 optimizer
 steps (28 batches of 32 trajectories and one batch of 7); the 1,854 supervised
 actions remain inside those 903 examples. Preflight reports both counts and the

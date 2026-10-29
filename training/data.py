@@ -2,8 +2,9 @@
 
 The shell wrapper is synthesized; the Python source and execution feedback are
 recorded evidence. Each record produces one complete conversation. All converted
-assistant reasoning and tool-call actions receive loss, including unsuccessful attempts in a
-successful episode. Instructions, tool feedback, and preview images are context.
+assistant text (including teacher summaries) and tool-call actions receive loss,
+including unsuccessful attempts in a successful episode. Instructions, tool
+feedback, and preview images are context.
 Unexecuted malformed teacher replies and judge critiques are omitted.
 """
 
@@ -24,7 +25,7 @@ TOOLS = [{"type": "function", "function": {
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 INPUT_MODE = "multimodal-previews"
-CONVERSION = "bash-trajectory-human-curated-reasoning-assistant-only-v11"
+CONVERSION = "bash-trajectory-summary-text-assistant-only-v12"
 LOSS_POLICY = "assistant-only"
 
 
@@ -51,7 +52,7 @@ def action(command: str, call_id: str, reasoning: str | None = None) -> dict:
         "function": {"name": "bash", "arguments": {"command": command}},
     }])
     if isinstance(reasoning, str) and reasoning.strip():
-        result["content"].insert(0, {"type": "thinking", "thinking": reasoning})
+        result["content"][0]["text"] = reasoning
     return result
 
 
@@ -174,6 +175,8 @@ def convert_native_record(record: dict, root: Path) -> dict:
             if kind == "text" and isinstance(part.get("text"), str):
                 continue
             if kind == "thinking" and role == "assistant" and isinstance(part.get("thinking"), str):
+                part["text"] = part.pop("thinking")
+                part["type"] = "text"
                 continue
             if kind == "image" and role == "tool":
                 image = artifact(root, part["image"], part["imageHash"])

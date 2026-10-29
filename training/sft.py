@@ -1,4 +1,4 @@
-"""Tinker LoRA SFT for the Qwen3.5 vision-language drawing policy.
+"""Tinker LoRA SFT for Qwen vision-language drawing policies.
 
 Run from the repository root: python -m training.sft --dataset DATA/accepted.jsonl --dry-run
 """
@@ -14,7 +14,13 @@ import random
 from training.data import LOSS_POLICY, ROOT, digest, load_examples
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION, MODEL_CONTEXT_WINDOW
 
-RENDERER = "qwen3_5_preserve_thinking"
+RENDERER = "qwen3_5_disable_thinking"
+
+
+def renderer_for_model(model: str) -> str:
+    if model.split(":", 1)[0] == "Qwen/Qwen3.8-27B":
+        return "qwen3_8_disable_thinking"
+    return RENDERER
 
 
 class DrawingEncoder:
@@ -68,7 +74,7 @@ class DrawingEncoder:
                 elif part["type"] == "text":
                     parts.append(part)
                 elif part["type"] == "thinking" and msg["role"] == "assistant" and isinstance(part.get("thinking"), str):
-                    parts.append(part)
+                    parts.append({"type": "text", "text": part["thinking"]})
                 else:
                     raise ValueError(f"{example['id']}: only text, assistant thinking, and tool preview images are supported")
             msg["content"] = parts
@@ -117,7 +123,7 @@ def create_encoder(model: str, max_length: int) -> DrawingEncoder:
     revision = MODEL_REVISION if model == MODEL_ID else None
     tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
     image_processor = AutoImageProcessor.from_pretrained(model, revision=revision)
-    renderer = renderers.get_renderer(RENDERER, tokenizer, image_processor=image_processor)
+    renderer = renderers.get_renderer(renderer_for_model(model), tokenizer, image_processor=image_processor)
     return DrawingEncoder(renderer, max_length, image_processor=image_processor)
 
 
@@ -146,7 +152,7 @@ def train(args, data: list, manifest: dict):
     if args.max_steps != -1:
         total_steps = min(total_steps, args.max_steps)
     config = {"dataset_sha256": manifest["dataset_sha256"], "api_doc_sha256": manifest["api_doc_sha256"],
-              "conversion": manifest["conversion"], "renderer": RENDERER, "input_mode": manifest["input_mode"],
+              "conversion": manifest["conversion"], "renderer": renderer_for_model(args.model), "input_mode": manifest["input_mode"],
               "model": args.model, "tokenizer_revision": MODEL_REVISION if args.model.split(":", 1)[0] == MODEL_ID else None,
               "lora_rank": args.lora_rank, "batch_size": args.batch_size,
               "batch_unit": "trajectory", "image_size": IMAGE_SIZE,
@@ -170,7 +176,7 @@ def train(args, data: list, manifest: dict):
     service = tinker.ServiceClient()
     supported = {model.model_name for model in service.get_server_capabilities().supported_models}
     if args.model not in supported:
-        raise ValueError(f"Tinker does not offer {args.model}; choose a supported Qwen3.5 vision model with --model")
+        raise ValueError(f"Tinker does not offer {args.model}; choose a supported Qwen vision model with --model")
     if checkpoint:
         client = service.create_training_client_from_state_with_optimizer(checkpoint["state_path"])
     else:
@@ -219,7 +225,7 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", type=Path, required=True, help="Recorded training dataset JSONL")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/sft-warmup")
-    p.add_argument("--model", default=MODEL_ID, help="Hosted Qwen3.5 vision model ID")
+    p.add_argument("--model", default=MODEL_ID, help="Hosted Qwen3.5 or Qwen3.8 vision model ID")
     p.add_argument("--dry-run", action="store_true", help="Validate artifacts and print a converted example; no API calls")
     p.add_argument("--export", type=Path, help="Write converted conversation JSONL with trainable message indices")
     p.add_argument("--sample-id", help="Record ID to display in dry-run")
@@ -229,7 +235,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--max-steps", type=int, default=-1)
     p.add_argument("--batch-size", type=int, default=8, help="Complete trajectories per optimizer step")
     p.add_argument("--learning-rate", type=float, default=2e-4)
-    p.add_argument("--lr-schedule", choices=("constant", "cosine"), default="constant",
+    p.add_argument("--lr-schedule", choices=("constant", "cosine"), default="cosine",
                    help="Learning-rate schedule; --learning-rate is the initial/peak rate")
     p.add_argument("--lora-rank", type=int, default=32)
     p.add_argument("--max-length", type=int, default=MODEL_CONTEXT_WINDOW)
@@ -267,14 +273,14 @@ def main(argv=None):
                 "Review them or use --allow-unreviewed for an experimental run.")
     if not args.check_batch and not args.resume_from_checkpoint and args.output_dir.exists() and any(args.output_dir.iterdir()):
         p.error("Output directory is not empty; choose a fresh directory or --resume-from-checkpoint")
-    if not args.model.startswith("Qwen/Qwen3.5-") or "Base" in args.model:
-        p.error("Use a Qwen3.5 vision chat model with the Qwen3.5 preserve-thinking renderer")
+    if not (args.model.startswith("Qwen/Qwen3.5-") or args.model.split(":", 1)[0] == "Qwen/Qwen3.8-27B") or "Base" in args.model:
+        p.error("Use a Qwen3.5 or Qwen3.8 vision chat model with a disabled-thinking renderer")
 
     encoder = create_encoder(args.model.split(":", 1)[0], args.max_length)
     data = [datum for example in examples for datum in encoder(example)]
     manifest.update(training_examples=len(data), max_tokens=max(d.model_input.length + 1 for d in data),
                     supervised_tokens=sum(sum(d.loss_fn_inputs["weights"].data) for d in data),
-                    model=args.model, renderer=RENDERER,
+                    model=args.model, renderer=renderer_for_model(args.model),
                     batch_size=args.batch_size, steps_per_epoch=math.ceil(len(data) / args.batch_size),
                     total_steps=min(math.ceil(len(data) / args.batch_size) * args.epochs,
                                     args.max_steps if args.max_steps != -1 else math.inf))
