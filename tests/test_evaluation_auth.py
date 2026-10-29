@@ -35,6 +35,20 @@ class HostModelAuthTests(unittest.TestCase):
             self.assertEqual(model.api.base_url, "http://127.0.0.1:8080/v1")
             self.assertNotIn("OPENAI_API_KEY", os.environ)
 
+    def test_long_retry_timeout_reaches_task_and_http_client(self):
+        with patch.dict(os.environ, {"ARTSY_MODEL_URL": "http://127.0.0.1:8080/v1"}, clear=True):
+            model = model_from_env(timeout=600)
+            self.assertEqual(model.config.timeout, 600)
+            self.assertEqual(model.api.client_timeout, 600)
+            task = drawing_task([{"id": "retry", "prompt": "Draw a circle", "seed": 1}],
+                                "/tmp/artsy-test-retry", time_limit=600)
+            self.assertEqual(task.time_limit, 600)
+            self.assertEqual(task.config.timeout, 600)
+            self.assertEqual(task.metadata["environment_limits"]["episodeMs"], 600000)
+            for invalid in (0, -1, True, 1.5):
+                with self.subTest(value=invalid), self.assertRaises(ValueError):
+                    drawing_task([], "/tmp/artsy-test-retry", time_limit=invalid)
+
     def test_local_alias_uses_generic_provider_and_preserves_wire_model(self):
         with patch.dict(os.environ, {"ARTSY_MODEL_URL": "http://127.0.0.1:8080/v1"}, clear=True):
             model = model_from_env("artsy/sft-v1")

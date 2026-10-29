@@ -12,7 +12,7 @@ class TinkerBackend:
         from tinker_cookbook import renderers
 
         self.model_id = model_id
-        self.native_tools = renderer_name.startswith('kimi_') or renderer_name == RENDERER
+        self.native_tools = renderer_name.startswith(('kimi_', 'qwen3_8_')) or renderer_name == RENDERER
         self.sampling_model_id = sampling_model_id or model_id
         self.service = tinker.ServiceClient()
         self.client = self.service.create_sampling_client(

@@ -6,6 +6,8 @@ MODEL_REVISION = "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a"
 MODEL_CONTEXT_WINDOW = 262144
 TINKER_SAMPLING_MODEL_ID = f"{MODEL_ID}:peft:{MODEL_CONTEXT_WINDOW}"
 IMAGE_SIZE = {"shortest_edge": 256 * 256, "longest_edge": 1024 * 1024}
+MAX_RESPONSE_TOKENS = None  # Let the provider use its available context.
+MODEL_REQUEST_SECONDS = 300
 
 # Keep the names used by the persisted environment config.
 LIMITS = {

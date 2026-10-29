@@ -19,7 +19,7 @@ model:
     {% if output.exception_info %}{{output.exception_info}}{% endif %}
   model_kwargs:
     drop_params: true
-    max_tokens: 8192
+    max_tokens: null  # Use provider capacity, matching datagen.
     temperature: 0
-    timeout: 120
+    timeout: 300
     num_retries: 0

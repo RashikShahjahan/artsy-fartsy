@@ -15,7 +15,7 @@ class BenchmarkTests(unittest.TestCase):
         from ui.server import drawing_dataset
         manifest, rows = suite()
         self.assertEqual(manifest['status'], 'validated')
-        self.assertEqual(manifest['counts'], {'drawing':64, 'harmful_image':8, 'malicious_code':8})
+        self.assertEqual(manifest['counts'], {'drawing':35, 'benign_boundary':5, 'harmful_image':5, 'malicious_code':5})
         self.assertEqual([r['id'] for r in rows], [r['id'] for r in load_specs(dataset_path())])
         with patch('ui.server.DRAWING_DATASET', None):
             self.assertEqual(drawing_dataset()['sha256'], manifest['sha256'])
@@ -41,7 +41,7 @@ class BenchmarkTests(unittest.TestCase):
             return SimpleNamespace(returncode=0)
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp)/'comparison'
-            argv = ['benchmark', '--output', str(output), '--max-tokens','12000','--token-limit','48000']
+            argv = ['benchmark', '--output', str(output), '--max-tokens','12000','--token-limit','48000', '--time-limit', '600']
             for name, model in models.items(): argv.extend(['--model', name+'='+model])
             with patch('sys.argv', argv), patch('evaluation.run_benchmark.httpx.get') as health, \
                  patch('evaluation.run_benchmark.load_dotenv'), \
@@ -58,6 +58,7 @@ class BenchmarkTests(unittest.TestCase):
             for command in calls:
                 self.assertEqual(command[command.index('--max-tokens')+1], '12000')
                 self.assertEqual(command[command.index('--token-limit')+1], '48000')
+                self.assertEqual(command[command.index('--time-limit')+1], '600')
             result = json.loads((output/'comparisons/sft-vs-rl/report.json').read_text())
             self.assertEqual(set(result['models']), {'sft','rl'})
             self.assertIsNone(result['visual']['candidate_win_fraction_with_half_ties'])
@@ -69,6 +70,34 @@ class BenchmarkTests(unittest.TestCase):
                        ['base=base','sft=missing'], ['base=base','same=base']):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 selected_models(values, catalog)
+
+    def test_runner_forwards_datagen_defaults_without_restoring_a_response_cap(self):
+        from evaluation.run_benchmark import main
+        from drawing.config import MODEL_ID, MODEL_CONTEXT_WINDOW, LIMITS
+        catalog = [{'id': MODEL_ID, 'model_path': None},
+                   {'id': 'artsy/sft-v1', 'model_path': 'tinker://sft'}]
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / 'comparison'
+            with patch('sys.argv', ['benchmark', '--output', str(output)]), \
+                 patch('evaluation.run_benchmark.httpx.get') as health, \
+                 patch('evaluation.run_benchmark.load_dotenv'), \
+                 patch.dict('os.environ', {'ARTSY_CORRECTNESS_JUDGE_MODEL':'mockllm/correct',
+                                          'ARTSY_SAFETY_JUDGE_MODEL':'mockllm/safe'}), \
+                 patch('evaluation.run_benchmark.subprocess.run', return_value=SimpleNamespace(returncode=0)) as run, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                health.return_value.raise_for_status.return_value.json.return_value = {
+                    'backend': 'tinker', 'model_path': None, 'models': catalog}
+                self.assertEqual(main(), 0)
+            plan = json.loads((output / 'run-plan.json').read_text())
+            self.assertIsNone(plan['max_tokens'])
+            self.assertEqual(plan['token_limit'], MODEL_CONTEXT_WINDOW)
+            self.assertEqual(plan['environment_limits'], LIMITS)
+            self.assertEqual(plan['time_limit'], 300)
+            self.assertEqual(run.call_count, 2)
+            for call in run.call_args_list:
+                command = call.args[0]
+                self.assertEqual(command[command.index('--max-tokens') + 1], '0')
+                self.assertEqual(command[command.index('--token-limit') + 1], str(MODEL_CONTEXT_WINDOW))
 
     def test_frozen_mix_and_difficulty(self):
         manifest, rows=suite()
@@ -129,7 +158,7 @@ class BenchmarkTests(unittest.TestCase):
                 prepare(SimpleNamespace(base=root/'base',sft=root/'sft',output=out))
                 report(SimpleNamespace(packet=out,labels=None,output=root/'report.json'))
             data=json.loads((root/'report.json').read_text())
-            self.assertEqual(data['models']['base']['slices']['all']['missing'],80)
+            self.assertEqual(data['models']['base']['slices']['all']['missing'],len(specs))
             self.assertIsNone(data['models']['base']['slices']['all']['harmful_image_among_judged_images']['rate'])
             self.assertIsNone(data['visual']['sft_win_fraction_with_half_ties'])
             packet=json.loads((out/'packet.json').read_text());packet['items'][0]['prompt']='tampered'

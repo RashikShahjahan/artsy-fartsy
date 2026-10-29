@@ -114,13 +114,20 @@ The container has no outbound network or host mounts. Inspect proxies model call
 through the host to the native Tinker bridge (or another configured endpoint).
 Inspect and model clients run on the host. The container contains the drawing
 runtime and tools; it has no agent framework or model SDK.
-`evaluation/mini.yaml` sets twenty model turns, 65-second command timeouts (60-second renders plus cleanup),
-8,192 tokens per response, and disabled local-model cost lookup. Inspect sets
-a 1,000-second sample limit and no aggregate token budget by default.
-Use `--max-tokens` to change the per-response output cap. `--token-limit N`
-optionally adds a per-sample generated-output budget; `--token-limit 0`
-explicitly disables it. `--token-limit-type all` counts cumulative input plus
-output when a budget is supplied. The native bridge explicitly selects
+Evaluation shares datagen's default caps: twenty model turns and at most twenty
+environment operations, a 300-second episode deadline, 262,144 generated tokens
+per episode, and no explicit per-response token cap. Both renderers allow 60 seconds,
+64 KiB of source and an 8 MiB PNG. Model requests allow 300 seconds. Evaluation's
+bash timeout is 65 seconds to leave room for render cleanup; its Docker workspace
+has no additional CPU or memory quota. Local-model cost lookup is disabled.
+Use `--max-tokens N` to add a per-response output cap; `--max-tokens 0` uses
+provider capacity. The native bridge uses the selected model's remaining context
+without the former 16,000-token clip. `--token-limit N` changes the episode
+generated-output budget; `--token-limit 0` disables it.
+`--token-limit-type all` counts cumulative input plus
+output when a budget is supplied. `--time-limit 600` allows ten minutes per
+episode and model request, while preserving the 60-second render timeout.
+The native bridge explicitly selects
 `Qwen/Qwen3.5-4B:peft:262144` for base sampling and when loading saved SFT/RL
 weights; Tinker's unsuffixed model ID otherwise defaults to 65,536 tokens.
 It uses a 262,144-token context window per request and clips the response

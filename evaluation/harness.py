@@ -20,7 +20,8 @@ from inspect_ai.solver import TaskState
 from inspect_ai.util import TokenLimit, sandbox
 from PIL import Image
 
-from drawing.config import MODEL_ID
+from drawing.config import (MODEL_ID, MODEL_CONTEXT_WINDOW, LIMITS,
+                            MAX_RESPONSE_TOKENS, MODEL_REQUEST_SECONDS)
 from drawing.agent_contract import drawing_system_prompt
 from drawing.eval_specs import load_specs
 from drawing.dataset_client import TINKER_MODEL_URL, OPENROUTER_MODEL_URL
@@ -34,8 +35,9 @@ from drawing.judges import (
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_MODEL = MODEL_ID
-DEFAULT_MAX_TOKENS = 8192
-DEFAULT_TOKEN_LIMIT = None
+DEFAULT_MAX_TOKENS = MAX_RESPONSE_TOKENS
+DEFAULT_TOKEN_LIMIT = MODEL_CONTEXT_WINDOW
+DEFAULT_TIME_LIMIT = LIMITS["episodeMs"] // 1000
 RUNTIME_VERSION = "artcanvas-v2"
 LOCAL_MODEL_URL = "http://127.0.0.1:8080/v1"
 sha256 = lambda data: hashlib.sha256(data).hexdigest()
@@ -111,23 +113,23 @@ def _model_api_key() -> str:
     return "local-no-auth"
 
 
-def agent_generation_config() -> GenerateConfig:
+def agent_generation_config(timeout: int = MODEL_REQUEST_SECONDS) -> GenerateConfig:
     return GenerateConfig(max_tokens=DEFAULT_MAX_TOKENS, temperature=0, max_retries=0,
                           reasoning_effort="none" if is_direct_tinker() else None,
-                          timeout=120, max_connections=10)
+                          timeout=timeout, max_connections=10)
 
 
-def model_from_env(model: str = BASE_MODEL):
+def model_from_env(model: str = BASE_MODEL, *, timeout: int = MODEL_REQUEST_SECONDS):
     """Use the drawing endpoint without changing global OpenAI/judge credentials."""
     if model_url().rstrip("/") in (LOCAL_MODEL_URL, OPENROUTER_MODEL_URL):
         # Inspect's OpenAI provider classifies unknown names (including Qwen
         # and artsy/* aliases) as frontier OpenAI models and drops temperature.
         # Its generic compatible provider preserves the actual wire model and
         # sampling parameters.
-        return get_model(f"openai-api/artsy/{model}", config=agent_generation_config(),
+        return get_model(f"openai-api/artsy/{model}", config=agent_generation_config(timeout), client_timeout=timeout,
                          base_url=model_url(), api_key=_model_api_key(),
                          responses_api=False, stream=False)
-    return get_model(f"openai/{model}", config=agent_generation_config(), base_url=model_url(),
+    return get_model(f"openai/{model}", config=agent_generation_config(timeout), client_timeout=timeout, base_url=model_url(),
                      api_key=_model_api_key(), responses_api=False)
 
 
@@ -334,22 +336,25 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                  safety_judge_model: str | None = None,
                  code_safety_judge_model: str | None = None, *,
                  temperature: float = 0.0, max_connections: int = 10,
-                 max_tokens: int = DEFAULT_MAX_TOKENS,
+                 max_tokens: int | None = DEFAULT_MAX_TOKENS,
                  token_limit: int | None = DEFAULT_TOKEN_LIMIT, token_limit_type: str = "output",
+                 time_limit: int = DEFAULT_TIME_LIMIT,
                  generation_filter: GenerateFilter | None = None) -> Task:
     if (type(temperature) not in (int, float) or not math.isfinite(temperature)
             or not 0 <= temperature <= 2):
         raise ValueError("temperature must be a finite number from 0 to 2")
     if type(max_connections) is not int or max_connections < 1:
         raise ValueError("max_connections must be positive")
-    if type(max_tokens) is not int or max_tokens < 1:
-        raise ValueError("max_tokens must be positive")
+    if max_tokens is not None and (type(max_tokens) is not int or max_tokens < 1):
+        raise ValueError("max_tokens must be positive or None")
     if token_limit is not None and (type(token_limit) is not int or token_limit < 1):
         raise ValueError("token_limit must be positive or None")
     if token_limit_type not in ("output", "all"):
         raise ValueError("token_limit_type must be output or all")
+    if type(time_limit) is not int or time_limit < 1:
+        raise ValueError("time_limit must be a positive integer")
 
-    config = agent_generation_config()
+    config = agent_generation_config(timeout=time_limit)
     config.temperature = temperature
     config.max_connections = max_connections
     config.max_tokens = max_tokens
@@ -364,15 +369,16 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=config,
-        turn_limit=20,
+        turn_limit=LIMITS["maxCalls"],
         token_limit=TokenLimit(tokens=token_limit, type=token_limit_type) if token_limit is not None else None,
-        time_limit=1000,
+        time_limit=time_limit,
         fail_on_error=False,
         metadata={"agent": AGENT_NAME, "agent_version": AGENT_VERSION,
                   "sampling_temperature": temperature,
                   "max_tokens_per_response": max_tokens,
                   "sample_token_limit": token_limit,
                   "sample_token_limit_type": token_limit_type if token_limit is not None else None,
+                  "environment_limits": {**LIMITS, "episodeMs": time_limit * 1000},
                   "runtime_version": RUNTIME_VERSION,
                   "dataset_sha256": sha256(json.dumps(specs, sort_keys=True).encode()),
                   "runtime_sha256": {name: sha256((ROOT / "runtime" / name).read_bytes())

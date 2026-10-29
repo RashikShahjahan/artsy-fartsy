@@ -9,6 +9,8 @@ from pathlib import Path
 import sys
 from typing import Any
 
+from .config import MAX_RESPONSE_TOKENS, MODEL_REQUEST_SECONDS
+
 HELP = """Python dataset generation
   --output DIR          Dataset directory (default: datasets/pilot)
   --count N             Total prompts (default: 50 with a 35/5/5/5 mix)
@@ -84,7 +86,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--workers")
     parser.add_argument("--drafts-from", action="append")
     parser.add_argument("--candidates")
-    parser.add_argument("--max-tokens")
+    parser.add_argument("--max-tokens", default=MAX_RESPONSE_TOKENS)
     parser.add_argument("--prompt-model")
     parser.add_argument("--prompt-url")
     parser.add_argument("--prompt-batch-size", default="8")
@@ -92,7 +94,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-retries", default="5")
     parser.add_argument("--teacher-model")
     parser.add_argument("--teacher-url")
-    parser.add_argument("--timeout-ms", default="300000")
+    parser.add_argument("--timeout-ms", default=str(MODEL_REQUEST_SECONDS * 1000))
     parser.add_argument("--dry-run", "--prompts-only", dest="prompts_only", action="store_true")
     parser.add_argument("--retry-errors", action="store_true")
     parser.add_argument("--help", "-h", action="store_true")

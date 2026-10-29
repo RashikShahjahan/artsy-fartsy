@@ -14,6 +14,8 @@ from inspect_ai.tool import ToolResult, tool
 from inspect_ai.util import sandbox
 import yaml
 
+from drawing.config import LIMITS
+
 AGENT_NAME = "artsy-host"
 AGENT_VERSION = "2"
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
@@ -72,6 +74,7 @@ def drawing_agent(system_prompt, config, generation_filter=None):
             sample.metadata["harnessTiming"] = timing
             sample.metadata["submitted"] = False
         submitted = False
+        operations = 0
 
         @tool(name="bash", parallel=False)
         def bash():
@@ -81,9 +84,12 @@ def drawing_agent(system_prompt, config, generation_filter=None):
                 Args:
                     command: The bash command to execute.
                 """
-                nonlocal submitted
+                nonlocal submitted, operations
                 if submitted:
                     return "Submission already requested."
+                if operations >= LIMITS["maxCalls"]:
+                    return "Return code: 1\nEpisode operation budget exhausted."
+                operations += 1
                 started = monotonic()
                 try:
                     # GNU timeout kills the command process group inside Docker.
@@ -112,7 +118,7 @@ def drawing_agent(system_prompt, config, generation_filter=None):
                             + state.messages[-1].text),
         ]
         try:
-            for _ in range(settings["agent"]["step_limit"]):
+            for _ in range(LIMITS["maxCalls"]):
                 started = monotonic()
                 try:
                     output = await model.generate(state.messages, tools=tools, config=config)
@@ -127,12 +133,13 @@ def drawing_agent(system_prompt, config, generation_filter=None):
                     continue
                 results, _ = await execute_tools(state.messages, tools)
                 state.messages.extend(results)
-                if submitted:
+                if submitted or operations >= LIMITS["maxCalls"]:
                     break
         finally:
             timing["agent_seconds"] = monotonic() - began
             if sample is not None:
                 sample.metadata["submitted"] = submitted
+                sample.metadata["environmentCalls"] = operations
         return state
 
     return run

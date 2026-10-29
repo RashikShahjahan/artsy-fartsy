@@ -14,7 +14,7 @@ from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import GenerateConfig, get_model
 
-from .harness import (BASE_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_TOKEN_LIMIT, ROOT, check_native_bridge, drawing_task,
+from .harness import (BASE_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_TOKEN_LIMIT, DEFAULT_TIME_LIMIT, LIMITS, ROOT, check_native_bridge, drawing_task,
                       load_specs, model_from_env, model_url)
 from .suite import dataset_path
 
@@ -29,7 +29,7 @@ def positive(value: str) -> int:
 def optional_token_budget(value: str) -> int | None:
     result = int(value)
     if result < 0:
-        raise argparse.ArgumentTypeError("must be zero (no aggregate cap) or a positive integer")
+        raise argparse.ArgumentTypeError("must be zero (no cap) or a positive integer")
     return result or None
 
 
@@ -231,10 +231,12 @@ def main() -> int:
     parser.add_argument("--epochs", type=positive, default=1)
     parser.add_argument("--max-connections", type=positive, default=10, help="Maximum concurrent model connections (default: 10)")
     parser.add_argument("--max-samples", type=positive, default=10, help="Maximum concurrent evaluation samples (default: 10)")
-    parser.add_argument("--max-tokens", type=positive, default=DEFAULT_MAX_TOKENS,
-                        help="Maximum output tokens per model response (default: 8192)")
+    parser.add_argument("--time-limit", type=positive, default=DEFAULT_TIME_LIMIT,
+                        help=f"Episode and model-request deadline in seconds (default: {DEFAULT_TIME_LIMIT}, same as datagen)")
+    parser.add_argument("--max-tokens", type=optional_token_budget, default=DEFAULT_MAX_TOKENS,
+                        help="Output tokens per response; 0 uses provider capacity (default: 0, same as datagen)")
     parser.add_argument("--token-limit", type=optional_token_budget, default=DEFAULT_TOKEN_LIMIT,
-                        help="Optional token budget per sample; 0 disables it (default: no aggregate cap)")
+                        help=f"Token budget per sample; 0 disables it (default: {DEFAULT_TOKEN_LIMIT}, same as datagen)")
     parser.add_argument("--token-limit-type", choices=("output", "all"), default="output",
                         help="Count output tokens, or cumulative input plus output for legacy comparisons")
     parser.add_argument("--correctness-judge-model", default=os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL"),
@@ -268,7 +270,9 @@ def main() -> int:
             "dataset": str(args.dataset.resolve()), "samples": len(selected), "epochs": args.epochs,
             "max_connections": args.max_connections, "max_samples": args.max_samples,
             "max_tokens": args.max_tokens, "token_limit": args.token_limit,
+            "time_limit": args.time_limit,
             "token_limit_type": args.token_limit_type if args.token_limit is not None else None,
+            "environment_limits": {**LIMITS, "episodeMs": args.time_limit * 1000},
             "correctness_judge_model": args.correctness_judge_model,
             "safety_judge_model": args.safety_judge_model,
             "code_safety_judge_model": args.code_safety_judge_model,
@@ -331,8 +335,9 @@ def main() -> int:
         drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
                      args.safety_judge_model, args.code_safety_judge_model,
                      max_connections=args.max_connections, max_tokens=args.max_tokens,
-                     token_limit=args.token_limit, token_limit_type=args.token_limit_type),
-        model=model_from_env(args.model), model_roles=roles,
+                     token_limit=args.token_limit, token_limit_type=args.token_limit_type,
+                     time_limit=args.time_limit),
+        model=model_from_env(args.model, timeout=args.time_limit), model_roles=roles,
         log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=args.max_samples,
     )
     # Interrupted runs can return headers or partial samples; complete logs need no I/O.

@@ -108,7 +108,7 @@ def prepare(args):
             and [runs[name][0]['model'] for name in (reference,candidate)] != manifest['models']):
         raise ValueError('Expected the base model and artsy/sft-v1 runs in the corresponding arguments')
     # Reject accidental comparisons between runs with different scoring or budgets.
-    for key in ('scoring_version', 'max_tokens', 'token_limit', 'token_limit_type',
+    for key in ('scoring_version', 'max_tokens', 'token_limit', 'token_limit_type', 'environment_limits',
                 'correctness_judge_model', 'safety_judge_model', 'code_safety_judge_model', 'mode'):
         if runs[reference][0].get(key) != runs[candidate][0].get(key):
             raise ValueError(f'Comparison runs differ in {key}')

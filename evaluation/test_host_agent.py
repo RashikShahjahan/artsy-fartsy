@@ -145,6 +145,19 @@ class HostAgentTests(unittest.TestCase):
         sbox.exec.assert_not_awaited()
         self.assertFalse(samples[0].metadata["submitted"])
 
+    def test_operation_budget_cannot_be_bypassed_with_multiple_calls_per_turn(self):
+        from drawing.config import LIMITS
+        calls = [ToolCall(id=f"call-{i}", function="bash", arguments={"command": f"write {i}"})
+                 for i in range(LIMITS["maxCalls"])]
+        calls.append(ToolCall(id="submit", function="bash", arguments={"command": SUBMIT}))
+        samples, sbox = self.run_agent([reply(calls=calls)], lambda *a, **k: SimpleNamespace(
+            stdout="", stderr="", returncode=0, success=True))
+        self.assertEqual(sbox.exec.await_count, LIMITS["maxCalls"])
+        self.assertEqual(samples[0].metadata["environmentCalls"], LIMITS["maxCalls"])
+        self.assertFalse(samples[0].metadata["submitted"])
+        self.assertTrue(any("operation budget exhausted" in m.text
+                            for m in samples[0].messages if m.role == "tool"))
+
     def test_filter_can_modify_request_and_fall_back_to_the_configured_provider(self):
         seen = []
 
