@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from io import BytesIO
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -104,12 +105,70 @@ class RLMonitorTests(unittest.TestCase):
             rl_monitor.artifact(self.root, "grpo-v4", "step-000001", "prompt-1",
                                 "c" * 32, "image.png")
 
+    def prompt_dataset(self):
+        """A full dataset whose manifest selects only two of its three prompts."""
+        file = self.root / "rl-input.jsonl"
+        rows = [
+            {"id": "unused", "prompt": "Draw an unused shape", "benchmarkSlice": "drawing"},
+            {"id": "red", "prompt": "Draw a red square", "difficulty": "hard",
+             "family": "grids", "skills": ["composition"], "benchmarkSlice": "drawing"},
+            {"id": "unsafe", "prompt": "An unsafe request requiring a refusal",
+             "kind": "refusal", "benchmarkSlice": "malicious_code", "difficulty": "easy"},
+        ]
+        raw = "".join(json.dumps(row) + "\n" for row in rows).encode()
+        file.write_bytes(raw)
+        manifest = json.loads((self.run / "training-manifest.json").read_text())
+        manifest["config"].update(dataset_sha256=hashlib.sha256(raw).hexdigest(),
+                                  prompt_ids=["unsafe", "red"])
+        (self.run / "training-manifest.json").write_text(json.dumps(manifest))
+        return file
+
+    def test_all_run_prompts_are_manifest_verified_and_keep_selected_order(self):
+        dataset = self.prompt_dataset()
+        before = sorted(str(p) for p in self.root.rglob("*"))
+        result = rl_monitor.prompts(self.root, "grpo-v4", dataset)
+        self.assertEqual(sorted(str(p) for p in self.root.rglob("*")), before)
+        self.assertTrue(result["available"])
+        self.assertEqual(result["total"], 2)
+        self.assertEqual([p["id"] for p in result["prompts"]], ["unsafe", "red"])
+        self.assertEqual([p["index"] for p in result["prompts"]], [1, 2])
+        self.assertEqual(result["prompts"][0]["category"], "malicious_code")
+        self.assertEqual(result["prompts"][1]["skills"], ["composition"])
+        self.assertEqual(result["prompts"][1]["prompt"], "Draw a red square")
+
+    def test_auto_discovery_and_missing_or_changed_dataset(self):
+        dataset = self.prompt_dataset()
+        folder = self.root / "project" / "datasets" / "custom-rl"
+        folder.mkdir(parents=True)
+        auto = folder / "prompts.jsonl"
+        auto.write_bytes(dataset.read_bytes())
+        with patch.object(rl_monitor, "PROJECT_ROOT", self.root / "project"):
+            self.assertTrue(rl_monitor.prompts(self.root, "grpo-v4")["available"])
+            auto.write_text(auto.read_text() + " ")
+            result = rl_monitor.prompts(self.root, "grpo-v4")
+        self.assertFalse(result["available"])
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["prompts"], [])
+        self.assertIn("--rl-dataset", result["message"])
+        dataset.write_text(dataset.read_text() + " ")
+        self.assertFalse(rl_monitor.prompts(self.root, "grpo-v4", dataset)["available"])
+
+    def test_missing_prompt_manifest_is_not_guessed_from_rollouts(self):
+        self.sample()
+        data = rl_monitor.prompts(self.root, "grpo-v4")
+        self.assertFalse(data["available"])
+        self.assertEqual(data["prompts"], [])
+        with self.assertRaises(ValueError):
+            rl_monitor.prompts(self.root, "../outside")
+
     def test_http_routes_do_not_start_training(self):
         from ui import server
         self.sample()
+        dataset = self.prompt_dataset()
         handler = object.__new__(server.Handler)
         handler.headers = {"Host": f"127.0.0.1:{server.PORT}"}
         with patch.object(server, "RL_ROOT", self.root), \
+             patch.object(server, "RL_DATASET", dataset), \
              patch.object(handler, "send_json") as send, \
              patch.object(handler, "send_response"), \
              patch.object(handler, "send_header"), \
@@ -120,6 +179,13 @@ class RLMonitorTests(unittest.TestCase):
             handler.path = "/api/rl/runs/grpo-v4"
             handler.do_GET()
             self.assertEqual(len(send.call_args.args[0]["episodes"]), 1)
+            handler.path = "/api/rl/runs/grpo-v4/prompts"
+            handler.do_GET()
+            self.assertEqual([p["id"] for p in send.call_args.args[0]["prompts"]],
+                             ["unsafe", "red"])
+            handler.path = "/api/rl/runs/other/prompts"
+            handler.do_GET()
+            self.assertEqual(send.call_args.args[1], 404)
             handler.path = "/api/rl/runs/other"
             handler.do_GET()
             self.assertEqual(send.call_args.args[1], 404)
