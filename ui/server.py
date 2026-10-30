@@ -11,6 +11,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 from urllib.parse import urlsplit, parse_qs
 from ui.shell import navigation, review_page, empty_page
+from ui import rl_monitor
 from urllib.request import urlopen
 
 from drawing.config import MODEL_ID
@@ -29,6 +30,7 @@ from drawing.dataset_specs import validate_specs
 
 ROOT = Path(__file__).resolve().parents[1]
 JOBS = ROOT / 'episodes' / 'ui'
+RL_ROOT = Path(os.getenv('ARTSY_RL_ROOT', str(ROOT / 'checkpoints'))).expanduser().resolve()
 LOCK = threading.Lock()
 ACTIVE = None
 PORT = int(os.getenv('ARTSY_UI_PORT', '4173'))
@@ -271,6 +273,34 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({'error': 'Local requests only.'}, 403)
         if self.serve_workspace():
             return
+        target = urlsplit(self.path).path
+        if target == '/api/rl/runs':
+            return self.send_json({'runs': rl_monitor.runs(RL_ROOT)})
+        match = re.fullmatch(r'/api/rl/runs/([^/]+)', target)
+        if match:
+            try:
+                return self.send_json(rl_monitor.episodes(RL_ROOT, match[1]))
+            except (ValueError, OSError):
+                return self.send_json({'error': 'RL run unavailable.'}, 404)
+        match = re.fullmatch(
+            r'/api/rl/artifacts/([^/]+)/([^/]+)/([^/]+)/([^/]+)/(image\.png|program\.py|result\.json)', target)
+        if match:
+            try:
+                file = rl_monitor.artifact(RL_ROOT, *match.groups())
+                data = file.read_bytes()
+            except (ValueError, OSError):
+                return self.send_json({'error': 'RL artifact unavailable.'}, 404)
+            self.send_response(200)
+            self.send_header('Content-Type', {
+                'image.png': 'image/png', 'program.py': 'text/plain; charset=utf-8',
+                'result.json': 'application/json',
+            }[match[5]])
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.path == '/api/drawing-prompts':
             try:
                 dataset = drawing_dataset()
@@ -314,22 +344,28 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(status)
         if self.path.startswith('/api/'):
             return self.send_json({'error': 'Not found.'}, 404)
+        if target in ('/rl', '/rl/'):
+            page = (ROOT / 'ui/rl-monitor.html').read_text().replace('__NAVIGATION__', navigation('rl'))
+            return self.send_page(page)
         if urlsplit(self.path).path in ('/', '/index.html', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
             return self.send_page(page)
-        if self.path not in ('/app.js', '/trace.js', '/style.css'):
+        if self.path not in ('/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--rl-root', type=Path, help='RL checkpoints directory or one RL run; read-only monitoring')
     parser.add_argument('--dataset', type=Path, help='Prompt JSONL for Studio and prompt review (defaults to the frozen benchmark)')
     parser.add_argument('--candidates', type=Path, help='Candidate JSONL for SFT inspection and export')
     parser.add_argument('--review-output', type=Path, help='Prompt review output JSON')
     parser.add_argument('--candidate-review', type=Path, help='Candidate review output JSON')
     parser.add_argument('--accepted-output', type=Path, help='Approved SFT export JSONL')
     args = parser.parse_args()
+    if args.rl_root:
+        RL_ROOT = args.rl_root.expanduser().resolve()
     CANDIDATE_DATASET = str(args.candidates.resolve()) if args.candidates else CANDIDATE_DATASET
     PROMPT_REVIEW_OUTPUT = args.review_output
     CANDIDATE_REVIEW_OUTPUT = args.candidate_review
