@@ -8,14 +8,14 @@ From the repository root:
 
 Open http://127.0.0.1:4173. Start Docker and the native bridge (`make serve`) before generating. The service uses `.eval-venv/bin/python`, falling back to `.venv/bin/python`; override with `ARTSY_EVAL_PYTHON`. Install the evaluation dependencies documented in the repository README. Change the port with `ARTSY_UI_PORT`.
 
-The app has four workspaces with shared navigation and styling:
+The app has five workspaces with shared navigation and styling:
 
 - **Studio** writes a freeform prompt or selects an ordinary drawing from a dataset, using one model selector, output panel, timeline, and artifact downloads.
 - **Prompt review** searches and reviews drawing and safety prompts, saves notes and decisions, and records named dataset approval. Choose Safety prompts to retain the separate safety-only approval workflow.
 - **SFT candidates** inspects full trajectories and images, saves manual decisions, and exports approved, structurally trainable examples.
-- **RL monitor** (`/rl`) browses all configured RL training prompts and passively inspects completed RL episode artifacts and rewards without launching or modifying training.
+- **Runs** (`/runs`) launches evaluations, supervised fine-tuning, and GRPO jobs from validated CLI settings, with status, console output, history, and Stop controls.\n- **RL monitor** (`/rl`) browses all configured RL training prompts and passively inspects completed RL episode artifacts and rewards without launching or modifying training.
 
-Run all three with one command:
+Run all workspaces with one command:
 
 ```sh
 .venv/bin/python -m ui.server \
@@ -100,3 +100,48 @@ by the monitor. Prompt text is read from the original dataset on demand; runs ca
 created at training startup.
 
 RL prompt browser tests: `python -m unittest ui.test_rl_monitor` and `node --test ui/test_rl_monitor.cjs`.
+
+## Launch evaluation, SFT, and RL from the browser
+
+Open **Runs** at http://127.0.0.1:4173/runs. Choose a workflow, edit
+its CLI settings, and click **Launch**. A confirmation is shown before every
+non-dry-run launch because these jobs can consume model credits and compute.
+
+- **Evaluation** calls `evaluation.evaluate` using `.eval-venv/bin/python` when
+  available, falling back to `.venv`. Set an evaluation model that is actually
+  served by your configured bridge/provider; evaluation is not limited to
+  Studio's static model dropdown. The default prompt set is the frozen benchmark.
+- **SFT** calls `training.sft` using `.venv/bin/python` when available.
+  It requires a reviewed, accepted trajectory JSONL (for example
+  `datasets/sft-v2/accepted.jsonl`). Base model, LoRA rank, epochs, batch
+  size, learning rate and maximum updates can be changed.
+- **RL** calls `training.grpo` using `.venv/bin/python` when available.
+  Configure the prompt dataset, SFT initialization checkpoint, updates, group
+  size, concurrency and hyperparameters. The optional **Continue from**
+  directory uses the trainer's existing continuation mode, inheriting previous
+  training settings; enter the extra update count instead of overriding them.
+
+The UI creates a unique output for each launch: `eval-results/ui-eval-<id>`
+or `checkpoints/ui-{sft,rl}-<id>`. Its own job metadata and bounded console
+log live in `episodes/ui-launches/<id>/`. Polling the run detail shows the
+latest 100 KB of stdout/stderr, job exit state, and the exact argv. The passive
+RL monitor discovers completed rollouts in the new RL checkpoint directories.
+Use the existing CLIs to resume a failed trainer run that requires its original
+output directory; the UI creates a new directory for each launch.
+
+Only one optimizer (SFT or RL) launch can be active at a time; evaluation can
+run concurrently. Run cancellation sends SIGTERM to the subprocess group
+on POSIX (or terminates the direct child on Windows). Cancellation is available
+only while the current UI server owns the child process; if the UI server
+restarts, an already running child can outlive its tracking thread. The UI
+then displays the saved PID/state, but cannot cancel that orphaned process.
+A run whose PID has vanished without a recorded exit is marked interrupted.
+
+The UI only accepts recognized flags and repository-local input paths. It does
+not provide arbitrary shell command execution or expose environment/API keys.
+Existing `.env` variables still configure Tinker, the inference bridge, and
+the evaluation judges. Set `ARTSY_TRAIN_PYTHON` or `ARTSY_EVAL_PYTHON`
+to explicitly choose an interpreter.
+
+Local checks: `python -m unittest ui.test_launch ui.test_server`,
+`node --check ui/runs.js`.
