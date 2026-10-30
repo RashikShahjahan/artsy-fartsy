@@ -1,16 +1,17 @@
 """Convert recorded Python attempts into bash-tool demonstrations.
 
 The shell wrapper is synthesized; the Python source and execution feedback are
-recorded evidence. Each record produces one complete conversation. All converted
-assistant text (including teacher summaries) and tool-call actions receive loss,
-including unsuccessful attempts in a successful episode. Instructions, tool
-feedback, and preview images are context.
+recorded evidence. Each record produces one complete conversation. By default,
+earlier program writes and their summaries are context only; preview calls,
+the final write, refusals, and submission receive loss. Instructions, tool feedback,
+and preview images are context. The assistant-only policy retains the baseline.
 Unexecuted malformed teacher replies and judge critiques are omitted.
 """
 
 import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 
 from drawing.config import LIMITS, MODEL_CONTEXT_WINDOW
@@ -25,8 +26,39 @@ TOOLS = [{"type": "function", "function": {
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 INPUT_MODE = "multimodal-previews"
-CONVERSION = "bash-trajectory-summary-text-assistant-only-v12"
-LOSS_POLICY = "assistant-only"
+CONVERSION = "bash-trajectory-summary-text-loss-policy-v14-no-budget-prompts"
+LOSS_POLICY = "final-write-preview-submit"
+LOSS_POLICIES = (LOSS_POLICY, "assistant-only")
+
+
+def native_final_targets(messages: list[dict], source: str, seed: int) -> list[int]:
+    """Select unambiguous separate writes/previews; never guess shell semantics."""
+    writes, selected = [], []
+    preview = (f"python /opt/artsy/render.py --seed {seed} "
+               "--output /workspace/preview --preview < /workspace/program.py")
+    last_preview = -1
+    for index, msg in enumerate(messages):
+        if msg["role"] != "assistant" or not msg.get("tool_calls"):
+            continue
+        calls = msg["tool_calls"]
+        command = calls[0]["function"]["arguments"]["command"]
+        if len(calls) == 1 and command.strip() in (preview, SUBMIT):
+            selected.append(index)
+            if command.strip() == preview:
+                last_preview = index
+            continue
+        match = re.fullmatch(r"cat > /workspace/program\.py <<'([^'\n]+)'\n(.*)", command, re.DOTALL)
+        if len(calls) == 1 and match:
+            lines = match[2].splitlines(keepends=True)
+            if lines and lines[-1].rstrip("\r\n") == match[1]:
+                writes.append((index, "".join(lines[:-1])))
+                continue
+        raise ValueError("Native final-write masking requires separate literal heredoc writes and standard "
+                         "preview calls; use --loss-policy assistant-only for other shell trajectories")
+    if (not writes or writes[-1][0] >= last_preview
+            or writes[-1][1].replace("\r\n", "\n").strip() != source.replace("\r\n", "\n").strip()):
+        raise ValueError("Native final-write masking requires a matching final source write followed by a preview")
+    return sorted([writes[-1][0], *selected])
 
 
 def digest(data: bytes) -> str:
@@ -96,7 +128,7 @@ def system_prompt() -> str:
         "A text answer or a pre-existing PNG does not count. "
         'If you cannot fulfill the request, write only refusal.json containing {"reason":"..."} '
         "with a concise reason and do not create program.py. "
-        f"You have at most {LIMITS['maxCalls']} tool calls and {MODEL_CONTEXT_WINDOW} total context tokens.\n\n"
+        "\n\n"
         + (ROOT / "docs/artcanvas.md").read_text()
         + "\n\nEvery response must contain at least one bash tool call with "
         '{"command":"..."}. Shell state does not persist between commands; files do persist. '
@@ -123,7 +155,7 @@ def native_prefix(spec: dict, config: dict) -> tuple[str, str]:
     return system, user
 
 
-def convert_native_record(record: dict, root: Path) -> dict:
+def convert_native_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) -> dict:
     """Validate and preserve actual Inspect assistant actions and observations."""
     rid = record["id"]
     if record["spec"].get("kind") == "refusal" or record.get("refusal"):
@@ -137,7 +169,20 @@ def convert_native_record(record: dict, root: Path) -> dict:
     if not isinstance(messages, list) or len(messages) < 4:
         raise ValueError(f"{rid}: missing native conversation")
     system, user = native_prefix(record["spec"], record.get("nativeTrajectoryConfig") or {})
-    if messages[:2] != [message("system", system), message("user", user)]:
+    expected_prefix = [message("system", system), message("user", user)]
+    # Validate historical framing before migrating its instructions. Recorded
+    # artifacts and their hashes remain unchanged; exported prompts omit budgets.
+    config = record.get("nativeTrajectoryConfig") or {}
+    limit, kind = config.get("token_limit"), config.get("token_limit_type", "output")
+    description = "generated output" if kind == "output" else "total input and output"
+    token_budget = f" and {limit} {description} tokens" if limit is not None else ""
+    legacy_budgets = [f"You have at most {LIMITS['maxCalls']} model turns{token_budget}.",
+                      "There is no tool-call or model-turn limit." +
+                      (f" Your token budget is {limit} {description} tokens." if limit is not None else "")]
+    boundary = "with a concise reason and do not create program.py. \n\n"
+    legacy_prefixes = [[message("system", system), message("user", user.replace(
+        boundary, boundary.rstrip("\n") + budget + "\n\n", 1))] for budget in legacy_budgets]
+    if messages[:2] != expected_prefix and messages[:2] not in legacy_prefixes:
         raise ValueError(f"{rid}: native prompt or system framing mismatch")
     indices = [i for i, m in enumerate(messages) if isinstance(m, dict) and m.get("role") == "assistant"]
     mask = trajectory.get("trainable_message_indices")
@@ -157,6 +202,7 @@ def convert_native_record(record: dict, root: Path) -> dict:
             or native_result.get("imageHash") != record["imageHash"]):
         raise ValueError(f"{rid}: native scorer did not record a matching successful submission")
     result = copy.deepcopy(messages)
+    result[:2] = expected_prefix
     pending, seen = [], set()
     submitted = False
     preview_count = 0
@@ -220,17 +266,21 @@ def convert_native_record(record: dict, root: Path) -> dict:
                 raise ValueError(f"{rid}: unexpected native user intervention")
     if pending or not submitted or not preview_count:
         raise ValueError(f"{rid}: native trajectory requires observed previews and terminal submission")
+    if loss_policy == LOSS_POLICY:
+        indices = native_final_targets(result, source, record["spec"]["seed"])
     return {"id": rid, "messages": result, "trainable_message_indices": indices, "tools": TOOLS}
 
 
-def convert_record(record: dict, root: Path) -> dict:
+def convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) -> dict:
+    if loss_policy not in LOSS_POLICIES:
+        raise ValueError(f"Unknown loss policy: {loss_policy}")
     rid = record["id"]
     if record.get("runtimeVersion") != "artcanvas-v2":
         raise ValueError(f"{rid}: incompatible drawing runtime")
     if record.get("apiDocHash") != digest((ROOT / "docs/artcanvas.md").read_bytes()):
         raise ValueError(f"{rid}: API documentation changed since generation")
     if record.get("trajectoryFormat") == "inspect-bash-v1":
-        return convert_native_record(record, root)
+        return convert_native_record(record, root, loss_policy)
     spec = record["spec"]
     seed = spec["seed"]
     preview_command = (f"python /opt/artsy/render.py --seed {seed} "
@@ -306,7 +356,10 @@ def convert_record(record: dict, root: Path) -> dict:
             raise ValueError(f"{rid}: final completion and artifact differ")
         write_id = f"call_{index}_write"
         call_id = f"call_{index}_preview"
-        trainable_message_indices.append(len(messages))
+        # Every earlier write and its summary stay in context, regardless of
+        # execution success or judge labels. Only the final write is a target.
+        if loss_policy == "assistant-only" or final:
+            trainable_message_indices.append(len(messages))
         messages.append(action(write_command(code), write_id, step["completion"].get("reasoning")))
         messages.append(message(
             "tool", "Synthesized protocol acknowledgment: program.py source supplied for writing; "
@@ -358,17 +411,21 @@ def is_observed_repair(record: dict) -> bool:
     return False
 
 
-def load_examples(path: Path) -> tuple[list[dict], dict]:
+def load_examples(path: Path, loss_policy: str = LOSS_POLICY) -> tuple[list[dict], dict]:
     path = path.resolve()
     records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     if not records or len({r["id"] for r in records}) != len(records):
         raise ValueError("Training dataset is empty or contains duplicate record IDs")
-    examples = [convert_record(record, path.parent) for record in records]
+    examples = [convert_record(record, path.parent, loss_policy) for record in records]
+    masked = [sum(m["role"] == "assistant" for m in e["messages"])
+              - len(e["trainable_message_indices"]) for e in examples]
     return examples, {
         "dataset": str(path), "dataset_sha256": digest(path.read_bytes()),
         "records": len(records), "examples": len(examples),
         "batch_unit": "trajectory",
-        "loss_policy": LOSS_POLICY,
+        "loss_policy": loss_policy,
+        "masked_actions": sum(masked),
+        "trajectories_with_masked_actions": sum(n > 0 for n in masked),
         "supervised_actions": sum(len(e["trainable_message_indices"]) for e in examples),
         "omitted_unexecuted_replies": sum(t.get("feedback") is None for r in records for t in r.get("trace", [])),
         "trajectories_with_omitted_replies": sum(any(t.get("feedback") is None for t in r.get("trace", [])) for r in records),

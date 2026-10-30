@@ -58,11 +58,17 @@ def observation(result, image_pattern):
 
 
 @agent(name=AGENT_NAME)
-def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMITS["maxCalls"]):
+def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMITS["maxCalls"],
+                  max_turns=None):
     """Preserve the Mini SWE bash protocol without its container-side harness."""
     settings = yaml.safe_load(Path(__file__).with_name("mini.yaml").read_text())
     image_pattern = re.compile(settings["model"]["multimodal_regex"])
     timeout = settings["environment"]["timeout"]
+    if max_turns is not None:
+        if type(max_turns) is not int or max_turns < 1:
+            raise ValueError("max_turns must be positive or None")
+        system_prompt += (f"\n\nYou have {max_turns} model turns to complete this task. "
+                          "Each response uses one turn. Submit your final output by the last turn.")
 
     async def run(state: AgentState):
         began = monotonic()
@@ -119,8 +125,14 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
         ]
         try:
             turns = 0
-            while max_calls is None or turns < max_calls:
+            while ((max_calls is None or turns < max_calls)
+                   and (max_turns is None or turns < max_turns)):
                 turns += 1
+                if max_turns is not None:
+                    state.messages.append(ChatMessageUser(content=
+                        f"Turn {turns} of {max_turns}." +
+                        (" This is your final turn; submit your final output now."
+                         if turns == max_turns else "")))
                 started = monotonic()
                 try:
                     output = await model.generate(state.messages, tools=tools, config=config)
@@ -142,6 +154,8 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
             if sample is not None:
                 sample.metadata["submitted"] = submitted
                 sample.metadata["environmentCalls"] = operations
+                sample.metadata["turnLimitReached"] = bool(
+                    max_turns is not None and timing["model_calls"] >= max_turns and not submitted)
         return state
 
     return run

@@ -36,7 +36,7 @@ def reply(command=None, *, calls=None, usage=20):
 
 class HostAgentTests(unittest.TestCase):
     def run_agent(self, outputs, execute, *, callback=None, token_limit=32768, epochs=1,
-                  max_calls=20, turn_limit=16):
+                  max_calls=20, turn_limit=16, max_turns=None):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             model = get_model("mockllm/host-test", custom_outputs=outputs, memoize=False)
@@ -46,7 +46,8 @@ class HostAgentTests(unittest.TestCase):
                  patch("inspect_ai._util.appdirs.user_cache_path", side_effect=lambda name: root / "cache" / name):
                 logs = eval(Task(dataset=[Sample(id="drawing", input="Draw a circle")],
                     solver=drawing_agent("Use ArtCanvas.", GenerateConfig(max_tokens=4096,
-                                         temperature=0.8, max_retries=0), callback, max_calls=max_calls),
+                                         temperature=0.8, max_retries=0), callback,
+                                         max_calls=max_calls, max_turns=max_turns),
                     token_limit=token_limit, turn_limit=turn_limit),
                     model=model, epochs=epochs, max_samples=2, log_dir=str(root / "logs"), display="none")
             self.assertEqual(logs[0].status, "success", logs[0].error)
@@ -145,6 +146,30 @@ class HostAgentTests(unittest.TestCase):
         self.assertEqual(len([m for m in samples[0].messages if m.role == "assistant"]), 16)
         sbox.exec.assert_not_awaited()
         self.assertFalse(samples[0].metadata["submitted"])
+
+    def test_announced_turn_limit_counts_text_answers_and_stops_at_25(self):
+        inputs = []
+        async def native(model, messages, tools, tool_choice, config):
+            inputs.append(list(messages))
+            return reply()
+        samples, _ = self.run_agent([], None, callback=native, max_calls=None,
+                                    turn_limit=None, max_turns=25)
+        self.assertEqual(len(inputs), 25)
+        self.assertIn('You have 25 model turns', inputs[0][1].text)
+        for turn, messages in enumerate(inputs, 1):
+            self.assertTrue(messages[-1].text.startswith(f'Turn {turn} of 25.'))
+        self.assertIn('final turn', inputs[-1][-1].text)
+        self.assertTrue(samples[0].metadata['turnLimitReached'])
+
+    def test_submission_on_turn_25_is_executed(self):
+        outputs = [reply() for _ in range(24)] + [reply(SUBMIT)]
+        samples, sbox = self.run_agent(outputs, lambda *a, **k: SimpleNamespace(
+            stdout='COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n', stderr='', returncode=0,
+            success=True), max_calls=None, turn_limit=None, max_turns=25)
+        self.assertEqual(samples[0].metadata['harnessTiming']['model_calls'], 25)
+        self.assertTrue(samples[0].metadata['submitted'])
+        self.assertFalse(samples[0].metadata['turnLimitReached'])
+        self.assertEqual(sbox.exec.await_count, 1)
 
     def test_operation_budget_cannot_be_bypassed_with_multiple_calls_per_turn(self):
         from drawing.config import LIMITS

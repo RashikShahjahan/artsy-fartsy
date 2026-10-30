@@ -124,14 +124,14 @@ flowchart TD
     V --> D[Repeat write/preview for repairs, then submit<br/>omit judge critiques]
     D --> Q{dry-run?}
     Q -- Yes --> J[Print or export converted conversations;<br/>no Tinker training calls]
-    Q -- No --> E[Supervise every converted assistant action<br/>including unsuccessful attempts]
-    E --> F[Encode one full trajectory per example<br/>with assistant-only loss]
+    Q -- No --> E[Supervise final write, every preview, and submit<br/>earlier writes remain context; baseline policy optional]
+    E --> F[Encode one full trajectory per example<br/>with selected assistant turns receiving loss]
     F --> G[Local text tokenization and image preparation]
-    G --> H[Preflight text/image sequence lengths<br/>and assistant-only loss masks]
+    G --> H[Preflight text/image sequence lengths<br/>and selected-action loss masks]
     H --> I{check-batch?}
     I -- Yes --> R[Print token and loss-mask summary;<br/>no Tinker training calls]
     I -- No --> K[Tinker hosted LoRA training<br/>base Qwen3.5 vision model]
-    K --> L[Cross-entropy on all assistant<br/>action tokens]
+    K --> L[Cross-entropy on selected assistant<br/>action tokens]
     L --> M[metrics.jsonl and periodic checkpoints<br/>remote optimizer/model state paths]
     M --> N[final.json with sampler weights path]
     N --> O[Use adapter with base model<br/>for trained-checkpoint evaluation]

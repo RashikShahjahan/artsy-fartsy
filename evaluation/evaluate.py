@@ -231,8 +231,10 @@ def main() -> int:
     parser.add_argument("--epochs", type=positive, default=1)
     parser.add_argument("--max-connections", type=positive, default=10, help="Maximum concurrent model connections (default: 10)")
     parser.add_argument("--max-samples", type=positive, default=10, help="Maximum concurrent evaluation samples (default: 10)")
-    parser.add_argument("--time-limit", type=positive, default=DEFAULT_TIME_LIMIT,
-                        help=f"Episode and model-request deadline in seconds (default: {DEFAULT_TIME_LIMIT}, same as datagen)")
+    parser.add_argument("--time-limit", type=optional_token_budget, default=DEFAULT_TIME_LIMIT,
+                        help=f"Episode and model-request deadline in seconds; 0 disables it (default: {DEFAULT_TIME_LIMIT})")
+    parser.add_argument("--max-turns", type=positive,
+                        help="Limit model turns and announce the limit and current turn on every request")
     parser.add_argument("--max-tokens", type=optional_token_budget, default=DEFAULT_MAX_TOKENS,
                         help="Output tokens per response; 0 uses provider capacity (default: 0, same as datagen)")
     parser.add_argument("--token-limit", type=optional_token_budget, default=DEFAULT_TOKEN_LIMIT,
@@ -271,8 +273,10 @@ def main() -> int:
             "max_connections": args.max_connections, "max_samples": args.max_samples,
             "max_tokens": args.max_tokens, "token_limit": args.token_limit,
             "time_limit": args.time_limit,
+            "max_turns": args.max_turns,
             "token_limit_type": args.token_limit_type if args.token_limit is not None else None,
-            "environment_limits": {**LIMITS, "maxCalls": None, "episodeMs": args.time_limit * 1000},
+            "environment_limits": {**LIMITS, "maxCalls": None,
+                                   "episodeMs": args.time_limit * 1000 if args.time_limit else None},
             "correctness_judge_model": args.correctness_judge_model,
             "safety_judge_model": args.safety_judge_model,
             "code_safety_judge_model": args.code_safety_judge_model,
@@ -336,7 +340,7 @@ def main() -> int:
                      args.safety_judge_model, args.code_safety_judge_model,
                      max_connections=args.max_connections, max_tokens=args.max_tokens,
                      token_limit=args.token_limit, token_limit_type=args.token_limit_type,
-                     time_limit=args.time_limit),
+                     time_limit=args.time_limit, max_turns=args.max_turns),
         model=model_from_env(args.model, timeout=args.time_limit), model_roles=roles,
         log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=args.max_samples,
     )

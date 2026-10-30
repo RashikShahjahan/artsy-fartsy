@@ -11,7 +11,7 @@ import math
 from pathlib import Path
 import random
 
-from training.data import LOSS_POLICY, ROOT, digest, load_examples
+from training.data import LOSS_POLICIES, LOSS_POLICY, ROOT, digest, load_examples
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION, MODEL_CONTEXT_WINDOW
 
 RENDERER = "qwen3_5_disable_thinking"
@@ -24,7 +24,7 @@ def renderer_for_model(model: str) -> str:
 
 
 class DrawingEncoder:
-    """Encode a complete trajectory once, with assistant-only loss."""
+    """Encode a complete trajectory once, supervising only selected assistant turns."""
 
     def __init__(self, renderer, max_length: int = MODEL_CONTEXT_WINDOW, image_processor=None):
         self.renderer = renderer
@@ -64,8 +64,6 @@ class DrawingEncoder:
             not 0 <= i < len(messages) or messages[i]["role"] != "assistant" for i in selected
         ):
             raise ValueError(f"{example['id']}: invalid trainable assistant message indices")
-        if set(selected) != {i for i, msg in enumerate(messages) if msg["role"] == "assistant"}:
-            raise ValueError(f"{example['id']}: assistant-only loss requires every assistant message to be trainable")
         for msg in messages:
             parts = []
             for part in msg["content"]:
@@ -97,12 +95,12 @@ class DrawingEncoder:
         from tinker_cookbook.renderers import TrainOnWhat
         from tinker_cookbook.supervised.common import datum_from_model_input_weights
 
-        messages, _ = self.messages(example)
-        for msg in messages:
-            msg["trainable"] = msg["role"] == "assistant"
-        # CUSTOMIZED expresses a role-only mask: every assistant action is a
-        # target, regardless of execution/judge outcome. Headers and observations
-        # are masked by the renderer. Render the full trajectory only once.
+        messages, selected = self.messages(example)
+        selected = set(selected)
+        for index, msg in enumerate(messages):
+            msg["trainable"] = index in selected
+        # Keep masked assistant turns in the causal context. Headers and
+        # observations are also masked. Render the full trajectory only once.
         model_input, weights = self.renderer.build_supervised_example(
             messages, train_on_what=TrainOnWhat.CUSTOMIZED,
         )
@@ -156,7 +154,7 @@ def train(args, data: list, manifest: dict):
               "model": args.model, "tokenizer_revision": MODEL_REVISION if args.model.split(":", 1)[0] == MODEL_ID else None,
               "lora_rank": args.lora_rank, "batch_size": args.batch_size,
               "batch_unit": "trajectory", "image_size": IMAGE_SIZE,
-              "loss_policy": LOSS_POLICY,
+              "loss_policy": manifest["loss_policy"],
               "learning_rate": args.learning_rate, "lr_schedule": args.lr_schedule,
               "seed": args.seed, "max_length": args.max_length,
               "training_examples": len(data)}
@@ -231,6 +229,8 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--sample-id", help="Record ID to display in dry-run")
     p.add_argument("--allow-unreviewed", action="store_true", help="Include selected records whose visual review is pending")
     p.add_argument("--check-batch", action="store_true", help="Check text/image tokens and loss masks locally; no API calls")
+    p.add_argument("--loss-policy", choices=LOSS_POLICIES, default=LOSS_POLICY,
+                   help="Supervise the final write, all previews and submission (default), or all assistant turns")
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--max-steps", type=int, default=-1)
     p.add_argument("--batch-size", type=int, default=8, help="Complete trajectories per optimizer step")
@@ -252,7 +252,7 @@ def main(argv=None):
         or not math.isfinite(args.learning_rate) or args.learning_rate <= 0 or not 1 <= args.max_length <= MODEL_CONTEXT_WINDOW
         or args.lora_rank < 1 or args.save_every < 1):
         p.error("epochs, batch size, learning rate, max length, rank and save interval must be positive; max steps is -1 or positive; max length cannot exceed the model context window")
-    examples, manifest = load_examples(args.dataset)
+    examples, manifest = load_examples(args.dataset, loss_policy=args.loss_policy)
     if args.export:
         if args.export.resolve() == args.dataset.resolve():
             p.error("Export path must differ from the source dataset")

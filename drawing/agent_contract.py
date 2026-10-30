@@ -9,13 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def drawing_system_prompt(token_limit: int | None = MODEL_CONTEXT_WINDOW, token_limit_type: str = "all",
                           max_calls: int | None = LIMITS['maxCalls']) -> str:
-    """Share drawing instructions while describing the caller's actual budget."""
+    """Share drawing instructions without exposing execution budgets to the model.
+
+    Budget arguments remain accepted for callers and recorded trajectory configs.
+    Limits are enforced by the harness rather than included in instructions.
+    """
     documentation = (ROOT / "docs/artcanvas.md").read_text()
-    token_description = "generated output" if token_limit_type == "output" else "total input and output"
-    token_budget = f" and {token_limit} {token_description} tokens" if token_limit is not None else ""
-    budget = (f"You have at most {max_calls} model turns{token_budget}." if max_calls is not None else
-              "There is no tool-call or model-turn limit." +
-              (f" Your token budget is {token_limit} {token_description} tokens." if token_limit is not None else ""))
     return (
         "Fulfill the drawing request by writing /workspace/program.py. "
         "Use the installed ArtCanvas module to save output.png at 1920×1200. "
@@ -26,6 +25,6 @@ def drawing_system_prompt(token_limit: int | None = MODEL_CONTEXT_WINDOW, token_
         "A text answer or a pre-existing PNG does not count. "
         'If you cannot fulfill the request, write only refusal.json containing {"reason":"..."} '
         "with a concise reason and do not create program.py. "
-        f"{budget}\n\n"
+        "\n\n"
         + documentation
     )

@@ -106,7 +106,33 @@ class NativeTrajectoryTests(unittest.TestCase):
         self.rehash(r)
         converted = convert_record(r, self.root)
         self.assertEqual(converted['messages'][2]['content'][0]['text'], 'I will draw this.')
-        self.assertEqual(converted['trainable_message_indices'], [2, 4, 6, 8])
+        self.assertEqual(converted['trainable_message_indices'], [4, 6, 8])
+        baseline = convert_record(r, self.root, loss_policy='assistant-only')
+        self.assertEqual(baseline['trainable_message_indices'], [2, 4, 6, 8])
+
+    def test_native_earlier_write_is_context_and_all_previews_remain_targets(self):
+        r = copy.deepcopy(self.record)
+        messages = r['nativeTrajectory']['messages']
+        earlier = copy.deepcopy(messages[2:6])
+        earlier[0]['tool_calls'][0]['id'] = 'draft-write'
+        earlier[0]['tool_calls'][0]['function']['arguments']['command'] = "cat > /workspace/program.py <<'PY'\ndraw('blue')\nPY"
+        earlier[1]['tool_call_id'] = 'draft-write'
+        earlier[2]['tool_calls'][0]['id'] = 'draft-preview'
+        earlier[3]['tool_call_id'] = 'draft-preview'
+        messages[2:2] = earlier
+        r['nativeTrajectory']['trainable_message_indices'] = [2, 4, 6, 8, 10]
+        self.rehash(r)
+        converted = convert_record(r, self.root)
+        self.assertEqual(converted['trainable_message_indices'], [4, 6, 8, 10])
+        self.assertIn("draw('blue')", json.dumps(converted['messages']))
+
+    def test_native_ambiguous_shell_requires_explicit_baseline_policy(self):
+        r = copy.deepcopy(self.record)
+        r['nativeTrajectory']['messages'][2]['tool_calls'][0]['function']['arguments']['command'] = 'python generate.py'
+        self.rehash(r)
+        with self.assertRaisesRegex(ValueError, 'use --loss-policy assistant-only'):
+            convert_record(r, self.root)
+        self.assertEqual(convert_record(r, self.root, loss_policy='assistant-only')['trainable_message_indices'], [2, 4, 6])
 
     def test_native_trajectory_loads_as_sft_example(self):
         path = self.root / 'accepted.jsonl'

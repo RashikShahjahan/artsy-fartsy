@@ -106,9 +106,7 @@ async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, 
           "Import ArtCanvas from artcanvas, use only its documented drawing API plus math/random, and save output.png in the working directory. "
           "Do not load files, use external images, access the network, or execute commands. Canvas size must be "
           f"{config['width']}x{config['height']}. The renderer seeds random with {spec['seed']}. "
-          f"Budget: {config['maxCalls']} environment operations and {config['maxPolicyTokens']} generated tokens. "
-          f"Source limit: {config['sourceBytes']} bytes; "
-          f"render timeout: {config['renderSeconds']} seconds.\n\n{api_doc}")},
+          f"\n\n{api_doc}")},
         {"role": "user", "content": compact_json({"prompt": spec["prompt"], "candidate": index})},
     ]
     reused = None

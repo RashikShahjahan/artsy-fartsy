@@ -286,6 +286,12 @@ Evaluation defaults to ten concurrent samples and ten model connections. Use
 its own Docker container, so choose sample concurrency to fit available memory.
 Use a fresh output directory for every run. The first run builds the Docker image.
 
+Drawing prompts omit budget statements by default. Set `--max-turns 25` to enforce
+25 model turns, state that limit in the instructions, and show `Turn N of 25`
+before every model request. The final turn includes a submission reminder.
+Use `--time-limit 0` to disable episode and model-request deadlines; individual
+render and bash command timeouts still apply.
+
 `render_valid` checks code execution and a valid PNG of the expected dimensions.
 `adherence` records the correctness vision judge's overall prompt-match score from 0 to 1.
 A separate safety vision judge determines `image_harmful` without relying on the
@@ -672,10 +678,22 @@ Source/image hashes, API documentation version, and explicit
 legacy duplicate exceptions are checked during conversion. Review pending records
 before training, or explicitly include them with `--allow-unreviewed`.
 
-Training uses the agent SFT baseline: every converted assistant action receives
-cross-entropy loss, including unsuccessful program attempts, repairs, refusal-writing
-actions and submission. Each complete trajectory is encoded once as one training
-example. Malformed or truncated teacher JSON replies that were never attempted
+Training defaults to `--loss-policy final-write-preview-submit`: cross-entropy
+loss covers the final code-writing action, every preview call, and submission.
+All earlier code-writing actions and their associated summaries receive zero loss,
+including drafts that executed successfully. They remain in the conversation with
+their feedback and preview images, so the final write can learn from the full
+history. Refusal-writing actions and their submission also receive loss.
+No judge labels or failure thresholds are used to select targets.
+Use `--loss-policy assistant-only` for the baseline that supervises every assistant
+action, including earlier attempts. Preflight reports the policy, supervised and
+masked action counts, and trajectories containing masked actions.
+Each complete trajectory is encoded once as one training example.
+Native Inspect trajectories support the default mask when actions use separate
+literal heredoc writes to `program.py` and standard preview commands. Other shell
+trajectories require `--loss-policy assistant-only`; conversion rejects ambiguous
+actions rather than guessing which one wrote the final source.
+Malformed or truncated teacher JSON replies that were never attempted
 as programs are omitted, along with the old synthetic correction instructions;
 they are collection-protocol failures, not agent tool calls. Preflight reports
 how many replies were omitted. Causal
@@ -688,11 +706,14 @@ disabled-thinking prefix. The encoder verifies image hashes, loads local PNGs,
 and uses the same RGB conversion and bounded image sizing as inference. Tokenizer
 and image-processor metadata are loaded locally; model weights remain hosted.
 Teacher thinking summaries are preserved as ordinary assistant text before the
-corresponding tool calls, and receive loss. They are not placed in the thinking channel.
+corresponding tool calls, and receive loss only when that action is supervised.
+They are not placed in the thinking channel.
 Both model families use their `disable_thinking` renderer.
-The v12 summary-text conversion version and `assistant-only` loss policy prevent resuming earlier
-combined-write-preview, selective-action, text-only or per-action-prefix checkpoints with this changed
-training input. Start a fresh run for the agent SFT baseline.
+The v14 summary-text conversion version and selected loss policy are pinned in
+checkpoints. Start a fresh run when changing policy or moving from an older
+conversion; resuming with different supervision is rejected. Exported training
+instructions omit budget statements, including when converting older native
+trajectories whose recorded prompts contained them.
 
 Sequences are never packed or truncated. Preflight checks every full trajectory against
 `--max-length` (default 262,144) before creating a hosted training client.

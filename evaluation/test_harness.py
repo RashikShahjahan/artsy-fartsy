@@ -168,9 +168,20 @@ class EvaluationTest(unittest.TestCase):
     def test_model_uses_the_local_chat_endpoint_without_global_key_mutation(self):
         with patch.dict(os.environ, {"ARTSY_MODEL_URL": "http://localhost:1234/v1", "ARTSY_MODEL_API_KEY": "test-only"}):
             model = model_from_env()
-        self.assertEqual(model.name, "Qwen/Qwen3.5-4B")
+        self.assertEqual(model.name, "artsy/Qwen/Qwen3.5-4B")
         self.assertEqual(model.api.base_url, "http://localhost:1234/v1")
         self.assertFalse(model.model_args["responses_api"])
+
+    def test_disabled_timeout_reaches_task_and_http_client(self):
+        with patch.dict(os.environ, {"ARTSY_MODEL_URL": "http://127.0.0.1:8086/v1"}):
+            model = model_from_env(timeout=None)
+        self.assertIsNone(model.config.timeout)
+        self.assertIsNone(model.api.client.timeout.read)
+        self.assertIsNone(model.api.client.timeout.connect)
+        task = drawing_task([{"id": "turn-limit", "prompt": "Draw a circle", "seed": 1}],
+                            "/tmp/turn-limit-test", time_limit=None, max_turns=25)
+        self.assertIsNone(task.time_limit)
+        self.assertEqual(task.metadata["max_model_turns"], 25)
 
     def test_mini_bridge_sends_the_agent_token_cap_to_the_provider(self):
         from importlib import import_module
@@ -347,7 +358,7 @@ class EvaluationTest(unittest.TestCase):
             self.assertEqual(main(), 0)
         self.assertIsNone(json.loads(output.getvalue())["max_tokens"])
         for flag in ("--max-connections", "--max-samples", "--max-tokens", "--token-limit", "--time-limit"):
-            for value in (("-1", "invalid") if flag in ("--max-tokens", "--token-limit") else ("0", "-1", "invalid")):
+            for value in (("-1", "invalid") if flag in ("--max-tokens", "--token-limit", "--time-limit") else ("0", "-1", "invalid")):
                 with self.subTest(flag=flag, value=value), patch.object(sys, "argv", ["evaluate", "--dry-run", flag, value]), \
                      patch("sys.stderr", new_callable=io.StringIO), self.assertRaises(SystemExit) as error:
                     main()

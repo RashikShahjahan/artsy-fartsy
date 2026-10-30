@@ -377,13 +377,15 @@ class ToolBudgetTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RolloutPromptTests(unittest.TestCase):
-    def test_initial_messages_describe_turn_limit_without_aggregate_token_limit(self):
+    def test_initial_messages_omit_budgets(self):
         from training.cookbook_env import initial_messages
         renderer = SimpleNamespace(create_conversation_prefix_with_tools=lambda *a, **k: [])
         with patch('training.cookbook_env.encoder', return_value=SimpleNamespace(renderer=renderer)):
             messages = initial_messages({'prompt': 'Draw a disk', 'seed': 1}, [])
         content = messages[-1]['content']
-        self.assertIn('20 model turns', content)
+        self.assertNotIn('20 model turns', content)
+        self.assertNotIn('budget', content.lower())
+        self.assertNotIn('model-turn limit', content)
         self.assertNotIn('32768', content)
         self.assertNotIn('total input and output', content)
 

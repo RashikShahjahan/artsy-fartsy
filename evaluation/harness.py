@@ -9,6 +9,7 @@ import math
 import os
 from pathlib import Path
 import re
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
@@ -113,22 +114,27 @@ def _model_api_key() -> str:
     return "local-no-auth"
 
 
-def agent_generation_config(timeout: int = MODEL_REQUEST_SECONDS) -> GenerateConfig:
+def agent_generation_config(timeout: int | None = MODEL_REQUEST_SECONDS) -> GenerateConfig:
     return GenerateConfig(max_tokens=DEFAULT_MAX_TOKENS, temperature=0, max_retries=0,
                           reasoning_effort="none" if is_direct_tinker() else None,
                           timeout=timeout, max_connections=10)
 
 
-def model_from_env(model: str = BASE_MODEL, *, timeout: int = MODEL_REQUEST_SECONDS):
+def model_from_env(model: str = BASE_MODEL, *, timeout: int | None = MODEL_REQUEST_SECONDS):
     """Use the drawing endpoint without changing global OpenAI/judge credentials."""
-    if model_url().rstrip("/") in (LOCAL_MODEL_URL, OPENROUTER_MODEL_URL):
+    if (model_url().rstrip("/") in (LOCAL_MODEL_URL, OPENROUTER_MODEL_URL)
+            or urlparse(model_url()).hostname in ("127.0.0.1", "localhost", "::1")):
         # Inspect's OpenAI provider classifies unknown names (including Qwen
         # and artsy/* aliases) as frontier OpenAI models and drops temperature.
         # Its generic compatible provider preserves the actual wire model and
         # sampling parameters.
+        client_options = {}
+        if timeout is None:
+            from openai import DefaultAsyncHttpxClient
+            client_options["http_client"] = DefaultAsyncHttpxClient(timeout=None)
         return get_model(f"openai-api/artsy/{model}", config=agent_generation_config(timeout), client_timeout=timeout,
                          base_url=model_url(), api_key=_model_api_key(),
-                         responses_api=False, stream=False)
+                         responses_api=False, stream=False, **client_options)
     return get_model(f"openai/{model}", config=agent_generation_config(timeout), client_timeout=timeout, base_url=model_url(),
                      api_key=_model_api_key(), responses_api=False)
 
@@ -219,6 +225,7 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
         result = {"outcome": "incomplete", "seed": state.metadata["seed"],
                   "expectedRefusal": expected_refusal, "refusalCorrect": False,
                   "submitted": state.metadata.get("submitted") is True,
+                  "turnLimitReached": state.metadata.get("turnLimitReached", False),
                   "scoringVersion": "artsy-eval-v3-submitted-rubric",
                   "adherenceJudgeVersion": RL_JUDGE_VERSION,
                   "runtimeVersion": RUNTIME_VERSION, "prompt": state.metadata["prompt"],
@@ -338,7 +345,8 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                  temperature: float = 0.0, max_connections: int = 10,
                  max_tokens: int | None = DEFAULT_MAX_TOKENS,
                  token_limit: int | None = DEFAULT_TOKEN_LIMIT, token_limit_type: str = "output",
-                 time_limit: int = DEFAULT_TIME_LIMIT,
+                 time_limit: int | None = DEFAULT_TIME_LIMIT,
+                 max_turns: int | None = None,
                  generation_filter: GenerateFilter | None = None) -> Task:
     if (type(temperature) not in (int, float) or not math.isfinite(temperature)
             or not 0 <= temperature <= 2):
@@ -351,8 +359,10 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
         raise ValueError("token_limit must be positive or None")
     if token_limit_type not in ("output", "all"):
         raise ValueError("token_limit_type must be output or all")
-    if type(time_limit) is not int or time_limit < 1:
-        raise ValueError("time_limit must be a positive integer")
+    if time_limit is not None and (type(time_limit) is not int or time_limit < 1):
+        raise ValueError("time_limit must be positive or None")
+    if max_turns is not None and (type(max_turns) is not int or max_turns < 1):
+        raise ValueError("max_turns must be positive or None")
 
     config = agent_generation_config(timeout=time_limit)
     config.temperature = temperature
@@ -366,7 +376,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                  for row in specs],
          solver=drawing_agent(config=config, generation_filter=generation_filter,
                               system_prompt=drawing_system_prompt(token_limit, token_limit_type, max_calls=None),
-                              max_calls=None),
+                              max_calls=None, max_turns=max_turns),
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=config,
@@ -379,7 +389,9 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                   "max_tokens_per_response": max_tokens,
                   "sample_token_limit": token_limit,
                   "sample_token_limit_type": token_limit_type if token_limit is not None else None,
-                  "environment_limits": {**LIMITS, "maxCalls": None, "episodeMs": time_limit * 1000},
+                  "max_model_turns": max_turns,
+                  "environment_limits": {**LIMITS, "maxCalls": None,
+                                         "episodeMs": time_limit * 1000 if time_limit else None},
                   "runtime_version": RUNTIME_VERSION,
                   "dataset_sha256": sha256(json.dumps(specs, sort_keys=True).encode()),
                   "runtime_sha256": {name: sha256((ROOT / "runtime" / name).read_bytes())

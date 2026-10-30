@@ -110,17 +110,17 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(unrelated.read_text(), "sentinel")
         self.assertFalse((self.root / "unwanted").exists())
 
-    def test_one_conversation_supervises_every_attempt_and_submission(self):
+    def test_failed_write_is_context_but_preview_repair_and_submission_are_targets(self):
         example = convert_record(self.record, self.root)
         self.assertEqual(example["id"], self.record["id"])
         self.assertIn("broken()", json.dumps(example["messages"]))
         self.assertIn("NameError", json.dumps(example["messages"]))
         targets = [example["messages"][i] for i in example["trainable_message_indices"]]
-        self.assertEqual(len(targets), 5)
-        self.assertIn("broken()", json.dumps(targets))
-        self.assertIn(self.record["code"], targets[2]["tool_calls"][0]["function"]["arguments"]["command"])
-        self.assertEqual(targets[4]["tool_calls"][0]["function"]["arguments"]["command"], SUBMIT)
-        self.assertEqual(example["trainable_message_indices"], [2, 4, 6, 8, 10])
+        self.assertEqual(len(targets), 4)
+        self.assertNotIn("broken()", json.dumps(targets))
+        self.assertIn(self.record["code"], targets[1]["tool_calls"][0]["function"]["arguments"]["command"])
+        self.assertEqual(targets[3]["tool_calls"][0]["function"]["arguments"]["command"], SUBMIT)
+        self.assertEqual(example["trainable_message_indices"], [4, 6, 8, 10])
         self.assertEqual(sum(part["type"] == "image" for msg in example["messages"] for part in msg["content"]), 1)
         self.assertEqual([p["type"] for p in example["messages"][3]["content"]], ["text"])
         self.assertIn('"ok": true', example["messages"][-2]["content"][0]["text"])
@@ -169,7 +169,26 @@ class ConversionTests(unittest.TestCase):
                                     "imageHash": digest((self.root / name).read_bytes())})
         self.assertNotIn("secret answer", serialized)
         self.assertNotIn("privileged", serialized)
-        self.assertEqual(example["trainable_message_indices"], [2, 4, 6, 8, 10])
+        self.assertEqual(example["trainable_message_indices"], [4, 6, 8, 10])
+
+    def test_all_earlier_writes_are_masked_regardless_of_execution_or_judge_labels(self):
+        self.record["trace"][0]["feedback"] = {"ok": True, "artifact": "/old/preview-1.png"}
+        for evaluation in ({}, {"score": 1}, {"correct": False}, {"correctness": {"score": 0.2}}):
+            with self.subTest(evaluation=evaluation):
+                self.record["trace"][0]["evaluation"] = evaluation
+                self.record["trace"][-1]["evaluation"] = {"score": 0.1}
+                example = convert_record(self.record, self.root)
+                self.assertNotIn(2, example["trainable_message_indices"])
+                self.assertIn(6, example["trainable_message_indices"])
+                self.assertNotIn("correctness", json.dumps(example["messages"]))
+
+    def test_baseline_policy_preserves_identical_context_and_trains_failed_write(self):
+        masked = convert_record(self.record, self.root)
+        baseline = convert_record(self.record, self.root, loss_policy="assistant-only")
+        self.assertEqual(masked["messages"], baseline["messages"])
+        self.assertEqual(baseline["trainable_message_indices"], [2, 4, 6, 8, 10])
+        with self.assertRaisesRegex(ValueError, "Unknown loss policy"):
+            convert_record(self.record, self.root, loss_policy="unknown")
 
     def test_legacy_visual_repairs_include_images_without_observation_metadata(self):
         self.record["trace"][0]["feedback"] = {"ok": True, "artifact": "/old/preview-1.png"}
@@ -192,10 +211,16 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(summary["examples_with_images"], 1)
         self.assertEqual(summary["conversion"], CONVERSION)
         self.assertEqual(summary["loss_policy"], LOSS_POLICY)
-        self.assertEqual(summary["supervised_actions"], 5)
+        self.assertEqual(summary["supervised_actions"], 4)
+        self.assertEqual(summary["masked_actions"], 1)
+        self.assertEqual(summary["trajectories_with_masked_actions"], 1)
         example = json.loads(exported.read_text())
-        self.assertEqual(len(example["trainable_message_indices"]), 5)
+        self.assertEqual(len(example["trainable_message_indices"]), 4)
         self.assertTrue(Path(example["messages"][-2]["content"][1]["image"]).is_file())
+        with contextlib.redirect_stdout(io.StringIO()):
+            main(["--dataset", str(dataset), "--dry-run", "--export", str(exported),
+                  "--loss-policy", "assistant-only"])
+        self.assertEqual(json.loads(exported.read_text())["trainable_message_indices"], [2, 4, 6, 8, 10])
 
     def test_rejects_modified_source_and_artifacts(self):
         for change in ("source", "observation", "final_image", "preview"):
@@ -243,14 +268,14 @@ class ConversionTests(unittest.TestCase):
         example = convert_record(self.record, self.root)
         self.assertNotIn("truncated JSON", json.dumps(example["messages"]))
         self.assertNotIn("previous reply could not be executed", json.dumps(example["messages"]))
-        self.assertEqual(example["trainable_message_indices"], [2, 4, 6, 8, 10])
+        self.assertEqual(example["trainable_message_indices"], [4, 6, 8, 10])
         self.assertTrue(all(example["messages"][i].get("tool_calls") for i in example["trainable_message_indices"]))
         dataset = self.root / "accepted.jsonl"
         dataset.write_text(json.dumps(self.record) + "\n")
         _, summary = load_examples(dataset)
         self.assertEqual(summary["omitted_unexecuted_replies"], 1)
         self.assertEqual(summary["trajectories_with_omitted_replies"], 1)
-        self.assertEqual(summary["supervised_actions"], 5)
+        self.assertEqual(summary["supervised_actions"], 4)
 
     def test_shell_payload_is_literal_and_heredoc_collision_is_handled(self):
         import subprocess
@@ -408,13 +433,33 @@ class TinkerTests(unittest.TestCase):
         for indices in ([], [3, 3], [1], [True], [-1], [99]):
             with self.subTest(indices=indices), self.assertRaisesRegex(ValueError, "invalid trainable"):
                 encoder({**self.example(), "trainable_message_indices": indices})
-        with self.assertRaisesRegex(ValueError, "every assistant message"):
-            encoder({**self.example(), "trainable_message_indices": [4, 6]})
         for index in (0, 1, 6):
             example = self.example()
             example["messages"][index]["content"].append({"type": "image", "image": "/unused/preview.png"})
             with self.subTest(index=index), self.assertRaisesRegex(ValueError, "tool preview images"):
                 encoder(example)
+
+    def test_masked_write_and_reasoning_have_zero_loss_but_remain_in_context(self):
+        from training.sft import DrawingEncoder
+        example = self.example()
+        example['trainable_message_indices'] = [4, 6]
+        example['messages'][2]['content'] = [{'type': 'thinking', 'thinking': 'An unsuccessful draft.'}]
+        encoder = DrawingEncoder(self.renderer)
+        datum = encoder(example)[0]
+        targets = self.targets(datum)
+        context = self.tokenizer.decode(datum.model_input.to_ints())
+        for text in ('broken()', 'An unsuccessful draft.', 'NameError'):
+            self.assertIn(text, context)
+            self.assertNotIn(text, targets)
+        self.assertIn('printf fixed', targets)
+        self.assertIn(SUBMIT, targets)
+        # The masked version encodes exactly the same conversation as baseline.
+        baseline = encoder({**example, 'trainable_message_indices': [2, 4, 6]})[0]
+        self.assertEqual(datum.model_input.to_ints(), baseline.model_input.to_ints())
+        masked_weights = datum.loss_fn_inputs['weights'].data
+        full_weights = baseline.loss_fn_inputs['weights'].data
+        self.assertTrue(all(masked <= full for masked, full in zip(masked_weights, full_weights)))
+        self.assertLess(sum(masked_weights), sum(full_weights))
 
     def test_preview_images_reach_model_and_have_zero_loss(self):
         import tinker
@@ -455,6 +500,11 @@ class TinkerTests(unittest.TestCase):
             # The correction sees only its preceding preview; later pixels are
             # present after it in the full causal sequence, before submission.
             full = content_signature(data[0].model_input)
+            masked = encoder({**example, "trainable_message_indices": [4, 6]})[0]
+            self.assertEqual(content_signature(masked.model_input), full)
+            self.assertNotIn("wrong radius", self.targets(masked))
+            self.assertIn("correct radius", self.targets(masked))
+            self.assertIn(SUBMIT, self.targets(masked))
             for index, expected_images in zip(selected, (0, 1, 2)):
                 prompt = self.vision_renderer.build_generation_prompt(messages[:index])
                 prefix = content_signature(prompt)
@@ -495,7 +545,7 @@ class TinkerAPITests(unittest.TestCase):
                                              "weights": tinker.TensorData(data=[0.0, 1.0], dtype="float32", shape=[2])})
                 for token in (11, 21)]
         manifest = {"dataset_sha256": "dataset", "api_doc_sha256": "docs",
-                    "conversion": CONVERSION, "input_mode": INPUT_MODE}
+                    "conversion": CONVERSION, "input_mode": INPUT_MODE, "loss_policy": LOSS_POLICY}
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp)
             args = parser().parse_args(["--dataset", "accepted.jsonl", "--output-dir", temp,
@@ -534,6 +584,9 @@ class TinkerAPITests(unittest.TestCase):
                         train(args, data, dict(manifest))
                 service.create_training_client_from_state_with_optimizer.assert_not_called()
                 args.resume_from_checkpoint = checkpoint
+                with self.assertRaisesRegex(ValueError, "configuration does not match"):
+                    train(args, data, {**manifest, "loss_policy": "assistant-only"})
+                service.create_training_client_from_state_with_optimizer.assert_not_called()
                 train(args, data, dict(manifest))
                 service.create_training_client_from_state_with_optimizer.assert_called_once_with("tinker://run/weights/state")
                 self.assertEqual(client.optim_step.call_count, 2)
@@ -558,7 +611,7 @@ class TinkerAPITests(unittest.TestCase):
                             loss_fn_inputs={"target_tokens": tinker.TensorData(data=[11, 12], dtype="int64", shape=[2]),
                                             "weights": tinker.TensorData(data=[0.0, 1.0], dtype="float32", shape=[2])})
         manifest = {"dataset_sha256": "dataset", "api_doc_sha256": "docs",
-                    "conversion": CONVERSION, "input_mode": INPUT_MODE}
+                    "conversion": CONVERSION, "input_mode": INPUT_MODE, "loss_policy": LOSS_POLICY}
         with tempfile.TemporaryDirectory() as temp:
             args = parser().parse_args(["--dataset", "accepted.jsonl", "--output-dir", temp,
                                        "--batch-size", "1", "--lr-schedule", "cosine", "--save-every", "1"])
@@ -597,6 +650,7 @@ class TrainingCLITests(unittest.TestCase):
     def test_defaults_use_cosine_and_non_thinking_renderers(self):
         from training.sft import parser, renderer_for_model
         self.assertEqual(parser().parse_args(['--dataset', 'accepted.jsonl']).lr_schedule, 'cosine')
+        self.assertEqual(parser().parse_args(['--dataset', 'accepted.jsonl']).loss_policy, LOSS_POLICY)
         for model, renderer in [('Qwen/Qwen3.5-4B', 'qwen3_5_disable_thinking'),
                                 ('Qwen/Qwen3.8-27B', 'qwen3_8_disable_thinking')]:
             self.assertEqual(renderer_for_model(model + ':peft:262144'), renderer)
