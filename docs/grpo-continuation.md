@@ -7,9 +7,9 @@ The paths below are examples for future runs, not bundled checkpoints.
 ```sh
 # Validate without writing files or making Docker/model requests:
 .venv/bin/python -m training.grpo \
-  --continue-from checkpoints/grpo-v3 \
+  --continue-from checkpoints/grpo-v4 \
   --additional-steps 25 \
-  --output-dir checkpoints/grpo-v3-continued \
+  --output-dir checkpoints/grpo-v4-continued \
   --dry-run
 ```
 

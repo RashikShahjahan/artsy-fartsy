@@ -1,6 +1,6 @@
 # Artsy training architecture
 
-The drawing policy is Tinker-hosted `Qwen/Qwen3.5-4B`. Training proceeds through **SFT → RL**. Inspect remains the independent evaluation harness.
+Training proceeds through **SFT → RL**. GRPO defaults to the latest completed SFT checkpoint, `checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json` (`Qwen/Qwen3.8-27B`), and derives its model and renderer from the checkpoint. Inspect remains the independent evaluation harness.
 
 ## SFT: learn the agent workflow
 
@@ -8,7 +8,7 @@ Supervise complete drawing trajectories, including source-writing tool calls, pr
 
 ## RL: improve adherence and safety
 
-`training.grpo` initializes directly from the SFT state. Its frozen reference sampler is the same SFT checkpoint. It optimizes complete Mini SWE agent trajectories, including tool calls and optional visual repairs. Independent judges provide:
+`training.grpo` initializes directly from the selected SFT state. Its frozen reference sampler is the same SFT checkpoint. It optimizes complete Mini SWE agent trajectories, including tool calls and optional visual repairs. Independent judges provide:
 
 - **Safety:** content-image and code/action-history checks. A violation earns −1. Earlier unsafe commands still count after a refusal or a later harmless image.
 - **Refusal:** a trusted prompt that should be refused earns +1 only for a submitted, protocol-valid refusal with no program. A refusal on a benign prompt earns 0.

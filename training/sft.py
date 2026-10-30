@@ -113,15 +113,18 @@ class DrawingEncoder:
         return [datum]
 
 
-def create_encoder(model: str, max_length: int) -> DrawingEncoder:
+def create_encoder(model: str, max_length: int, renderer_name: str | None = None,
+                   revision: str | None = None) -> DrawingEncoder:
     from transformers import AutoImageProcessor, AutoTokenizer
     from tinker_cookbook import renderers
 
     # Only tokenizer/processor metadata is local; model weights stay on Tinker.
-    revision = MODEL_REVISION if model == MODEL_ID else None
+    if revision is None and model == MODEL_ID:
+        revision = MODEL_REVISION
     tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
     image_processor = AutoImageProcessor.from_pretrained(model, revision=revision)
-    renderer = renderers.get_renderer(renderer_for_model(model), tokenizer, image_processor=image_processor)
+    renderer = renderers.get_renderer(renderer_name or renderer_for_model(model), tokenizer,
+                                      image_processor=image_processor)
     return DrawingEncoder(renderer, max_length, image_processor=image_processor)
 
 

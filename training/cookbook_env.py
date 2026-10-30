@@ -25,7 +25,7 @@ from drawing.judges import (JUDGE_MAX_TOKENS, CODE_SAFETY_MAX_TOKENS, adherence_
     parse_adherence_rubric, code_safety_judge_prompt, parse_code_safety_judgment,
     safety_judge_prompt, parse_safety_judgment, RL_JUDGE_VERSION)
 from training.data import ROOT
-from training.sft import create_encoder
+from training.sft import RENDERER, create_encoder
 
 IMAGE = "artsy-rl-runtime"
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
@@ -51,10 +51,11 @@ async def _docker(argv: list[str], *, stdin: bytes | None = None, timeout: float
     return await asyncio.to_thread(_run, ["docker", *argv], stdin=stdin, timeout=timeout)
 
 
-@lru_cache(maxsize=1)
-def encoder():
+@lru_cache(maxsize=4)
+def encoder(model=MODEL_ID, renderer=RENDERER, max_length=MODEL_CONTEXT_WINDOW,
+            revision=None):
     # Cached per process; weights live on Tinker, not on this machine.
-    return create_encoder(MODEL_ID, MODEL_CONTEXT_WINDOW)
+    return create_encoder(model, max_length, renderer, revision)
 
 
 @lru_cache(maxsize=1)
@@ -63,10 +64,12 @@ def agent_settings():
     return yaml.safe_load((ROOT / "evaluation/mini.yaml").read_text())
 
 
-def initial_messages(spec: dict, tool_specs: list[dict]) -> list[dict]:
+def initial_messages(spec: dict, tool_specs: list[dict], model=MODEL_ID,
+                     renderer=RENDERER, max_length=MODEL_CONTEXT_WINDOW,
+                     revision=None) -> list[dict]:
     """Use the same system/instance framing and API documentation as Inspect."""
     settings = agent_settings()
-    prefix = encoder().renderer.create_conversation_prefix_with_tools(
+    prefix = encoder(model, renderer, max_length, revision).renderer.create_conversation_prefix_with_tools(
         tool_specs, system_prompt=settings["agent"]["system_template"])
     prompt = (f'{spec["prompt"]}\n\nPreview with: '
               f'python /opt/artsy/render.py --seed {spec["seed"]} '
@@ -75,7 +78,9 @@ def initial_messages(spec: dict, tool_specs: list[dict]) -> list[dict]:
                       "content": f"System instructions:\n{drawing_system_prompt(token_limit=None)}\n\nTask:\n{prompt}"}]
 
 
-def _preview_observation(stdout: bytes, stderr: bytes, returncode: int) -> tuple[list[dict] | str, dict | None]:
+def _preview_observation(stdout: bytes, stderr: bytes, returncode: int, model=MODEL_ID,
+                         renderer=RENDERER, max_length=MODEL_CONTEXT_WINDOW,
+                         revision=None) -> tuple[list[dict] | str, dict | None]:
     """Convert the renderer's tagged base64 image into a native image observation."""
     output = stdout.decode("utf-8", errors="replace")
     error = stderr.decode("utf-8", errors="replace")
@@ -95,7 +100,7 @@ def _preview_observation(stdout: bytes, stderr: bytes, returncode: int) -> tuple
             rgb = image.convert("RGB")
         # Match the native Qwen bridge's bounded image preprocessing.
         from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
-        processor = encoder().image_processor
+        processor = encoder(model, renderer, max_length, revision).image_processor
         height, width = smart_resize(
             rgb.height, rgb.width,
             factor=processor.patch_size * processor.merge_size,
@@ -120,8 +125,11 @@ def _preview_observation(stdout: bytes, stderr: bytes, returncode: int) -> tuple
 class DockerSession:
     """One ephemeral sandbox per trajectory, never used to grade final code."""
 
-    def __init__(self, spec: dict, directory: Path, judge):
+    def __init__(self, spec: dict, directory: Path, judge, model=MODEL_ID,
+                 renderer=RENDERER, max_length=MODEL_CONTEXT_WINDOW, revision=None):
         self.spec, self.directory, self.judge = spec, directory, judge
+        self.model, self.renderer = model, renderer
+        self.max_length, self.revision = max_length, revision
         self.container: str | None = None
         self.commands: list[str] = []
         self.previews: list[dict] = []
@@ -168,7 +176,9 @@ class DockerSession:
             return "Return code: 124\nCommand timed out.", len(self.commands) >= LIMITS["maxCalls"]
         if command.strip() == SUBMIT and result.returncode == 0:
             self.submitted = True
-        observation, preview = _preview_observation(result.stdout, result.stderr, result.returncode)
+        observation, preview = _preview_observation(
+            result.stdout, result.stderr, result.returncode, self.model, self.renderer,
+            self.max_length, self.revision)
         if preview:
             self.previews.append(preview)
         return observation, self.submitted or len(self.commands) >= LIMITS["maxCalls"]
@@ -324,11 +334,13 @@ class ArtsyGroupBuilder:
     """Tinker Cookbook EnvGroupBuilder protocol, one prompt per rollout group."""
 
     def __init__(self, spec: dict, group_size: int, step: int, root: Path, judge, max_tokens: int,
-                 max_length: int, normalize_rewards: bool):
+                 max_length: int, normalize_rewards: bool, model=MODEL_ID, renderer=RENDERER,
+                 revision=None):
         self.spec, self.group_size, self.step = spec, group_size, step
         self.root, self.judge = root, judge
         self.max_tokens, self.max_length = max_tokens, max_length
         self.normalize_rewards = normalize_rewards
+        self.model, self.renderer, self.revision = model, renderer, revision
         self.sessions: list[DockerSession] = []
 
     async def make_envs(self):
@@ -350,11 +362,12 @@ class ArtsyGroupBuilder:
         for _ in range(self.group_size):
             session = DockerSession(self.spec,
                 self.root / f"step-{self.step:06d}" / self.spec["id"] / uuid4().hex,
-                self.judge)
+                self.judge, self.model, self.renderer, self.max_length, self.revision)
             self.sessions.append(session)
 
             tool_obj = BashTool(session)
-            messages = initial_messages(self.spec, [tool_obj.to_spec()])
+            messages = initial_messages(self.spec, [tool_obj.to_spec()], self.model,
+                                        self.renderer, self.max_length, self.revision)
             agent = DrawingMessageEnv(tools=[tool_obj], initial_messages=messages,
                                       max_turns=agent_settings()["agent"]["step_limit"],
                                       reward_fn=session.grade,
@@ -362,7 +375,8 @@ class ArtsyGroupBuilder:
                                       failed_parse_reward=0.0,
                                       terminate_on_parse_error=True)
             environments.append(EnvFromMessageEnv(
-                encoder().renderer, agent, failed_parse_reward=0.0,
+                encoder(self.model, self.renderer, self.max_length, self.revision).renderer,
+                agent, failed_parse_reward=0.0,
                 terminate_on_parse_error=True, terminate_on_length=True,
                 max_trajectory_tokens=self.max_length,
                 # Runner clips each response to remaining context space.

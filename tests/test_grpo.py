@@ -31,6 +31,8 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             specs=({"id": "draw", "prompt": "Draw a circle", "seed": 1},),
             output_dir="/tmp/artsy-dataset-test", batch_size=1, group_size=2,
             epochs=1, seed=42, max_tokens=128, max_length=32768,
+            model="Qwen/Qwen3.8-27B", renderer="qwen3_8_disable_thinking",
+            revision=None,
             normalize_rewards=False, judge_model="adherence", judge_url="https://judge.example/v1",
             safety_config={"model": "safety", "baseUrl": "https://safety.example/v1"},
             code_safety_config={"model": "code", "baseUrl": "https://code.example/v1"})
@@ -283,7 +285,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(args.max_tokens, 8192)
         self.assertEqual(args.max_length, 262144)
         self.assertEqual(args.init_checkpoint.name, 'final.json')
-        self.assertEqual(args.init_checkpoint.parent.name, 'sft-v1')
+        self.assertEqual(args.init_checkpoint.parent.name,
+                         'sft-v2-qwen3.8-27b-final-preview-masked-cosine')
 
     def test_sft_checkpoint_initializes_rl_and_other_stage_is_rejected(self):
         from drawing.config import MODEL_ID, MODEL_REVISION
@@ -316,6 +319,9 @@ class ConfigurationTests(unittest.TestCase):
         args.output_dir = Path("/tmp/artsy-rl-example")
         plan = {"initial_state_path": "tinker://initial",
                 "reference_sampler_path": "tinker://reference",
+                "model": "Qwen/Qwen3.8-27B",
+                "renderer": "qwen3_8_disable_thinking",
+                "tokenizer_revision": None,
                 "lora_rank": 32, "correctness_judge_model": "judge",
                 "correctness_judge_url": "https://judge.example/v1",
                 "safety_config": {}, "code_safety_config": {}}

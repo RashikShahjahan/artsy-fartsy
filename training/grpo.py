@@ -19,12 +19,12 @@ from pathlib import Path
 import subprocess
 import sys
 
-from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION, MODEL_CONTEXT_WINDOW
+from drawing.config import IMAGE_SIZE, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
 from training.data import ROOT, digest
-from training.sft import RENDERER, batches
+from training.sft import batches
 
-ALGORITHM = "tinker-cookbook-rlhf-v3"
+ALGORITHM = "tinker-cookbook-rlhf-v4"
 PROVENANCE_FILES = (
     "docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
     "drawing/agent_contract.py", "drawing/eval_specs.py",
@@ -52,17 +52,24 @@ def load_run(args):
         specs = specs[:args.limit]
     initial = json.loads(args.init_checkpoint.read_text())
     source = initial.get("config", {})
-    if (source.get("algorithm") is not None or source.get("model") != MODEL_ID
-            or source.get("tokenizer_revision") != MODEL_REVISION
-            or source.get("renderer") != RENDERER or type(source.get("lora_rank")) is not int
+    checkpoint_model = source.get("model")
+    if isinstance(checkpoint_model, str) and ":peft:" in checkpoint_model:
+        checkpoint_model = checkpoint_model.split(":peft:", 1)[0]
+    if (source.get("algorithm") is not None or not isinstance(checkpoint_model, str)
+            or not checkpoint_model.startswith("Qwen/")
+            or not isinstance(source.get("renderer"), str)
+            or type(source.get("lora_rank")) is not int
             or source["lora_rank"] < 1
+            or source.get("image_size", IMAGE_SIZE) != IMAGE_SIZE
             or source.get("api_doc_sha256") != digest((ROOT / "docs/artcanvas.md").read_bytes())
             or any(not isinstance(initial.get(key), str) or not initial[key].startswith("tinker://")
                    for key in ("state_path", "sampler_path"))):
         raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
     config = {
-        "algorithm": ALGORITHM, "model": MODEL_ID, "tokenizer_revision": MODEL_REVISION,
-        "renderer": RENDERER, "image_size": IMAGE_SIZE, "lora_rank": source["lora_rank"],
+        "algorithm": ALGORITHM, "model": checkpoint_model,
+        "tokenizer_revision": source.get("tokenizer_revision"),
+        "renderer": source["renderer"], "image_size": IMAGE_SIZE,
+        "lora_rank": source["lora_rank"],
         "dataset_sha256": digest(args.dataset.read_bytes()),
         "prompt_ids": [row["id"] for row in specs],
         "initial_state_path": initial["state_path"],
@@ -124,8 +131,8 @@ def load_continuation(args):
     if set(old_hashes) != set(current_hashes) or any(
             old_hashes[p] != h for p, h in current_hashes.items()):
         raise ValueError("Continuation source runtime or training dependencies changed")
-    if (previous["model"] != MODEL_ID or previous["tokenizer_revision"] != MODEL_REVISION
-            or previous["renderer"] != RENDERER or previous["image_size"] != IMAGE_SIZE
+    if (not previous["model"].startswith("Qwen/")
+            or previous["image_size"] != IMAGE_SIZE
             or digest(args.dataset.read_bytes()) != previous["dataset_sha256"]):
         raise ValueError("Continuation model or dataset changed")
     all_specs = load_specs(args.dataset)
@@ -171,9 +178,9 @@ def make_cookbook_config(args, specs, plan, total):
 
     return cookbook.Config(
         log_path=str(args.output_dir.resolve()),
-        model_name=MODEL_ID,
+        model_name=plan["model"],
         recipe_name="artsy_rl",
-        renderer_name=RENDERER,
+        renderer_name=plan["renderer"],
         load_checkpoint_path=plan["initial_state_path"],
         lora_rank=plan["lora_rank"],
         dataset_builder=ArtsyDatasetBuilder(
@@ -182,11 +189,14 @@ def make_cookbook_config(args, specs, plan, total):
             epochs=args.epochs, seed=args.seed,
             max_tokens=args.max_tokens, max_length=args.max_length,
             normalize_rewards=args.normalize_rewards,
+            revision=plan.get("tokenizer_revision"),
             judge_model=plan["correctness_judge_model"],
             judge_url=plan["correctness_judge_url"],
             judge_renderer=plan.get("correctness_judge_renderer", "qwen3_8_medium_reasoning"),
             judge_revision=plan.get("correctness_judge_revision"),
             judge_max_tokens=plan.get("correctness_judge_max_tokens", 16384),
+            model=plan["model"],
+            renderer=plan["renderer"],
             **{key: plan[key] for key in ("safety_config", "code_safety_config")},
         ),
         learning_rate=args.learning_rate,
@@ -198,7 +208,7 @@ def make_cookbook_config(args, specs, plan, total):
                         "clip_high_threshold": 1 + args.clip_epsilon},
         kl_penalty_coef=args.kl_coef,
         kl_reference_config=(cookbook.KLReferenceConfig(
-            base_model=MODEL_ID, load_checkpoint_path=plan["reference_sampler_path"])
+            base_model=plan["model"], load_checkpoint_path=plan["reference_sampler_path"])
             if args.kl_coef else None),
         remove_constant_reward_groups=True,
         eval_every=0,
@@ -260,8 +270,8 @@ async def train(args, specs, plan, total):
 def parser():
     p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     p.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v1/prompts.jsonl")
-    p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v1/final.json")
-    p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v3")
+    p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json")
+    p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v4")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
     p.add_argument("--additional-steps", type=int, help="Positive number of extra updates")

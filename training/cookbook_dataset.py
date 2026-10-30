@@ -15,16 +15,19 @@ from training.sft import batches
 
 class ArtsyRLDataset(RLDataset):
     def __init__(self, specs, root, batch_size, group_size, epochs, seed,
-                 max_tokens, max_length, normalize_rewards, judge):
+                 max_tokens, max_length, normalize_rewards, judge, model, renderer,
+                 revision):
         self.batches = list(batches(list(specs), batch_size, epochs, seed))
         self.root, self.group_size, self.judge = Path(root), group_size, judge
         self.max_tokens, self.max_length = max_tokens, max_length
         self.normalize_rewards = normalize_rewards
+        self.model, self.renderer, self.revision = model, renderer, revision
 
     def get_batch(self, index):
         return [
             ArtsyGroupBuilder(spec, self.group_size, index + 1, self.root, self.judge,
-                              self.max_tokens, self.max_length, self.normalize_rewards)
+                              self.max_tokens, self.max_length, self.normalize_rewards,
+                              self.model, self.renderer, self.revision)
             for spec in self.batches[index]
         ]
 
@@ -43,12 +46,14 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
     max_tokens: int
     max_length: int
     normalize_rewards: bool
+    model: str
+    renderer: str
+    revision: str | None
     judge_model: str
     judge_url: str
     judge_renderer: str = "qwen3_8_medium_reasoning"
     judge_revision: str | None = None
     judge_max_tokens: int = 16384
-
     safety_config: dict | None = None
     code_safety_config: dict | None = None
 
@@ -69,4 +74,5 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
         return ArtsyRLDataset(self.specs, self.output_dir, self.batch_size,
                               self.group_size, self.epochs, self.seed,
                               self.max_tokens, self.max_length,
-                              self.normalize_rewards, judges), None
+                              self.normalize_rewards, judges, self.model, self.renderer,
+                              self.revision), None

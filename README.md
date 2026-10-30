@@ -761,11 +761,11 @@ the inference bridge (`make serve`) is not needed during training.
 
 ### Policy, prompts, and environment
 
-The default policy is `Qwen/Qwen3.5-4B`, initialized from
-`checkpoints/sft-v1/final.json` with LoRA rank inherited from that checkpoint
-(rank 32 for the bundled SFT release). It uses the `qwen3_5_preserve_thinking`
-renderer. Training runs on Tinker; local tokenization and image processing run
-on the host.
+The default policy is the latest completed SFT checkpoint,
+`checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json`
+(`Qwen/Qwen3.8-27B`, LoRA rank 32). GRPO reads the model and renderer from the
+checkpoint, and uses that same SFT sampler as its frozen KL reference. Training
+runs on Tinker; local tokenization and image processing run on the host.
 
 The default `datasets/grpo-v1/prompts.jsonl` contains 200 benign drawing prompts:
 20 easy, 60 medium, 80 hard, and 40 very hard. It covers all 14 drawing skills.
@@ -839,17 +839,17 @@ OpenAI-compatible judges are also supported. See the [reward architecture](docs/
 
 # Smoke run: one update, two prompt groups, four trajectories per group:
 .venv/bin/python -m training.grpo --max-steps 1 \
-  --output-dir checkpoints/grpo-v3-smoke
+  --output-dir checkpoints/grpo-v4-smoke
 
 # Full run on the default 200 drawing prompts:
-make grpo ARGS="--output-dir checkpoints/grpo-v3"
+make grpo ARGS="--output-dir checkpoints/grpo-v4"
 
 # Resume an interrupted run with its original arguments:
-.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v3
+.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v4
 
 # Recover final.json after Cookbook completed but final export failed:
 .venv/bin/python -m training.grpo --finalize-only \
-  --output-dir checkpoints/grpo-v3
+  --output-dir checkpoints/grpo-v4
 ```
 
 ### Defaults and checkpointing
