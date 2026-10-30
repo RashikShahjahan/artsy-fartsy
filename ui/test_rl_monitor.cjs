@@ -16,7 +16,7 @@ function createNode(tag = "div") {
     setAttribute(name, value) { this.attributes[name] = value; }
   };
 }
-function fixture() {
+function fixture(fetchImpl = () => { throw new Error("Unexpected network request"); }) {
   const nodes = new Map();
   for (const name of ["rl-episodes", "rl-search", "rl-run", "rl-refresh", "rl-detail"]) {
     nodes.set(name, createNode());
@@ -31,7 +31,7 @@ function fixture() {
     document,
     clearTimeout() {},
     setTimeout() {},
-    fetch() { throw new Error("Grouping must not fetch data"); }
+    fetch: fetchImpl
   });
   return {nodes, ...result};
 }
@@ -103,4 +103,67 @@ test("empty and unmatched searches remain informative", () => {
   nodes.get("rl-search").value = "no-match";
   renderRows();
   assert.match(nodes.get("rl-episodes").children[0].textContent, /No episodes match/);
+});
+
+
+test("each rollout displays a lazy image and both scores without repeating prompts", () => {
+  const {nodes, state, renderRows} = fixture();
+  state.run = "grpo-v4";
+  state.rows = [
+    row("step-000001", "circle", "a", {score: 0.5, adherence: 0.8}),
+    row("step-000001", "circle", "b", {score: 1, adherence: 1}),
+    row("step-000001", "circle", "c", {score: -1, adherence: 0}),
+    row("step-000001", "circle", "d", {score: 0, adherence: 0}),
+  ];
+  renderRows();
+  const list = nodes.get("rl-episodes");
+  assert.equal(allNodes(list, node => node.className === "rl-prompt").length, 1);
+  assert.equal(allNodes(list, node => node.className === "rl-episode").length, 4);
+  const images = allNodes(list, node => node.tag === "img");
+  assert.equal(images.length, 4);
+  images.forEach((image, i) => {
+    assert.equal(image.loading, "lazy");
+    assert.equal(image.decoding, "async");
+    assert.equal(image.alt, "Final image for rollout " + (i + 1));
+  });
+  assert.equal(images[0].src,
+    "/api/rl/artifacts/grpo-v4/step-000001/circle/a/image.png");
+  const rewards = allNodes(list, node => node.className === "rl-reward");
+  assert.deepEqual(Array.from(rewards, node => node.textContent),
+    ["Reward 0.500", "Reward 1.000", "Reward -1.000", "Reward 0.000"]);
+  const adherence = allNodes(list, node => node.className === "rl-adherence");
+  assert.deepEqual(Array.from(adherence, node => node.textContent),
+    ["Adherence 0.800", "Adherence 1.000", "Adherence 0.000", "Adherence 0.000"]);
+});
+
+test("refusals and failed renders show placeholders without requesting an image", () => {
+  const {nodes, state, renderRows} = fixture();
+  state.run = "grpo-v4";
+  state.rows = [
+    row("step-000001", "circle", "a", {outcome: "refused", hasImage: false, score: 1}),
+    row("step-000001", "circle", "b", {outcome: "incomplete", hasImage: false, score: 0})
+  ];
+  renderRows();
+  const list = nodes.get("rl-episodes");
+  assert.equal(allNodes(list, node => node.tag === "img").length, 0);
+  assert.deepEqual(Array.from(allNodes(list, node => node.className === "rl-no-image"),
+    node => node.textContent), ["Refused — no image", "No final image"]);
+  assert.equal(allNodes(list, node => node.className === "rl-episode").length, 2);
+});
+
+test("unchanged poll data and tile selections keep thumbnail elements mounted", async () => {
+  const {nodes, state, renderRows} = fixture(async () => ({
+    ok: true, json: async () => ({scores: {reward: 0.75}})
+  }));
+  state.run = "grpo-v4";
+  state.rows = [row("step-000001", "circle", "a")];
+  renderRows();
+  const gallery = nodes.get("rl-episodes");
+  const image = allNodes(gallery, node => node.tag === "img")[0];
+  renderRows(); // A 30s poll returned identical results.
+  assert.equal(allNodes(gallery, node => node.tag === "img")[0], image);
+  const button = allNodes(gallery, node => node.className === "rl-episode")[0];
+  await button.onclick(); // Selecting details must not rebuild the gallery.
+  assert.equal(allNodes(gallery, node => node.tag === "img")[0], image);
+  assert.equal(button.attributes["aria-pressed"], "true");
 });
