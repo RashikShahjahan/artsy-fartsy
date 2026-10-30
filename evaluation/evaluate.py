@@ -14,7 +14,7 @@ from inspect_ai import eval
 from inspect_ai.log import read_eval_log
 from inspect_ai.model import GenerateConfig, get_model
 
-from .harness import (BASE_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_TOKEN_LIMIT, DEFAULT_TIME_LIMIT, LIMITS, ROOT, check_native_bridge, drawing_task,
+from .harness import (BASE_MODEL, DEFAULT_MAX_TOKENS, DEFAULT_TOKEN_LIMIT, DEFAULT_TIME_LIMIT, DEFAULT_MAX_TURNS, LIMITS, ROOT, check_native_bridge, drawing_task,
                       load_specs, model_from_env, model_url)
 from .suite import dataset_path
 
@@ -231,9 +231,11 @@ def main() -> int:
     parser.add_argument("--epochs", type=positive, default=1)
     parser.add_argument("--max-connections", type=positive, default=10, help="Maximum concurrent model connections (default: 10)")
     parser.add_argument("--max-samples", type=positive, default=10, help="Maximum concurrent evaluation samples (default: 10)")
+    parser.add_argument("--max-sandboxes", type=positive,
+                        help="Maximum concurrent Docker sandboxes (defaults to --max-samples)")
     parser.add_argument("--time-limit", type=optional_token_budget, default=DEFAULT_TIME_LIMIT,
                         help=f"Episode and model-request deadline in seconds; 0 disables it (default: {DEFAULT_TIME_LIMIT})")
-    parser.add_argument("--max-turns", type=positive,
+    parser.add_argument("--max-turns", type=positive, default=DEFAULT_MAX_TURNS,
                         help="Limit model turns and announce the limit and current turn on every request")
     parser.add_argument("--max-tokens", type=optional_token_budget, default=DEFAULT_MAX_TOKENS,
                         help="Output tokens per response; 0 uses provider capacity (default: 0, same as datagen)")
@@ -271,6 +273,7 @@ def main() -> int:
     plan = {"model": args.model, "base_url": model_url(),
             "dataset": str(args.dataset.resolve()), "samples": len(selected), "epochs": args.epochs,
             "max_connections": args.max_connections, "max_samples": args.max_samples,
+            "max_sandboxes": args.max_sandboxes or args.max_samples,
             "max_tokens": args.max_tokens, "token_limit": args.token_limit,
             "time_limit": args.time_limit,
             "max_turns": args.max_turns,
@@ -343,6 +346,7 @@ def main() -> int:
                      time_limit=args.time_limit, max_turns=args.max_turns),
         model=model_from_env(args.model, timeout=args.time_limit), model_roles=roles,
         log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=args.max_samples,
+        max_sandboxes=args.max_sandboxes or args.max_samples,
     )
     # Interrupted runs can return headers or partial samples; complete logs need no I/O.
     logs = [_recover_log(log, len(selected) * args.epochs) for log in logs]

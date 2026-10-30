@@ -110,7 +110,7 @@ class NativeTrajectoryTests(unittest.TestCase):
         baseline = convert_record(r, self.root, loss_policy='assistant-only')
         self.assertEqual(baseline['trainable_message_indices'], [2, 4, 6, 8])
 
-    def test_native_earlier_write_is_context_and_all_previews_remain_targets(self):
+    def test_native_earlier_write_and_preview_remain_context_only(self):
         r = copy.deepcopy(self.record)
         messages = r['nativeTrajectory']['messages']
         earlier = copy.deepcopy(messages[2:6])
@@ -123,8 +123,27 @@ class NativeTrajectoryTests(unittest.TestCase):
         r['nativeTrajectory']['trainable_message_indices'] = [2, 4, 6, 8, 10]
         self.rehash(r)
         converted = convert_record(r, self.root)
-        self.assertEqual(converted['trainable_message_indices'], [4, 6, 8, 10])
+        self.assertEqual(converted['trainable_message_indices'], [6, 8, 10])
         self.assertIn("draw('blue')", json.dumps(converted['messages']))
+        baseline = convert_record(r, self.root, loss_policy='assistant-only')
+        self.assertEqual(converted['messages'], baseline['messages'])
+        self.assertEqual(baseline['trainable_message_indices'], [2, 4, 6, 8, 10])
+
+    def test_native_repeated_preview_supervises_only_the_last_call(self):
+        r = copy.deepcopy(self.record)
+        messages = r['nativeTrajectory']['messages']
+        repeated = copy.deepcopy(messages[4:6])
+        repeated[0]['tool_calls'][0]['id'] = 'final-preview'
+        repeated[1]['tool_call_id'] = 'final-preview'
+        messages[6:6] = repeated
+        r['nativeTrajectory']['trainable_message_indices'] = [2, 4, 6, 8]
+        self.rehash(r)
+        converted = convert_record(r, self.root)
+        self.assertEqual(converted['trainable_message_indices'], [2, 6, 8])
+        self.assertEqual(converted['messages'][4]['tool_calls'][0]['id'], 'preview')
+        baseline = convert_record(r, self.root, loss_policy='assistant-only')
+        self.assertEqual(converted['messages'], baseline['messages'])
+        self.assertEqual(baseline['trainable_message_indices'], [2, 4, 6, 8])
 
     def test_native_ambiguous_shell_requires_explicit_baseline_policy(self):
         r = copy.deepcopy(self.record)

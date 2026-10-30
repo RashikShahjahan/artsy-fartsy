@@ -2,7 +2,7 @@
 
 The shell wrapper is synthesized; the Python source and execution feedback are
 recorded evidence. Each record produces one complete conversation. By default,
-earlier program writes and their summaries are context only; preview calls,
+earlier program writes and their summaries are context only; the final preview,
 the final write, refusals, and submission receive loss. Instructions, tool feedback,
 and preview images are context. The assistant-only policy retains the baseline.
 Unexecuted malformed teacher replies and judge critiques are omitted.
@@ -26,13 +26,13 @@ TOOLS = [{"type": "function", "function": {
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 INPUT_MODE = "multimodal-previews"
-CONVERSION = "bash-trajectory-summary-text-loss-policy-v14-no-budget-prompts"
-LOSS_POLICY = "final-write-preview-submit"
+CONVERSION = "bash-trajectory-summary-text-loss-policy-v15-final-preview-no-budget-prompts"
+LOSS_POLICY = "final-write-final-preview-submit"
 LOSS_POLICIES = (LOSS_POLICY, "assistant-only")
 
 
 def native_final_targets(messages: list[dict], source: str, seed: int) -> list[int]:
-    """Select unambiguous separate writes/previews; never guess shell semantics."""
+    """Select the final write, preview, and submission; never guess shell semantics."""
     writes, selected = [], []
     preview = (f"python /opt/artsy/render.py --seed {seed} "
                "--output /workspace/preview --preview < /workspace/program.py")
@@ -42,10 +42,11 @@ def native_final_targets(messages: list[dict], source: str, seed: int) -> list[i
             continue
         calls = msg["tool_calls"]
         command = calls[0]["function"]["arguments"]["command"]
-        if len(calls) == 1 and command.strip() in (preview, SUBMIT):
+        if len(calls) == 1 and command.strip() == preview:
+            last_preview = index
+            continue
+        if len(calls) == 1 and command.strip() == SUBMIT:
             selected.append(index)
-            if command.strip() == preview:
-                last_preview = index
             continue
         match = re.fullmatch(r"cat > /workspace/program\.py <<'([^'\n]+)'\n(.*)", command, re.DOTALL)
         if len(calls) == 1 and match:
@@ -58,7 +59,7 @@ def native_final_targets(messages: list[dict], source: str, seed: int) -> list[i
     if (not writes or writes[-1][0] >= last_preview
             or writes[-1][1].replace("\r\n", "\n").strip() != source.replace("\r\n", "\n").strip()):
         raise ValueError("Native final-write masking requires a matching final source write followed by a preview")
-    return sorted([writes[-1][0], *selected])
+    return sorted([writes[-1][0], last_preview, *selected])
 
 
 def digest(data: bytes) -> str:
@@ -364,7 +365,8 @@ def convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) -> 
         messages.append(message(
             "tool", "Synthesized protocol acknowledgment: program.py source supplied for writing; "
             "no recorded write execution result.", tool_call_id=write_id))
-        trainable_message_indices.append(len(messages))
+        if loss_policy == "assistant-only" or final:
+            trainable_message_indices.append(len(messages))
         messages.append(action(preview_command, call_id))
         visible = {key: feedback[key] for key in ("ok", "stdout", "stderr", "error", "exitCode", "width", "height")
                    if key in feedback}

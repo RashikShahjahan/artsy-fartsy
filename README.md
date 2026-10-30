@@ -115,10 +115,10 @@ The container has no outbound network or host mounts. Inspect proxies model call
 through the host to the native Tinker bridge (or another configured endpoint).
 Inspect and model clients run on the host. The container contains the drawing
 runtime and tools; it has no agent framework or model SDK.
-Evaluation shares datagen's default caps: twenty model turns and at most twenty
-environment operations, a 300-second episode deadline, 262,144 generated tokens
-per episode, and no explicit per-response token cap. Both renderers allow 60 seconds,
-64 KiB of source and an 8 MiB PNG. Model requests allow 300 seconds. Evaluation's
+Evaluation defaults to 25 model turns, with no separate environment-operation cap,
+episode deadline, model-request deadline, cumulative output-token budget, or
+explicit per-response token cap. Both renderers allow 60 seconds,
+64 KiB of source and an 8 MiB PNG. Evaluation's
 bash timeout is 65 seconds to leave room for render cleanup; its Docker workspace
 has no additional CPU or memory quota. Local-model cost lookup is disabled.
 Use `--max-tokens N` to add a per-response output cap; `--max-tokens 0` uses
@@ -277,8 +277,8 @@ with the requested model/checkpoint, then checks both capabilities. It avoids th
 beta OpenAI endpoint's model-specific vision limitation by routing messages
 through the native sampling renderer. No `reasoning_effort` request parameter or environment override is
 needed: the bridge defaults to Qwen's non-thinking renderer. Evaluation uses
-a 600-second episode and model-request deadline, unlimited tool calls and model
-turns, temperature zero, and a 262,144 generated-output-token budget. Each prompt
+no episode or model-request deadline, a 25-model-turn limit, temperature zero,
+and no cumulative output-token budget. Each prompt
 is evaluated once by default, with no explicit per-response token cap.
 Evaluation defaults to ten concurrent samples and ten model connections. Use
 `--max-samples` and `--max-connections` to tune these independently; for example,
@@ -286,11 +286,12 @@ Evaluation defaults to ten concurrent samples and ten model connections. Use
 its own Docker container, so choose sample concurrency to fit available memory.
 Use a fresh output directory for every run. The first run builds the Docker image.
 
-Drawing prompts omit budget statements by default. Set `--max-turns 25` to enforce
-25 model turns, state that limit in the instructions, and show `Turn N of 25`
+Evaluation defaults to `--max-turns 25 --time-limit 0`: the instructions state
+the 25-turn limit and show `Turn N of 25`
 before every model request. The final turn includes a submission reminder.
 Use `--time-limit 0` to disable episode and model-request deadlines; individual
-render and bash command timeouts still apply.
+render and bash command timeouts still apply. `--max-sandboxes` controls Inspect's
+separate Docker sandbox cap and defaults to `--max-samples`.
 
 `render_valid` checks code execution and a valid PNG of the expected dimensions.
 `adherence` records the correctness vision judge's overall prompt-match score from 0 to 1.
@@ -678,12 +679,13 @@ Source/image hashes, API documentation version, and explicit
 legacy duplicate exceptions are checked during conversion. Review pending records
 before training, or explicitly include them with `--allow-unreviewed`.
 
-Training defaults to `--loss-policy final-write-preview-submit`: cross-entropy
-loss covers the final code-writing action, every preview call, and submission.
-All earlier code-writing actions and their associated summaries receive zero loss,
-including drafts that executed successfully. They remain in the conversation with
-their feedback and preview images, so the final write can learn from the full
-history. Refusal-writing actions and their submission also receive loss.
+Training defaults to `--loss-policy final-write-final-preview-submit`: cross-entropy
+loss covers the final code-writing action, the final preview call, and submission.
+Earlier code-writing actions and preview calls receive zero loss, including drafts
+that executed successfully. They remain in the conversation with their feedback
+and preview images, so the final actions can learn from the full history.
+Tool feedback and preview images receive zero loss and remain context only.
+Refusal-writing actions and their submission also receive loss.
 No judge labels or failure thresholds are used to select targets.
 Use `--loss-policy assistant-only` for the baseline that supervises every assistant
 action, including earlier attempts. Preflight reports the policy, supervised and

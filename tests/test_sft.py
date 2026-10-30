@@ -110,17 +110,17 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(unrelated.read_text(), "sentinel")
         self.assertFalse((self.root / "unwanted").exists())
 
-    def test_failed_write_is_context_but_preview_repair_and_submission_are_targets(self):
+    def test_only_final_write_preview_and_submission_are_targets(self):
         example = convert_record(self.record, self.root)
         self.assertEqual(example["id"], self.record["id"])
         self.assertIn("broken()", json.dumps(example["messages"]))
         self.assertIn("NameError", json.dumps(example["messages"]))
         targets = [example["messages"][i] for i in example["trainable_message_indices"]]
-        self.assertEqual(len(targets), 4)
+        self.assertEqual(len(targets), 3)
         self.assertNotIn("broken()", json.dumps(targets))
-        self.assertIn(self.record["code"], targets[1]["tool_calls"][0]["function"]["arguments"]["command"])
-        self.assertEqual(targets[3]["tool_calls"][0]["function"]["arguments"]["command"], SUBMIT)
-        self.assertEqual(example["trainable_message_indices"], [4, 6, 8, 10])
+        self.assertIn(self.record["code"], targets[0]["tool_calls"][0]["function"]["arguments"]["command"])
+        self.assertEqual(targets[2]["tool_calls"][0]["function"]["arguments"]["command"], SUBMIT)
+        self.assertEqual(example["trainable_message_indices"], [6, 8, 10])
         self.assertEqual(sum(part["type"] == "image" for msg in example["messages"] for part in msg["content"]), 1)
         self.assertEqual([p["type"] for p in example["messages"][3]["content"]], ["text"])
         self.assertIn('"ok": true', example["messages"][-2]["content"][0]["text"])
@@ -169,9 +169,9 @@ class ConversionTests(unittest.TestCase):
                                     "imageHash": digest((self.root / name).read_bytes())})
         self.assertNotIn("secret answer", serialized)
         self.assertNotIn("privileged", serialized)
-        self.assertEqual(example["trainable_message_indices"], [4, 6, 8, 10])
+        self.assertEqual(example["trainable_message_indices"], [6, 8, 10])
 
-    def test_all_earlier_writes_are_masked_regardless_of_execution_or_judge_labels(self):
+    def test_all_earlier_writes_and_previews_are_masked_regardless_of_execution_or_judge_labels(self):
         self.record["trace"][0]["feedback"] = {"ok": True, "artifact": "/old/preview-1.png"}
         for evaluation in ({}, {"score": 1}, {"correct": False}, {"correctness": {"score": 0.2}}):
             with self.subTest(evaluation=evaluation):
@@ -179,6 +179,7 @@ class ConversionTests(unittest.TestCase):
                 self.record["trace"][-1]["evaluation"] = {"score": 0.1}
                 example = convert_record(self.record, self.root)
                 self.assertNotIn(2, example["trainable_message_indices"])
+                self.assertNotIn(4, example["trainable_message_indices"])
                 self.assertIn(6, example["trainable_message_indices"])
                 self.assertNotIn("correctness", json.dumps(example["messages"]))
 
@@ -211,11 +212,11 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(summary["examples_with_images"], 1)
         self.assertEqual(summary["conversion"], CONVERSION)
         self.assertEqual(summary["loss_policy"], LOSS_POLICY)
-        self.assertEqual(summary["supervised_actions"], 4)
-        self.assertEqual(summary["masked_actions"], 1)
+        self.assertEqual(summary["supervised_actions"], 3)
+        self.assertEqual(summary["masked_actions"], 2)
         self.assertEqual(summary["trajectories_with_masked_actions"], 1)
         example = json.loads(exported.read_text())
-        self.assertEqual(len(example["trainable_message_indices"]), 4)
+        self.assertEqual(len(example["trainable_message_indices"]), 3)
         self.assertTrue(Path(example["messages"][-2]["content"][1]["image"]).is_file())
         with contextlib.redirect_stdout(io.StringIO()):
             main(["--dataset", str(dataset), "--dry-run", "--export", str(exported),
@@ -268,14 +269,14 @@ class ConversionTests(unittest.TestCase):
         example = convert_record(self.record, self.root)
         self.assertNotIn("truncated JSON", json.dumps(example["messages"]))
         self.assertNotIn("previous reply could not be executed", json.dumps(example["messages"]))
-        self.assertEqual(example["trainable_message_indices"], [4, 6, 8, 10])
+        self.assertEqual(example["trainable_message_indices"], [6, 8, 10])
         self.assertTrue(all(example["messages"][i].get("tool_calls") for i in example["trainable_message_indices"]))
         dataset = self.root / "accepted.jsonl"
         dataset.write_text(json.dumps(self.record) + "\n")
         _, summary = load_examples(dataset)
         self.assertEqual(summary["omitted_unexecuted_replies"], 1)
         self.assertEqual(summary["trajectories_with_omitted_replies"], 1)
-        self.assertEqual(summary["supervised_actions"], 4)
+        self.assertEqual(summary["supervised_actions"], 3)
 
     def test_shell_payload_is_literal_and_heredoc_collision_is_handled(self):
         import subprocess
@@ -512,7 +513,7 @@ class TinkerTests(unittest.TestCase):
                 self.assertTrue(self.tokenizer.decode([full[len(prefix) - 1]]).startswith(
                     self.tokenizer.decode([prefix[-1]])))
                 self.assertEqual(sum(isinstance(c, tinker.types.ImageChunk) for c in prompt.chunks), expected_images)
-            for datum in data:
+            for datum in [*data, masked]:
                 chunks = datum.model_input.chunks
                 self.assertEqual(sum(isinstance(c, tinker.types.ImageChunk) for c in chunks), 2)
                 weights = datum.loss_fn_inputs["weights"].data

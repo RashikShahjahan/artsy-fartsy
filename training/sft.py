@@ -230,7 +230,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--allow-unreviewed", action="store_true", help="Include selected records whose visual review is pending")
     p.add_argument("--check-batch", action="store_true", help="Check text/image tokens and loss masks locally; no API calls")
     p.add_argument("--loss-policy", choices=LOSS_POLICIES, default=LOSS_POLICY,
-                   help="Supervise the final write, all previews and submission (default), or all assistant turns")
+                   help="Supervise the final write, final preview and submission (default), or all assistant turns")
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--max-steps", type=int, default=-1)
     p.add_argument("--batch-size", type=int, default=8, help="Complete trajectories per optimizer step")

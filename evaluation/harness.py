@@ -37,8 +37,9 @@ from drawing.judges import (
 ROOT = Path(__file__).resolve().parents[1]
 BASE_MODEL = MODEL_ID
 DEFAULT_MAX_TOKENS = MAX_RESPONSE_TOKENS
-DEFAULT_TOKEN_LIMIT = MODEL_CONTEXT_WINDOW
-DEFAULT_TIME_LIMIT = LIMITS["episodeMs"] // 1000
+DEFAULT_TOKEN_LIMIT = None
+DEFAULT_TIME_LIMIT = None
+DEFAULT_MAX_TURNS = 25
 RUNTIME_VERSION = "artcanvas-v2"
 LOCAL_MODEL_URL = "http://127.0.0.1:8080/v1"
 sha256 = lambda data: hashlib.sha256(data).hexdigest()
@@ -346,7 +347,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                  max_tokens: int | None = DEFAULT_MAX_TOKENS,
                  token_limit: int | None = DEFAULT_TOKEN_LIMIT, token_limit_type: str = "output",
                  time_limit: int | None = DEFAULT_TIME_LIMIT,
-                 max_turns: int | None = None,
+                 max_turns: int | None = DEFAULT_MAX_TURNS,
                  generation_filter: GenerateFilter | None = None) -> Task:
     if (type(temperature) not in (int, float) or not math.isfinite(temperature)
             or not 0 <= temperature <= 2):

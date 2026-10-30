@@ -124,7 +124,7 @@ flowchart TD
     V --> D[Repeat write/preview for repairs, then submit<br/>omit judge critiques]
     D --> Q{dry-run?}
     Q -- Yes --> J[Print or export converted conversations;<br/>no Tinker training calls]
-    Q -- No --> E[Supervise final write, every preview, and submit<br/>earlier writes remain context; baseline policy optional]
+    Q -- No --> E[Supervise final write, final preview, and submit<br/>earlier writes and previews remain context; baseline policy optional]
     E --> F[Encode one full trajectory per example<br/>with selected assistant turns receiving loss]
     F --> G[Local text tokenization and image preparation]
     G --> H[Preflight text/image sequence lengths<br/>and selected-action loss masks]

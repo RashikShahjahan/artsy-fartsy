@@ -138,11 +138,12 @@ class EvaluationTest(unittest.TestCase):
         datagen_args = _parser().parse_args([])
         self.assertIsNone(task.turn_limit)
         self.assertIsNone(task.metadata['environment_limits']['maxCalls'])
-        self.assertEqual(task.token_limit, ENVIRONMENT_CONFIG["maxPolicyTokens"])
-        self.assertEqual(task.token_limit_type, "output")
+        self.assertIsNone(task.token_limit)
+        self.assertIsNone(task.token_limit_type)
         self.assertIsNone(task.config.max_tokens)
-        self.assertEqual(task.time_limit, ENVIRONMENT_CONFIG["episodeMs"] / 1000)
-        self.assertEqual(task.config.timeout, 600)
+        self.assertIsNone(task.time_limit)
+        self.assertIsNone(task.config.timeout)
+        self.assertEqual(task.metadata['max_model_turns'], 25)
         self.assertEqual(task.config.max_tokens, datagen_args.max_tokens)
         self.assertEqual(task.config.timeout, task.time_limit)
 
@@ -348,7 +349,8 @@ class EvaluationTest(unittest.TestCase):
                 self.assertEqual(main(), 0)
             plan = json.loads(output.getvalue())
             self.assertEqual((plan["max_connections"], plan["max_samples"]), expected)
-        for flags, expected in (([], (262144, "output")), (["--token-limit", "0"], (None, None))):
+        for flags, expected in (([], (None, None)), (["--token-limit", "0"], (None, None)),
+                                (["--token-limit", "262144"], (262144, "output"))):
             with patch.object(sys, "argv", ["evaluate", "--dry-run", *flags]), redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(main(), 0)
             plan = json.loads(output.getvalue())

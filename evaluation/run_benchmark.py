@@ -51,15 +51,16 @@ def selected_models(requested, catalog):
 
 
 def main():
-    from .harness import DEFAULT_MAX_TOKENS, DEFAULT_TOKEN_LIMIT, DEFAULT_TIME_LIMIT, LIMITS
+    from .harness import DEFAULT_MAX_TOKENS, DEFAULT_TOKEN_LIMIT, DEFAULT_TIME_LIMIT, DEFAULT_MAX_TURNS, LIMITS
     from .evaluate import optional_token_budget, positive
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--suite', type=Path, default=SUITE)
     parser.add_argument('--model', action='append', help='NAME=MODEL_ID; repeat for base, SFT and RL')
     parser.add_argument('--max-samples', type=int, default=10)
-    parser.add_argument('--time-limit', type=positive, default=DEFAULT_TIME_LIMIT,
-                        help=f'Episode and model-request deadline in seconds (default: {DEFAULT_TIME_LIMIT})')
+    parser.add_argument('--time-limit', type=optional_token_budget, default=DEFAULT_TIME_LIMIT,
+                        help='Episode and model-request deadline in seconds; 0 disables it (default: disabled)')
+    parser.add_argument('--max-turns', type=positive, default=DEFAULT_MAX_TURNS)
     parser.add_argument('--max-tokens', type=optional_token_budget, default=DEFAULT_MAX_TOKENS,
                         help='Per-response output cap; 0 uses provider capacity (default: 0, same as datagen)')
     parser.add_argument('--token-limit', type=optional_token_budget, default=DEFAULT_TOKEN_LIMIT,
@@ -97,7 +98,9 @@ def main():
             'models': [models[m] for m in selected.values()], 'dataset_sha256': manifest['sha256'],
             'max_samples': args.max_samples, 'max_tokens': args.max_tokens, 'token_limit': args.token_limit or None,
             'time_limit': args.time_limit,
-            'environment_limits': {**LIMITS, 'maxCalls': None, 'episodeMs': args.time_limit * 1000},
+            'max_turns': args.max_turns,
+            'environment_limits': {**LIMITS, 'maxCalls': None,
+                                   'episodeMs': args.time_limit * 1000 if args.time_limit else None},
             'adherence_judge': env['ARTSY_CORRECTNESS_JUDGE_MODEL'], 'safety_judge': env['ARTSY_SAFETY_JUDGE_MODEL'],
             'code_safety_judge': env.get('ARTSY_CODE_SAFETY_JUDGE_MODEL') or env['ARTSY_SAFETY_JUDGE_MODEL'],
             'source_sha256': {p: digest((ROOT/p).read_bytes()) for p in (
@@ -113,7 +116,8 @@ def main():
         command = [sys.executable, '-m', 'evaluation.evaluate', '--dataset', str(dataset_path(args.suite)),
                    '--model', model, '--output', str(args.output/name), '--max-samples', str(args.max_samples),
                    '--max-tokens', str(args.max_tokens or 0), '--token-limit', str(args.token_limit or 0),
-                   '--time-limit', str(args.time_limit)]
+                   '--time-limit', str(args.time_limit or 0), '--max-turns', str(args.max_turns),
+                   '--max-connections', str(args.max_samples), '--max-sandboxes', str(args.max_samples)]
         print(f'Running {name}: {model}', flush=True)
         with (args.output/f'{name}.log').open('w') as log:
             exits[name] = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
