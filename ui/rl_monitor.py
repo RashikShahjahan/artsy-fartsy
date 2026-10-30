@@ -77,7 +77,11 @@ def runs(root: Path):
 def run_path(root: Path, name: str):
     base = root.resolve()
     path = base if (base / "training-manifest.json").is_file() and name == base.name else child(base, name)
-    if path.is_symlink() or not any(row["id"] == name for row in runs(base)):
+    if path.is_symlink():
+        raise ValueError("RL run not found")
+    manifest = load_json(path / "training-manifest.json", 256 * 1024)
+    config = manifest.get("config") if isinstance(manifest, dict) else None
+    if not isinstance(config, dict) or not str(config.get("algorithm", "")).startswith("tinker-cookbook-"):
         raise ValueError("RL run not found")
     return path
 
@@ -119,7 +123,10 @@ def episodes(root: Path, name: str):
                 if not EPISODE.fullmatch(sample.name):
                     continue
                 result = load_json(sample / "result.json")
-                if not isinstance(result, dict) or not isinstance(result.get("scores"), dict):
+                if (not isinstance(result, dict) or not isinstance(result.get("scores"), dict)
+                        or not isinstance(result["scores"].get("reward"), (int, float))):
+                    # grade() writes result.json before compute_group_rewards().
+                    # A terminal reward marks the end of rollout scoring.
                     continue
                 scores = result["scores"]
                 rows.append({
