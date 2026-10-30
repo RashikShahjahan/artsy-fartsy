@@ -276,13 +276,12 @@ unset and run:
   --output eval-results/qwen3.6-35b-a3b
 ```
 
-Before a real
-evaluation, verify tool calling and inline PNG
-input—with two small paid requests:
+Before a real evaluation, verify tool calling and inline PNG input with two
+small paid requests:
 
 ```sh
-.eval-venv/bin/python -m evaluation.check_tinker
-.eval-venv/bin/python -m evaluation.evaluate --execution-only --limit 1
+.eval-venv/bin/python -m evaluation.check_tinker --model Qwen/Qwen3.6-35B-A3B
+.eval-venv/bin/python -m evaluation.evaluate --model Qwen/Qwen3.6-35B-A3B --execution-only --limit 1
 ```
 
 `evaluation.check_tinker` first verifies that the local server is using Tinker
