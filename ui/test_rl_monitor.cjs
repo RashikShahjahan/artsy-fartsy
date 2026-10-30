@@ -18,7 +18,9 @@ function createNode(tag = "div") {
 }
 function fixture(fetchImpl = () => { throw new Error("Unexpected network request"); }) {
   const nodes = new Map();
-  for (const name of ["rl-episodes", "rl-search", "rl-run", "rl-refresh", "rl-detail"]) {
+  for (const name of ["rl-episodes", "rl-search", "rl-run", "rl-refresh", "rl-detail",
+    "rl-prompt-search", "rl-prompt-category", "rl-prompts-status", "rl-prompt-total",
+    "rl-prompt-list", "rl-prompt-pager", "rl-prompt-prev", "rl-prompt-next", "rl-prompt-page"]) {
     nodes.set(name, createNode());
   }
   const document = {
@@ -27,7 +29,7 @@ function fixture(fetchImpl = () => { throw new Error("Unexpected network request
     getElementById: id => nodes.get(id),
     addEventListener() {}
   };
-  const result = vm.runInNewContext(script + "\n;({state, groupEpisodeRows, renderRows})", {
+  const result = vm.runInNewContext(script + "\n;({state, groupEpisodeRows, renderRows, renderPrompts, loadPrompts})", {
     document,
     clearTimeout() {},
     setTimeout() {},
@@ -166,4 +168,72 @@ test("unchanged poll data and tile selections keep thumbnail elements mounted", 
   await button.onclick(); // Selecting details must not rebuild the gallery.
   assert.equal(allNodes(gallery, node => node.tag === "img")[0], image);
   assert.equal(button.attributes["aria-pressed"], "true");
+});
+
+test("all prompts are searchable and paginated independently of the rollout cap", () => {
+  const {nodes, state, renderPrompts} = fixture();
+  state.prompts = Array.from({length: 103}, (_, index) => ({
+    index: index + 1,
+    id: "prompt-" + index,
+    prompt: index === 102 ? "A unique needle at the end <script>alert(1)</script>" :
+      "Draw numbered picture " + index,
+    category: index % 2 ? "benign_boundary" : "drawing",
+    difficulty: "medium", family: "grids", skills: ["composition"]
+  }));
+  renderPrompts();
+  const list = nodes.get("rl-prompt-list");
+  assert.equal(allNodes(list, n => n.className === "rl-training-prompt").length, 50);
+  assert.equal(nodes.get("rl-prompt-total").textContent, "(103)");
+  assert.equal(nodes.get("rl-prompt-page").textContent, "Page 1 of 3");
+  assert.equal(nodes.get("rl-prompt-prev").disabled, true);
+  nodes.get("rl-prompt-next").onclick();
+  assert.equal(nodes.get("rl-prompt-page").textContent, "Page 2 of 3");
+  assert.equal(allNodes(list, n => n.className === "rl-training-prompt").length, 50);
+  nodes.get("rl-prompt-next").onclick();
+  assert.equal(allNodes(list, n => n.className === "rl-training-prompt").length, 3);
+  nodes.get("rl-prompt-search").value = "needle";
+  nodes.get("rl-prompt-search").oninput();
+  assert.equal(allNodes(list, n => n.className === "rl-training-prompt").length, 1);
+  assert.equal(nodes.get("rl-prompt-page").textContent, "Page 1 of 1");
+  assert.match(allNodes(list, n => n.className === "rl-prompt-full")[0].textContent,
+    /<script>alert\(1\)<\/script>/); // Treated only as text, never as HTML.
+  nodes.get("rl-prompt-category").value = "benign_boundary";
+  nodes.get("rl-prompt-category").onchange();
+  assert.match(nodes.get("rl-prompts-status").textContent, /No training prompts match/);
+});
+
+test("the full prompt endpoint is loaded for the selected run", async () => {
+  const urls = [];
+  const {state, nodes, loadPrompts} = fixture(async url => {
+    urls.push(url);
+    return {ok: true, json: async () => ({
+      run: "grpo-v4", available: true, prompts: [
+        {index: 1, id: "a", prompt: "Draw a circle", category: "drawing", skills: []},
+        {index: 2, id: "b", prompt: "Refuse harmful code", category: "malicious_code", skills: []}
+      ]
+    })};
+  });
+  state.run = "grpo-v4";
+  await loadPrompts("grpo-v4");
+  assert.deepEqual(urls, ["/api/rl/runs/grpo-v4/prompts"]);
+  assert.equal(state.prompts.length, 2);
+  assert.equal(nodes.get("rl-prompt-category").children.length, 3);
+  assert.equal(allNodes(nodes.get("rl-prompt-list"),
+    n => n.className === "rl-training-prompt").length, 2);
+  state.run = "other";
+  await loadPrompts("other");
+  assert.deepEqual(urls, ["/api/rl/runs/grpo-v4/prompts", "/api/rl/runs/other/prompts"]);
+});
+
+test("unavailable prompt data shows a dataset repair instruction instead of rollout-only data", async () => {
+  const {state, nodes, loadPrompts} = fixture(async () => ({
+    ok: true, json: async () => ({
+      available: false, total: 100, prompts: [],
+      message: "Start with --rl-dataset PATH"
+    })
+  }));
+  state.run = "grpo-v4";
+  await loadPrompts("grpo-v4");
+  assert.equal(nodes.get("rl-prompt-list").children.length, 0);
+  assert.match(nodes.get("rl-prompts-status").textContent, /--rl-dataset/);
 });
