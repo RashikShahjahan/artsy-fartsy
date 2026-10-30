@@ -6,7 +6,7 @@ import re
 def navigation(current):
     links = [('studio', '/', 'Studio'), ('review', '/review', 'Prompt review'),
              ('candidates', '/candidates', 'SFT candidates'),
-             ('rl', '/rl', 'RL monitor')]
+             ('runs', '/runs', 'Runs'), ('rl', '/rl', 'RL monitor')]
     return '<header class="app-header"><a class="brand" href="/">Artsy<span class="brand-dot">.</span></a><nav aria-label="Main navigation">' + ''.join(
         f'<a href="{url}"' + (' aria-current="page"' if key == current else '') + f'>{label}</a>'
         for key, url, label in links) + '</nav><span class="prototype">Drawing workspace</span></header>'
