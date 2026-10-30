@@ -85,6 +85,25 @@ class ToolProtocolTest(unittest.TestCase):
             service.return_value.create_sampling_client.assert_called_with(
                 base_model="Qwen/Qwen3.5-4B:peft:262144", model_path="tinker://saved/checkpoint")
 
+    def test_qwen36_backend_uses_qwen35_vision_tool_renderer_and_256k_sampler(self):
+        from drawing.config import IMAGE_SIZE
+        from inference.model_catalog import HOSTED_MODEL_PROFILES, QWEN36_MODEL_ID
+        from inference.tinker_backend import TinkerBackend
+
+        profile = HOSTED_MODEL_PROFILES[QWEN36_MODEL_ID]
+        with patch("tinker.ServiceClient") as service, \
+             patch("transformers.AutoTokenizer.from_pretrained") as tokenizer, \
+             patch("transformers.AutoImageProcessor.from_pretrained") as processor, \
+             patch("tinker_cookbook.renderers.get_renderer") as renderer:
+            backend = TinkerBackend(QWEN36_MODEL_ID, profile['revision'], IMAGE_SIZE,
+                sampling_model_id=profile['sampling_model'], renderer_name=profile['renderer'])
+            service.return_value.create_sampling_client.assert_called_once_with(
+                base_model="Qwen/Qwen3.6-35B-A3B:peft:262144")
+            tokenizer.assert_called_once_with(QWEN36_MODEL_ID, revision=profile['revision'])
+            processor.assert_called_once_with(QWEN36_MODEL_ID, revision=profile['revision'])
+            self.assertEqual(renderer.call_args.args[0], 'qwen3_5_disable_thinking')
+            self.assertTrue(backend.native_tools)
+
     def test_output_budget_uses_remaining_context_and_rejects_a_full_prompt(self):
         from inference.tinker_backend import TinkerBackend
 
@@ -231,6 +250,21 @@ class CompletionTest(unittest.TestCase):
             self.assertEqual(backend.generate.call_args.args[3], profile['context_window'])
             app.state.tinker.generate.assert_not_called()
             app.state.tinker.with_model_path.assert_not_called()
+
+    def test_qwen36_selection_loads_its_own_sampler_with_256k_context(self):
+        from drawing.config import IMAGE_SIZE
+        from inference.model_catalog import QWEN36_MODEL_ID, HOSTED_MODEL_PROFILES
+        profile = HOSTED_MODEL_PROFILES[QWEN36_MODEL_ID]
+        app.state.samplers = {}
+        with patch('inference.tinker_backend.TinkerBackend') as backend_class:
+            backend = backend_class.return_value
+            backend.generate.return_value = (self.raw, 3, 2)
+            for _ in range(2):
+                result = complete({**self.body, 'model': QWEN36_MODEL_ID})
+                self.assertEqual(result['model'], QWEN36_MODEL_ID)
+            backend_class.assert_called_once_with(QWEN36_MODEL_ID, profile['revision'], IMAGE_SIZE,
+                sampling_model_id=profile['sampling_model'], renderer_name=profile['renderer'])
+            self.assertEqual(backend.generate.call_args.args[3], 262144)
 
     def test_frontier_model_uses_native_tool_calls_and_its_context_limit(self):
         from inference.model_catalog import FRONTIER_MODEL_ID, HOSTED_MODEL_PROFILES
