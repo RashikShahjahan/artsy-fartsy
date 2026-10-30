@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION
 from training import grpo
-from training.sft import batches
+from training.sft import RENDERER, batches
 
 
 class ContinuationTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class ContinuationTests(unittest.TestCase):
         defaults = vars(grpo.parser().parse_args([]))
         self.config = {k: defaults[k] for k in grpo.INHERITED_PARAMETERS}
         self.config.update(algorithm=grpo.ALGORITHM, model=MODEL_ID,
-                           tokenizer_revision=MODEL_REVISION, renderer=grpo.RENDERER,
+                           tokenizer_revision=MODEL_REVISION, renderer=RENDERER,
                            image_size=IMAGE_SIZE, dataset_sha256=grpo.digest(self.dataset.read_bytes()),
                            prompt_ids=[s['id'] for s in self.specs],
                            source_sha256={p: grpo.digest((grpo.ROOT / p).read_bytes())

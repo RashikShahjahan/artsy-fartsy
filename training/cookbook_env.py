@@ -19,7 +19,7 @@ from uuid import uuid4
 
 from PIL import Image
 
-from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_CONTEXT_WINDOW, LIMITS
+from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_CONTEXT_WINDOW
 from drawing.agent_contract import drawing_system_prompt
 from drawing.judges import (JUDGE_MAX_TOKENS, CODE_SAFETY_MAX_TOKENS, adherence_rubric_prompt,
     parse_adherence_rubric, code_safety_judge_prompt, parse_code_safety_judgment,
@@ -74,8 +74,12 @@ def initial_messages(spec: dict, tool_specs: list[dict], model=MODEL_ID,
     prompt = (f'{spec["prompt"]}\n\nPreview with: '
               f'python /opt/artsy/render.py --seed {spec["seed"]} '
               '--output /workspace/preview --preview < /workspace/program.py')
+    max_turns = settings["agent"]["step_limit"]
+    instructions = drawing_system_prompt(token_limit=None) + (
+        f"\n\nYou have {max_turns} model turns to complete this task. "
+        "Each response uses one turn. Submit your final output by the last turn.")
     return [*prefix, {"role": "user",
-                      "content": f"System instructions:\n{drawing_system_prompt(token_limit=None)}\n\nTask:\n{prompt}"}]
+                      "content": f"System instructions:\n{instructions}\n\nTask:\n{prompt}"}]
 
 
 def _preview_observation(stdout: bytes, stderr: bytes, returncode: int, model=MODEL_ID,
@@ -163,8 +167,6 @@ class DockerSession:
     async def execute(self, command: str):
         if self.submitted:
             return "Submission already requested.", False
-        if len(self.commands) >= LIMITS["maxCalls"]:
-            return "Tool call budget exhausted.", True
         await self.start()
         self.commands.append(command)
         try:
@@ -173,7 +175,7 @@ class DockerSession:
                  str(agent_settings()["environment"]["timeout"]), "bash", "-c", command],
                 timeout=agent_settings()["environment"]["timeout"] + 2)
         except subprocess.TimeoutExpired:
-            return "Return code: 124\nCommand timed out.", len(self.commands) >= LIMITS["maxCalls"]
+            return "Return code: 124\nCommand timed out.", False
         if command.strip() == SUBMIT and result.returncode == 0:
             self.submitted = True
         observation, preview = _preview_observation(
@@ -181,7 +183,7 @@ class DockerSession:
             self.max_length, self.revision)
         if preview:
             self.previews.append(preview)
-        return observation, self.submitted or len(self.commands) >= LIMITS["maxCalls"]
+        return observation, self.submitted
 
     async def _read_source(self) -> str:
         if not self.container:
@@ -349,14 +351,31 @@ class ArtsyGroupBuilder:
         from tinker_cookbook.tool_use.agent_tool_message_env import AgentToolMessageEnv
 
         class DrawingMessageEnv(AgentToolMessageEnv):
+            def _countdown(self):
+                turn = self._turn_count + 1
+                self.history.append({"role": "user", "content":
+                    f"Turn {turn} of {self.max_turns}." +
+                    (" This is your final turn; submit your final output now."
+                     if turn == self.max_turns else "")})
+
+            async def initial_observation(self):
+                if not self.history:
+                    await super().initial_observation()
+                    self._countdown()
+                return self.history
+
             async def step(self, message):
                 # Match Inspect: a response without a bash call gets a reminder.
                 if (not message.get("tool_calls") and not message.get("unparsed_tool_calls")
                         and self._turn_count + 1 < self.max_turns):
                     self._turn_count += 1
                     self.history.extend([message, {"role": "user", "content": NO_TOOL_REMINDER}])
-                    return MessageStepResult(0.0, False, self.history)
-                return await super().step(message)
+                    result = MessageStepResult(0.0, False, self.history)
+                else:
+                    result = await super().step(message)
+                if not result.episode_done:
+                    self._countdown()
+                return result
 
         environments = []
         for _ in range(self.group_size):

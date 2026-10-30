@@ -43,7 +43,7 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
     group_size: int
     epochs: int
     seed: int
-    max_tokens: int
+    max_tokens: int | None
     max_length: int
     normalize_rewards: bool
     model: str

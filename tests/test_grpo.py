@@ -282,7 +282,8 @@ class ConfigurationTests(unittest.TestCase):
         args = parser().parse_args([])
         self.assertEqual(args.group_size, 4)
         self.assertEqual(args.max_samples, 4)
-        self.assertEqual(args.max_tokens, 8192)
+        self.assertIsNone(args.max_tokens)
+        self.assertIsNone(parser().parse_args(['--max-tokens', '0']).max_tokens)
         self.assertEqual(args.max_length, 262144)
         self.assertEqual(args.init_checkpoint.name, 'final.json')
         self.assertEqual(args.init_checkpoint.parent.name,
@@ -332,7 +333,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.loss_fn_config["clip_high_threshold"], 1.1)
         self.assertEqual(config.load_checkpoint_path, "tinker://initial")
         self.assertEqual(config.kl_reference_config.load_checkpoint_path, "tinker://reference")
-        self.assertEqual(config.max_tokens, 8192)
+        self.assertEqual(config.max_tokens, args.max_length)
+        self.assertIsNone(config.dataset_builder.max_tokens)
         self.assertTrue(config.termination.zero_reward_on_limit)
 
 
@@ -342,13 +344,13 @@ class NativeContextTests(unittest.IsolatedAsyncioTestCase):
         from tinker_cookbook.completers import TokensWithLogprobs
         from tinker_cookbook.rl.rollouts import do_single_rollout
         from drawing.config import MODEL_CONTEXT_WINDOW
-        for length, expected in ((40000, 8192), (MODEL_CONTEXT_WINDOW - 13, 13)):
+        for length, expected in ((40000, MODEL_CONTEXT_WINDOW - 40000), (MODEL_CONTEXT_WINDOW - 13, 13)):
             renderer = MagicMock()
             renderer.get_stop_sequences.return_value = [2]
             renderer.build_generation_prompt.return_value = tinker.ModelInput.from_ints([1] * length)
             builder = ArtsyGroupBuilder({'id': 'x', 'prompt': 'disk', 'seed': 1},
                                        1, 1, Path('/tmp'), MagicMock(),
-                                       8192, MODEL_CONTEXT_WINDOW, False)
+                                       None, MODEL_CONTEXT_WINDOW, False)
             calls = []
 
             async def policy(observation, stop, *, max_tokens=None):
@@ -360,37 +362,73 @@ class NativeContextTests(unittest.IsolatedAsyncioTestCase):
                 env, = await builder.make_envs()
                 self.assertIsNone(env.max_generation_tokens)
                 self.assertIsNone(env.rollout_limits.max_sampled_tokens)
+                self.assertIsNone(env.rollout_limits.max_turn_tokens)
+                self.assertIsNone(env.rollout_limits.max_tool_calls)
                 await do_single_rollout(policy, env)
             self.assertEqual(calls, [(length, expected)])
 
 
 class ToolBudgetTests(unittest.IsolatedAsyncioTestCase):
-    async def test_training_stops_at_twenty_calls_and_blocks_more_commands(self):
+    async def test_countdown_tracks_tool_and_no_tool_turns_and_stops_on_last(self):
+        from tinker_cookbook.renderers import ToolCall
+        builder = ArtsyGroupBuilder({'id': 'x', 'prompt': 'disk', 'seed': 1},
+                                   1, 1, Path('/tmp'), MagicMock(), None, 262144, False)
+        settings = {'agent': {'step_limit': 3}}
+        with patch('training.cookbook_env.encoder', return_value=SimpleNamespace(renderer=MagicMock())), \
+             patch('training.cookbook_env.initial_messages', return_value=[]), \
+             patch('training.cookbook_env.agent_settings', return_value=settings):
+            wrapped, = await builder.make_envs()
+        env = wrapped.message_env
+        env.reward_fn = AsyncMock(return_value=(0.0, {}))
+        builder.sessions[0].execute = AsyncMock(return_value=('ok', False))
+        history = await env.initial_observation()
+        self.assertEqual(history[-1]['content'], 'Turn 1 of 3.')
+        await env.initial_observation()
+        self.assertEqual(len(history), 1)
+        result = await env.step({'role': 'assistant', 'content': '', 'tool_calls': [
+            ToolCall(id='one', function=ToolCall.FunctionBody(
+                name='bash', arguments=json.dumps({'command': 'true'})))]})
+        self.assertFalse(result.episode_done)
+        self.assertEqual(result.next_messages[-1]['content'], 'Turn 2 of 3.')
+        result = await env.step({'role': 'assistant', 'content': 'thinking'})
+        self.assertFalse(result.episode_done)
+        self.assertIn('Every response must contain a bash tool call', result.next_messages[-2]['content'])
+        self.assertEqual(result.next_messages[-1]['content'],
+                         'Turn 3 of 3. This is your final turn; submit your final output now.')
+        builder.sessions[0].execute.return_value = ('submitted', True)
+        result = await env.step({'role': 'assistant', 'content': '', 'tool_calls': [
+            ToolCall(id='last', function=ToolCall.FunctionBody(name='bash', arguments=json.dumps({
+                'command': 'echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'})))]})
+        self.assertTrue(result.episode_done)
+        self.assertFalse(any('Turn 4' in str(m.get('content')) for m in result.next_messages))
+        env.reward_fn.assert_awaited_once()
+
+    async def test_training_allows_more_than_twenty_calls_until_submission(self):
         from training.cookbook_env import DockerSession
         with tempfile.TemporaryDirectory() as root:
             session = DockerSession({'prompt': 'Draw a disk', 'seed': 1}, Path(root), {})
             session.container = 'fake-container'
             reply = SimpleNamespace(stdout=b'', stderr=b'', returncode=0)
             with patch('training.cookbook_env._docker', new=AsyncMock(return_value=reply)) as docker:
-                for index in range(20):
+                for index in range(40):
                     _, done = await session.execute('true')
-                    self.assertEqual(done, index == 19)
-                observation, done = await session.execute('true')
+                    self.assertFalse(done)
+                _, done = await session.execute('echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT')
                 self.assertTrue(done)
-                self.assertIn('budget exhausted', observation)
-                self.assertEqual(docker.await_count, 20)
-                self.assertFalse(session.submitted)
+                self.assertEqual(docker.await_count, 41)
+                self.assertTrue(session.submitted)
 
 
 class RolloutPromptTests(unittest.TestCase):
-    def test_initial_messages_omit_budgets(self):
+    def test_initial_messages_announce_turn_budget_without_token_or_call_caps(self):
         from training.cookbook_env import initial_messages
         renderer = SimpleNamespace(create_conversation_prefix_with_tools=lambda *a, **k: [])
         with patch('training.cookbook_env.encoder', return_value=SimpleNamespace(renderer=renderer)):
             messages = initial_messages({'prompt': 'Draw a disk', 'seed': 1}, [])
         content = messages[-1]['content']
-        self.assertNotIn('20 model turns', content)
-        self.assertNotIn('budget', content.lower())
+        self.assertIn('20 model turns', content)
+        self.assertIn('Submit your final output by the last turn.', content)
+        self.assertNotIn('20 bash', content)
         self.assertNotIn('model-turn limit', content)
         self.assertNotIn('32768', content)
         self.assertNotIn('total input and output', content)

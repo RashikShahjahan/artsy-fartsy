@@ -337,7 +337,7 @@ def image_paths(record: dict, root: Path) -> list[tuple[str, Path]]:
             data = path.read_bytes()
             if hashlib.sha256(data).hexdigest() != expected_hash:
                 return
-            from preference.judge import validate_png
+            from drawing.renderer import validate_png
             try:
                 validate_png(data)
             except ValueError:

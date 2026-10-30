@@ -200,8 +200,9 @@ def make_cookbook_config(args, specs, plan, total):
             **{key: plan[key] for key in ("safety_config", "code_safety_config")},
         ),
         learning_rate=args.learning_rate,
-        # Cookbook max_tokens is a per-call cap; no aggregate sampled cap.
-        max_tokens=args.max_tokens,
+        # Cookbook requires an integer ceiling. Without an explicit cap, use
+        # context capacity; the rollout runner clips to remaining context.
+        max_tokens=args.max_tokens or args.max_length,
         temperature=args.temperature,
         loss_fn="ppo",
         loss_fn_config={"clip_low_threshold": 1 - args.clip_epsilon,
@@ -269,7 +270,7 @@ async def train(args, specs, plan, total):
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
-    p.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v1/prompts.jsonl")
+    p.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v2/prompts.jsonl")
     p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v4")
     p.add_argument("--dry-run", action="store_true")
@@ -290,7 +291,8 @@ def parser():
     p.add_argument("--kl-coef", type=float, default=0.01)
     p.add_argument("--normalize-rewards", action="store_true",
                    help="Deprecated compatibility flag: Tinker mean-centers without std scaling")
-    p.add_argument("--max-tokens", type=int, default=8192, help="Maximum generated tokens per turn")
+    p.add_argument("--max-tokens", type=lambda value: int(value) or None, default=None,
+                   help="Optional generated tokens per turn; 0 uses remaining context (default)")
     p.add_argument("--max-length", type=int, default=MODEL_CONTEXT_WINDOW, help="Maximum trajectory context tokens")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--save-every", type=int, default=1)
@@ -325,11 +327,11 @@ def main(argv=None):
             p.error(str(error))
         return 0
     if (any(value < 1 for value in (args.epochs, args.batch_size, args.max_samples,
-                                   args.save_every, args.max_tokens, args.max_length))
+                                   args.save_every, args.max_length))
             or args.group_size < 2 or args.max_steps == 0 or args.max_steps < -1
             or (args.limit is not None and args.limit < 1)
             or not 0 <= args.seed <= 2**32 - 1 or args.max_length > MODEL_CONTEXT_WINDOW
-            or args.max_tokens > args.max_length
+            or (args.max_tokens is not None and not 1 <= args.max_tokens <= args.max_length)
             or any(not math.isfinite(v) for v in
                    (args.learning_rate, args.temperature, args.clip_epsilon, args.kl_coef))
             or args.learning_rate <= 0 or not 0 < args.temperature <= 2

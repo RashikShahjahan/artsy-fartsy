@@ -225,12 +225,13 @@ blind review and calibration](docs/benchmark.md).
 .eval-venv/bin/python -m evaluation.evaluate --execution-only --limit 1 --output eval-results/base-smoke
 
 # Full evaluations use separate adherence, image-safety and code-safety roles:
-export ARTSY_CORRECTNESS_JUDGE_MODEL=thinkingmachines/Inkling:peft:262144
-export ARTSY_SAFETY_JUDGE_MODEL=thinkingmachines/Inkling:peft:262144
-# For separately hosted OpenAI-compatible endpoints, also set:
-export ARTSY_CORRECTNESS_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
-export ARTSY_SAFETY_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
-# Set ARTSY_CORRECTNESS_JUDGE_API_KEY and ARTSY_SAFETY_JUDGE_API_KEY if needed.
+export OPENROUTER_API_KEY=your-openrouter-api-key
+export ARTSY_CORRECTNESS_JUDGE_MODEL=openai/gpt-6-luna
+export ARTSY_SAFETY_JUDGE_MODEL=openai/gpt-6-luna
+export ARTSY_CODE_SAFETY_JUDGE_MODEL=openai/gpt-6-luna
+export ARTSY_CORRECTNESS_JUDGE_URL=https://openrouter.ai/api/v1
+export ARTSY_SAFETY_JUDGE_URL=https://openrouter.ai/api/v1
+export ARTSY_CODE_SAFETY_JUDGE_URL=https://openrouter.ai/api/v1
 
 # Run all checks; repeat with --epochs 3 to measure variability:
 .eval-venv/bin/python -m evaluation.evaluate --output eval-results/base
@@ -377,13 +378,12 @@ supply slice counts (for example, `--harmful-count` or
 
 Prompt writing and teaching use `openai/gpt-6-luna` through OpenRouter
 (`https://openrouter.ai/api/v1`). Copy `.env.example` to `.env` for a new
-setup and supply `OPENROUTER_API_KEY` for dataset generation and
-`TINKER_API_KEY` for evaluation judges.
-Benchmark correctness, image safety, and code safety judges use `thinkingmachines/Inkling:peft:262144` at
-`https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1`.
-The HTTP client saves provider-exposed reasoning separately from the final answer
-and uses low reasoning effort for Inkling. OpenRouter requests reasoning with its
-text included in the response. Judge roles make separate calls with their own prompts.
+setup and supply `OPENROUTER_API_KEY` for dataset generation, evaluation, and RL judges.
+Benchmark and RL correctness, image safety, and code safety judges use `openai/gpt-6-luna` at
+`https://openrouter.ai/api/v1`.
+The HTTP client saves provider-exposed reasoning separately from the final answer.
+OpenRouter requests reasoning with its text included in the response. Judge roles
+make separate calls with their own prompts.
 
 ```sh
 # Use GPT-6 Luna through OpenRouter (requires OPENROUTER_API_KEY).
@@ -767,11 +767,10 @@ The default policy is the latest completed SFT checkpoint,
 checkpoint, and uses that same SFT sampler as its frozen KL reference. Training
 runs on Tinker; local tokenization and image processing run on the host.
 
-The default `datasets/grpo-v1/prompts.jsonl` contains 200 benign drawing prompts:
-20 easy, 60 medium, 80 hard, and 40 very hard. It covers all 14 drawing skills.
-These are training prompts, not held-out evaluation data. The trainer also
-supports trusted `kind="refusal"` examples; supply an audited mixed prompt file
-to train refusal behavior, because the default set contains none.
+The default `datasets/grpo-v2/prompts.jsonl` contains 1,000 training prompts:
+800 drawing requests, 120 harmful-image refusal examples, and 80 malicious-code
+refusal examples, with mixed difficulty. These are training prompts, not held-out
+evaluation data. Refusal examples carry trusted `kind="refusal"` labels.
 
 Each trajectory gets a fresh network-isolated Docker workspace, the Mini SWE
 system prompt, bash tool, ArtCanvas documentation, and actual PNG previews.
@@ -819,21 +818,30 @@ Docker, and configure the following environment variables or local `.env` values
 
 ```dotenv
 TINKER_API_KEY=your-tinker-api-key
-ARTSY_CORRECTNESS_JUDGE_MODEL=thinkingmachines/Inkling:peft:262144
-ARTSY_CORRECTNESS_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
+OPENROUTER_API_KEY=your-openrouter-api-key
+ARTSY_CORRECTNESS_JUDGE_MODEL=openai/gpt-6-luna
+ARTSY_CORRECTNESS_JUDGE_URL=https://openrouter.ai/api/v1
 ARTSY_CORRECTNESS_JUDGE_MAX_TOKENS=16384
-ARTSY_SAFETY_JUDGE_MODEL=thinkingmachines/Inkling:peft:262144
-ARTSY_SAFETY_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
-ARTSY_CODE_SAFETY_JUDGE_MODEL=thinkingmachines/Inkling:peft:262144
-ARTSY_CODE_SAFETY_JUDGE_URL=https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1
+ARTSY_SAFETY_JUDGE_MODEL=openai/gpt-6-luna
+ARTSY_SAFETY_JUDGE_URL=https://openrouter.ai/api/v1
+ARTSY_CODE_SAFETY_JUDGE_MODEL=openai/gpt-6-luna
+ARTSY_CODE_SAFETY_JUDGE_URL=https://openrouter.ai/api/v1
 ```
 
-The Tinker endpoint uses `TINKER_API_KEY` for every role. Other providers may
+OpenRouter uses `OPENROUTER_API_KEY` for every judge role. Other providers may
 use corresponding `ARTSY_*_JUDGE_API_KEY` variables. Safety roles must each be explicitly configured. Native Tinker
 judges use `tinker://native` and a renderer appropriate to their model. HTTP
 OpenAI-compatible judges are also supported. See the [reward architecture](docs/rlhf-architecture.md).
 
 ```sh
+# Generate or resume the default prompt file without rendering or training.
+# Calls the prompt-writing provider only for missing checkpointed prompts:
+.venv/bin/python -m drawing.generate_dataset --prompts-only \
+  --count 1000 --harmful-count 120 --malicious-code-count 80 \
+  --benign-boundary-count 0 --difficulty mixed --seed 44 \
+  --prompt-model openai/gpt-6-luna --prompt-url https://openrouter.ai/api/v1 \
+  --output datasets/grpo-v2
+
 # Validate the dataset and initial checkpoint; no API/Docker calls or writes:
 .venv/bin/python -m training.grpo --dry-run --max-steps 1
 
@@ -841,7 +849,7 @@ OpenAI-compatible judges are also supported. See the [reward architecture](docs/
 .venv/bin/python -m training.grpo --max-steps 1 \
   --output-dir checkpoints/grpo-v4-smoke
 
-# Full run on the default 200 drawing prompts:
+# Full run on the default 1,000 mixed prompts:
 make grpo ARGS="--output-dir checkpoints/grpo-v4"
 
 # Resume an interrupted run with its original arguments:
@@ -863,14 +871,17 @@ make grpo ARGS="--output-dir checkpoints/grpo-v4"
 | Sampling temperature | 1.0 |
 | PPO ratio clipping | 0.8–1.2 |
 | Reference-KL coefficient | 0.01, against the initial SFT sampler |
-| Epochs | 1 (100 updates / 800 episodes on 200 prompts) |
-| Model turns per trajectory | 20 |
-| Generated tokens per turn | 8,192 |
+| Epochs | 1 (500 updates / 4,000 episodes on 1,000 prompts) |
+| Model turns per trajectory | 20, with a countdown and final-turn submission reminder |
+| Bash calls per trajectory | No separate cap |
+| Generated tokens per turn | Remaining context capacity; no separate cap |
 | Context per request, including history and preview images | 262,144 |
 | Separate aggregate generated-token budget | None |
 | Checkpoint cadence | Every update |
 
-Responses are clipped to the remaining context. Cookbook mean-centers rewards
+Responses are clipped to the remaining context. `--max-tokens N` optionally adds
+a per-response cap; `--max-tokens 0` uses the default remaining-context capacity.
+Cookbook mean-centers rewards
 within each prompt group without standard-deviation scaling and removes
 constant-reward groups. `--normalize-rewards` is a deprecated compatibility flag
 with no effect. Built-in training evaluation is disabled; evaluate checkpoints

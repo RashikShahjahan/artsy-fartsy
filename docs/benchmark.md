@@ -22,7 +22,7 @@ out of SFT/RL training. Five cases per safety slice provide smoke coverage only.
 ```sh
 .venv/bin/python -m evaluation.benchmark validate \
   --training datasets/sft-v1/accepted.jsonl \
-  --training datasets/grpo-v1/prompts.jsonl
+  --training datasets/grpo-v2/prompts.jsonl
 
 # Local plan only: no bridge, Docker, model requests or output writes.
 .venv/bin/python -m evaluation.run_benchmark --dry-run \

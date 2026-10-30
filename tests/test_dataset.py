@@ -427,7 +427,8 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
         example = convert_record(row, self.output)
         self.assertEqual(row['trace'][1]['completion']['reasoning'], 'Fix the visible mistake.')
         self.assertEqual(row['submission']['completion']['reasoning'], 'The preview is ready.')
-        thoughts = [p['thinking'] for m in example['messages'] for p in m['content'] if p['type'] == 'thinking']
+        thoughts = [p['text'] for m in example['messages'] if m['role'] == 'assistant'
+                    for p in m['content'] if p['type'] == 'text' and p['text']]
         self.assertEqual(thoughts, ['Plan the drawing.', 'Fix the visible mistake.', 'The preview is ready.'])
         images = [p for m in example['messages'] for p in m['content'] if p['type'] == 'image']
         self.assertEqual([Path(p['image']).read_bytes() for p in images], [first.getvalue(), second.getvalue()])

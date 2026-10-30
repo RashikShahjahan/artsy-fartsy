@@ -73,7 +73,7 @@ class BenchmarkTests(unittest.TestCase):
 
     def test_runner_forwards_datagen_defaults_without_restoring_a_response_cap(self):
         from evaluation.run_benchmark import main
-        from drawing.config import MODEL_ID, MODEL_CONTEXT_WINDOW, LIMITS
+        from drawing.config import MODEL_ID, LIMITS
         catalog = [{'id': MODEL_ID, 'model_path': None},
                    {'id': 'artsy/sft-v1', 'model_path': 'tinker://sft'}]
         with tempfile.TemporaryDirectory() as tmp:
@@ -90,16 +90,17 @@ class BenchmarkTests(unittest.TestCase):
                 self.assertEqual(main(), 0)
             plan = json.loads((output / 'run-plan.json').read_text())
             self.assertIsNone(plan['max_tokens'])
-            self.assertEqual(plan['token_limit'], MODEL_CONTEXT_WINDOW)
-            self.assertEqual(plan['environment_limits'], {**LIMITS, 'maxCalls': None})
-            self.assertEqual(plan['time_limit'], 600)
+            self.assertIsNone(plan['token_limit'])
+            self.assertEqual(plan['environment_limits'], {**LIMITS, 'maxCalls': None, 'episodeMs': None})
+            self.assertIsNone(plan['time_limit'])
             self.assertEqual(plan['max_samples'], 10)
             self.assertIsNone(plan['environment_limits']['maxCalls'])
             self.assertEqual(run.call_count, 2)
             for call in run.call_args_list:
                 command = call.args[0]
                 self.assertEqual(command[command.index('--max-tokens') + 1], '0')
-                self.assertEqual(command[command.index('--token-limit') + 1], str(MODEL_CONTEXT_WINDOW))
+                self.assertEqual(command[command.index('--token-limit') + 1], '0')
+                self.assertEqual(command[command.index('--time-limit') + 1], '0')
 
     def test_frozen_mix_and_difficulty(self):
         manifest, rows=suite()

@@ -105,7 +105,7 @@ async def score_outputs(specs, output, group_size, judge, concurrency=4):
 def main(argv=None):
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v1/prompts.jsonl")
+    parser.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v2/prompts.jsonl")
     parser.add_argument("--model", default="artsy/sft-v1")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--group-size", type=int, default=4)
