@@ -95,6 +95,10 @@ class LauncherTests(unittest.TestCase):
                     self.assertIn("completed locally", result["console"])
                     self.assertEqual(result["exit_code"], 0)
                     self.assertEqual(len(launch.list_runs()), 2)
+                for _ in range(100):
+                    if not launch.PROCESSES:
+                        break
+                    time.sleep(0.02)
                 self.assertFalse(launch.PROCESSES)
 
     def test_runs_ui_and_api_require_local_origin(self):
