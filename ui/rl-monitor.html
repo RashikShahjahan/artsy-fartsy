@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Artsy · RL monitor</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/rl-monitor.css">
+<script src="/rl-monitor.js" defer></script>
+</head>
+<body>
+__NAVIGATION__
+<main class="rl-main">
+  <div class="page-heading">
+    <div><p class="eyebrow">READ-ONLY OBSERVABILITY</p><h1>RL monitor</h1></div>
+    <p class="page-description">Completed rollouts only. No changes to the RL trainer or sampling loop.</p>
+  </div>
+  <section class="rl-toolbar" aria-label="RL monitor settings">
+    <label for="rl-run">RL run</label><select id="rl-run"></select>
+    <label for="rl-search">Filter</label><input id="rl-search" type="search" placeholder="Prompt, ID, outcome…">
+    <button id="rl-refresh" type="button">Refresh now</button>
+    <span id="rl-status" role="status">Loading…</span>
+  </section>
+  <p class="rl-explanation">Polls every 30 seconds while this tab is visible. Reads at most 48 completed episodes from the latest three steps. Images and source code are fetched only when you select an episode. Results reflect the saved terminal scoring, not live model reasoning.</p>
+  <div id="rl-metrics" class="rl-metrics" aria-label="Recent rollout metrics"></div>
+  <div class="rl-layout">
+    <section aria-label="Completed rollouts" class="rl-list-panel">
+      <h2>Completed rollouts</h2>
+      <div id="rl-episodes"></div>
+    </section>
+    <section aria-label="Selected episode" id="rl-detail" class="rl-detail">
+      <h2>Episode details</h2><p>Select an episode to view its final image, tool commands, rewards, and source.</p>
+    </section>
+  </div>
+</main>
+</body>
+</html>
