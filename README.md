@@ -24,7 +24,8 @@ Launch Studio, prompt and safety review, and SFT candidate inspection in one app
 Open http://127.0.0.1:4173. Studio shares one generation workspace for freeform
 and dataset prompts; Prompt review and SFT candidates use the same navigation.
 See [UI setup and review outputs](ui/README.md). Docker and `make serve` are needed
-for generation; browsing and review work independently.
+for generation; browsing and review work independently. The read-only RL monitor
+is available at `/rl` and reads completed rollout artifacts without instrumenting training.
 ## Setup
 
 Requires Python 3.14 and `uv`.
