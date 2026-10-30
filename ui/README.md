@@ -70,7 +70,10 @@ and does not invoke any models or judges. It reads at most 48 completed
 refreshing every 30 seconds while the browser tab is visible. Intermediate
 previews and complete model messages are not saved by the current RL trainer,
 so the monitor shows terminal artifacts and recorded bash commands only.
-Final PNGs load on episode selection; final source is read when expanded.
+Rollouts sharing one prompt and optimizer step are grouped under a single prompt
+heading, with each sampled variant selectable independently. Search retains
+original variant numbering. Final PNGs load on episode selection; final source
+is read when expanded.
 If training is on another host, mount/sync the output directory to the UI host.
 
 The UI is a separate read-only process, but filesystem reads are not literally
