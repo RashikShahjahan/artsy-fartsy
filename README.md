@@ -265,7 +265,18 @@ ARTSY_MODEL=Qwen/Qwen3.5-4B
 
 In a separate terminal, start `make serve`. The server authenticates to Tinker
 via `TINKER_API_KEY` (or the configured Tinker CLI credentials); the evaluation
-client only talks to the local bridge and needs no OpenAI key. Before a real
+client only talks to the local bridge and needs no OpenAI key. To evaluate the
+Qwen3.6-35B-A3B Tinker base model instead of Qwen3.5-4B, leave `ARTSY_MODEL_URL`
+unset and run:
+
+```sh
+.eval-venv/bin/python -m evaluation.evaluate \\
+  --model Qwen/Qwen3.6-35B-A3B \\
+  --epochs 1 \\
+  --output eval-results/qwen3.6-35b-a3b
+```
+
+Before a real
 evaluation, verify tool calling and inline PNG
 input—with two small paid requests:
 
