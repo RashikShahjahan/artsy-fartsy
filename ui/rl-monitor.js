@@ -44,35 +44,67 @@ function metrics(rows, data) {
     metric("Unsafe outcomes", String(unsafe), "Saved safety judgments")
   );
 }
+function groupEpisodeRows(rows, search = "") {
+  // A GRPO group is one prompt within one optimizer step. Keep its full
+  // rollout numbering stable even when the filter shows only some variants.
+  const groups = new Map();
+  for (const row of rows) {
+    const key = JSON.stringify([row.step, row.promptId]);
+    if (!groups.has(key)) {
+      groups.set(key, {step: row.step, promptId: row.promptId, prompt: row.prompt || "",
+        variants: []});
+    }
+    const group = groups.get(key);
+    if (!group.prompt && row.prompt) group.prompt = row.prompt;
+    group.variants.push({number: group.variants.length + 1, row});
+  }
+  const query = search.trim().toLowerCase();
+  return [...groups.values()].map(group => ({
+    ...group,
+    total: group.variants.length,
+    variants: group.variants.filter(({row}) => !query ||
+      [row.prompt, row.promptId, row.episodeId, row.outcome, row.step]
+        .some(v => String(v || "").toLowerCase().includes(query)))
+  })).filter(group => group.variants.length > 0);
+}
 function renderRows() {
   const list = byId("rl-episodes");
   list.replaceChildren();
-  const search = byId("rl-search").value.trim().toLowerCase();
-  const rows = state.rows.filter(r =>
-    !search || [r.prompt, r.promptId, r.episodeId, r.outcome, r.step]
-      .some(v => String(v || "").toLowerCase().includes(search)));
-  if (!rows.length) {
+  const groups = groupEpisodeRows(state.rows, byId("rl-search").value);
+  if (!groups.length) {
     list.append(element("p", state.rows.length ? "No episodes match this filter." :
       "No completed episodes in the latest monitored steps.", "rl-empty"));
     return;
   }
-  let group = "";
-  for (const row of rows) {
-    const key = row.step + " / " + row.promptId;
-    if (key !== group) {
-      list.append(element("h3", key, "rl-group-title"));
-      group = key;
+  for (const group of groups) {
+    const section = element("section", undefined, "rl-prompt-group");
+    const heading = element("div", undefined, "rl-prompt-heading");
+    heading.append(element("span",
+      "Step " + group.step.replace("step-", "") + " · " + group.promptId,
+      "rl-group-title"));
+    heading.append(element("p", group.prompt || group.promptId, "rl-prompt"));
+    heading.append(element("span",
+      group.variants.length === group.total ?
+        group.total + " rollout" + (group.total === 1 ? "" : "s") :
+        "Showing " + group.variants.length + " of " + group.total + " rollouts",
+      "rl-group-count"));
+    section.append(heading);
+    const variants = element("div", undefined, "rl-variants");
+    variants.setAttribute("aria-label", "Rollouts for " + group.promptId);
+    for (const {row, number} of group.variants) {
+      const button = element("button", undefined, "rl-episode");
+      button.type = "button";
+      button.setAttribute("aria-pressed", String(state.selected === episodeKey(row)));
+      button.append(element("span", "Rollout " + number, "rl-rollout-label"));
+      button.append(element("span", "Reward " + fmt(row.score) +
+        " · " + (row.outcome || "unknown") +
+        " · " + row.bashCalls + " tool calls" +
+        (row.hasImage ? " · PNG" : ""), "rl-meta"));
+      button.onclick = () => selectEpisode(row);
+      variants.append(button);
     }
-    const button = element("button", undefined, "rl-episode");
-    button.type = "button";
-    button.setAttribute("aria-pressed", String(state.selected === episodeKey(row)));
-    button.append(element("span", row.prompt || row.promptId, "rl-prompt"));
-    button.append(element("span", "Reward " + fmt(row.score) +
-      " · " + (row.outcome || "unknown") +
-      " · " + row.bashCalls + " tool calls" +
-      (row.hasImage ? " · PNG" : ""), "rl-meta"));
-    button.onclick = () => selectEpisode(row);
-    list.append(button);
+    section.append(variants);
+    list.append(section);
   }
 }
 function detailsBlock(parent, label, object) {
