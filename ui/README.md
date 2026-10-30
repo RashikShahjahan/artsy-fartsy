@@ -8,11 +8,12 @@ From the repository root:
 
 Open http://127.0.0.1:4173. Start Docker and the native bridge (`make serve`) before generating. The service uses `.eval-venv/bin/python`, falling back to `.venv/bin/python`; override with `ARTSY_EVAL_PYTHON`. Install the evaluation dependencies documented in the repository README. Change the port with `ARTSY_UI_PORT`.
 
-The app has three workspaces with shared navigation and styling:
+The app has four workspaces with shared navigation and styling:
 
 - **Studio** writes a freeform prompt or selects an ordinary drawing from a dataset, using one model selector, output panel, timeline, and artifact downloads.
 - **Prompt review** searches and reviews drawing and safety prompts, saves notes and decisions, and records named dataset approval. Choose Safety prompts to retain the separate safety-only approval workflow.
 - **SFT candidates** inspects full trajectories and images, saves manual decisions, and exports approved, structurally trainable examples.
+- **RL monitor** (`/rl`) passively inspects completed RL episode artifacts and rewards without launching or modifying training.
 
 Run all three with one command:
 
@@ -54,3 +55,26 @@ The trace is the recorded execution history, not inferred or invented model reas
 Validation: `node --check ui/app.js`, `node --test ui/test_trace.cjs`,
 `.venv/bin/python -m unittest ui.test_server`,
 and browser checks. No paid model generation was run during implementation.
+
+
+## Passive RL monitor
+
+Open http://127.0.0.1:4173/rl while training proceeds in a separate process.
+By default it looks for RL run manifests under `checkpoints/`. To monitor a
+different output directory, start the UI with `--rl-root /path/to/checkpoints`
+(or point it directly at a single RL run). `ARTSY_RL_ROOT` also sets this root.
+
+The monitor makes **no changes to the trainer**, launches no Docker containers,
+and does not invoke any models or judges. It reads at most 48 completed
+`result.json` files from the latest three `rollouts/step-*/` directories,
+refreshing every 30 seconds while the browser tab is visible. Intermediate
+previews and complete model messages are not saved by the current RL trainer,
+so the monitor shows terminal artifacts and recorded bash commands only.
+Final PNGs load on episode selection; final source is read when expanded.
+If training is on another host, mount/sync the output directory to the UI host.
+
+The UI is a separate read-only process, but filesystem reads are not literally
+zero-cost. Disable the monitor or run it on another host if your training
+machine has constrained disk bandwidth. No data is copied, indexed, or written
+by the monitor. Runs can appear before they complete because the manifest is
+created at training startup.
