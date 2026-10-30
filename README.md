@@ -14,7 +14,7 @@ artifacts have been retired; references to earlier releases below describe histo
 
 ## Unified UI
 
-Launch Studio, prompt and safety review, and SFT candidate inspection in one app:
+Launch Studio, reviews, inspection, training, and evaluation in one app:
 
 ```sh
 .venv/bin/python -m ui.server --dataset datasets/sft-v2/prompts.jsonl \
