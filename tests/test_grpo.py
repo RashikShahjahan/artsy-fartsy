@@ -309,6 +309,12 @@ class ConfigurationTests(unittest.TestCase):
             _, plan, _ = load_run(args)
             self.assertEqual(plan['initial_state_path'], initial['state_path'])
             self.assertEqual(plan['reference_sampler_path'], initial['sampler_path'])
+            self.assertEqual(plan['reference_model'], MODEL_ID + ':peft:262144')
+            config['model'] = MODEL_ID + ':peft:262144'
+            checkpoint.write_text(json.dumps(initial))
+            _, plan, _ = load_run(args)
+            self.assertEqual(plan['model'], MODEL_ID)
+            self.assertEqual(plan['reference_model'], config['model'])
             checkpoint.write_text(json.dumps({**initial, 'config': {**config, 'algorithm': 'another-policy-stage'}}))
             with self.assertRaisesRegex(ValueError, 'compatible SFT'):
                 load_run(args)
@@ -319,6 +325,7 @@ class ConfigurationTests(unittest.TestCase):
         args = parser().parse_args(["--max-steps", "1", "--clip-epsilon", "0.1"])
         args.output_dir = Path("/tmp/artsy-rl-example")
         plan = {"initial_state_path": "tinker://initial",
+                "reference_model": "Qwen/Qwen3.8-27B:peft:262144",
                 "reference_sampler_path": "tinker://reference",
                 "model": "Qwen/Qwen3.8-27B",
                 "renderer": "qwen3_8_disable_thinking",
@@ -333,6 +340,7 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.loss_fn_config["clip_high_threshold"], 1.1)
         self.assertEqual(config.load_checkpoint_path, "tinker://initial")
         self.assertEqual(config.kl_reference_config.load_checkpoint_path, "tinker://reference")
+        self.assertEqual(config.kl_reference_config.base_model, "Qwen/Qwen3.8-27B:peft:262144")
         self.assertEqual(config.max_tokens, args.max_length)
         self.assertIsNone(config.dataset_builder.max_tokens)
         self.assertTrue(config.termination.zero_reward_on_limit)

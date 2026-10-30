@@ -73,6 +73,10 @@ def load_run(args):
         "dataset_sha256": digest(args.dataset.read_bytes()),
         "prompt_ids": [row["id"] for row in specs],
         "initial_state_path": initial["state_path"],
+        # Preserve the hosted context selection for the frozen SFT sampler.
+        # The unsuffixed model ID can select a smaller default context.
+        "reference_model": (source["model"] if ":peft:" in source["model"]
+                            else f"{checkpoint_model}:peft:{MODEL_CONTEXT_WINDOW}"),
         "reference_sampler_path": initial["sampler_path"],
         "api_doc_sha256": digest((ROOT / "docs/artcanvas.md").read_bytes()),
         "source_sha256": {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES},
@@ -209,7 +213,7 @@ def make_cookbook_config(args, specs, plan, total):
                         "clip_high_threshold": 1 + args.clip_epsilon},
         kl_penalty_coef=args.kl_coef,
         kl_reference_config=(cookbook.KLReferenceConfig(
-            base_model=plan["model"], load_checkpoint_path=plan["reference_sampler_path"])
+            base_model=plan["reference_model"], load_checkpoint_path=plan["reference_sampler_path"])
             if args.kl_coef else None),
         remove_constant_reward_groups=True,
         eval_every=0,
