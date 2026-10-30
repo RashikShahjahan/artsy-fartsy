@@ -41,3 +41,29 @@
 @media(max-width:900px){.rl-metrics{grid-template-columns:repeat(2,1fr)}.rl-layout{grid-template-columns:1fr}}
 @media(max-width:480px){.rl-metrics{grid-template-columns:1fr}.rl-toolbar select,.rl-toolbar input{flex:1}}
 
+
+/* Manifest-backed prompt library: independent of the bounded rollout feed. */
+.rl-prompt-browser{background:#fff;border:1px solid #d7e2d9;border-radius:12px;padding:18px;margin:0 0 20px;min-width:0}
+.rl-prompts-heading{display:flex;justify-content:space-between;align-items:start;gap:18px;flex-wrap:wrap}
+.rl-prompts-heading h2{font-size:18px;margin:0 0 8px}
+.rl-prompts-heading h2 span{font-size:13px;font-weight:500;color:#597166}
+.rl-prompts-heading p{margin:0 0 12px;color:#627267;font-size:13px;line-height:1.55;max-width:580px}
+.rl-prompt-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.rl-prompt-controls label{font-size:13px;font-weight:650;color:#455d53}
+.rl-prompt-controls input,.rl-prompt-controls select{font:inherit;font-size:13px;border:1px solid #bdcec4;border-radius:8px;background:#fff;padding:9px;min-width:140px}
+.rl-prompt-controls input{width:min(280px,100%)}
+#rl-prompts-status{margin:10px 0;font-size:13px}
+.rl-training-prompts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:10px}
+.rl-training-prompt{min-width:0;border:1px solid #dee7df;border-radius:9px;background:#fbfcfa}
+.rl-training-prompt summary{cursor:pointer;padding:12px 14px;line-height:1.5}
+.rl-training-prompt summary:focus-visible{outline:3px solid #26764d;outline-offset:2px}
+.rl-training-prompt[open]{border-color:#aac8b3}
+.rl-training-prompt .rl-prompt-item-heading{font-size:12px;font-weight:650;color:#43634e;overflow-wrap:anywhere}
+.rl-training-prompt .rl-prompt-preview{display:block;font-size:14px;color:#263d33;margin-top:5px;overflow-wrap:anywhere}
+.rl-training-prompt .rl-prompt-full{font-size:14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:14px;border-top:1px solid #dee7df}
+.rl-training-prompt .rl-prompt-tags{display:block;font-size:12px;color:#66786d;margin-top:6px;overflow-wrap:anywhere}
+.rl-prompt-pager{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:16px;font-size:13px}
+.rl-prompt-pager button{border:1px solid #bdcec4;border-radius:7px;background:#e9f1eb;font:inherit;padding:8px 12px;cursor:pointer}
+.rl-prompt-pager button:disabled{opacity:.5;cursor:default}
+.rl-prompt-pager[hidden]{display:none}
+@media(max-width:600px){.rl-prompt-controls{width:100%}.rl-prompt-controls input{flex:1;min-width:0}.rl-training-prompts{grid-template-columns:1fr}}

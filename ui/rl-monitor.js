@@ -2,8 +2,10 @@
 "use strict";
 const byId = id => document.getElementById(id);
 const state = {run: null, rows: [], selected: null, busy: false, detailRequest: 0,
-  renderedRows: null, episodeButtons: new Map()};
+  renderedRows: null, episodeButtons: new Map(), prompts: [], promptRun: null,
+  promptPage: 0, promptRequest: 0, promptMessage: null};
 const PERIOD_MS = 30000;
+const PROMPTS_PER_PAGE = 50;
 let refreshTimer = null;
 
 function element(tag, text, cls) {
@@ -67,6 +69,87 @@ function groupEpisodeRows(rows, search = "") {
       [row.prompt, row.promptId, row.episodeId, row.outcome, row.step]
         .some(v => String(v || "").toLowerCase().includes(query)))
   })).filter(group => group.variants.length > 0);
+}
+
+/* The complete prompt browser is loaded once per run, not on each poll. */
+function renderPrompts() {
+  const list = byId("rl-prompt-list");
+  const pager = byId("rl-prompt-pager");
+  list.replaceChildren();
+  byId("rl-prompt-total").textContent = state.prompts.length ? "(" + state.prompts.length + ")" : "";
+  if (!state.prompts.length) {
+    byId("rl-prompts-status").textContent = state.promptMessage || "No prompts available.";
+    pager.hidden = true;
+    return;
+  }
+  const query = byId("rl-prompt-search").value.trim().toLowerCase();
+  const category = byId("rl-prompt-category").value;
+  const filtered = state.prompts.filter(row => {
+    if (category && row.category !== category) return false;
+    return !query || [row.prompt, row.id, row.category, row.difficulty, row.family,
+      ...(Array.isArray(row.skills) ? row.skills : [])]
+      .some(value => String(value || "").toLowerCase().includes(query));
+  });
+  const pages = Math.ceil(filtered.length / PROMPTS_PER_PAGE);
+  state.promptPage = Math.max(0, Math.min(state.promptPage, Math.max(0, pages - 1)));
+  const start = state.promptPage * PROMPTS_PER_PAGE;
+  const visible = filtered.slice(start, start + PROMPTS_PER_PAGE);
+  byId("rl-prompts-status").textContent = filtered.length
+    ? "Showing " + (start + 1) + "–" + (start + visible.length) + " of " +
+      filtered.length + " matching prompts (" + state.prompts.length + " in run)"
+    : "No training prompts match the current filters (" + state.prompts.length + " in run).";
+  for (const row of visible) {
+    const item = element("details", undefined, "rl-training-prompt");
+    const summary = element("summary");
+    summary.append(element("span", "#" + row.index + " · " + row.id, "rl-prompt-item-heading"));
+    const condensed = row.prompt.replace(/\s+/g, " ").trim();
+    summary.append(element("span", condensed.length > 180
+      ? condensed.slice(0, 180) + "…" : condensed, "rl-prompt-preview"));
+    summary.append(element("span", [row.category, row.difficulty, row.family,
+      ...(Array.isArray(row.skills) && row.skills.length ? ["Skills: " + row.skills.join(", ")] : [])]
+      .filter(Boolean).join(" · "), "rl-prompt-tags"));
+    item.append(summary, element("p", row.prompt, "rl-prompt-full"));
+    list.append(item);
+  }
+  pager.hidden = pages <= 1;
+  byId("rl-prompt-prev").disabled = state.promptPage === 0;
+  byId("rl-prompt-next").disabled = state.promptPage + 1 >= pages;
+  byId("rl-prompt-page").textContent = "Page " + (state.promptPage + 1) + " of " + pages;
+}
+async function loadPrompts(run) {
+  const serial = ++state.promptRequest;
+  const switching = state.promptRun !== run;
+  state.promptRun = run;
+  state.prompts = [];
+  state.promptMessage = "Loading original training prompts…";
+  if (switching) {
+    state.promptPage = 0;
+    byId("rl-prompt-search").value = "";
+    byId("rl-prompt-category").value = "";
+  }
+  renderPrompts();
+  try {
+    const result = await getJson("/api/rl/runs/" + encodeURIComponent(run) + "/prompts");
+    if (serial !== state.promptRequest || run !== state.run) return;
+    state.prompts = Array.isArray(result.prompts) ? result.prompts : [];
+    state.promptMessage = result.available ? null : result.message || "Prompt dataset unavailable.";
+    const categories = [...new Set(state.prompts.map(p => p.category).filter(Boolean))].sort();
+    const select = byId("rl-prompt-category");
+    select.replaceChildren();
+    const all = element("option", "All categories");
+    all.value = "";
+    select.append(all);
+    for (const category of categories) {
+      const option = element("option", category.replace(/_/g, " "));
+      option.value = category;
+      select.append(option);
+    }
+    renderPrompts();
+  } catch (err) {
+    if (serial !== state.promptRequest || run !== state.run) return;
+    state.promptMessage = String(err);
+    renderPrompts();
+  }
 }
 function renderRows() {
   const search = byId("rl-search").value;
@@ -203,7 +286,7 @@ async function selectEpisode(e) {
       element("h2", "Episode details"), element("p", String(err), "rl-empty"));
   }
 }
-async function refresh() {
+async function refresh(reloadPrompts = false) {
   if (state.busy || document.hidden) return;
   state.busy = true;
   byId("rl-refresh").disabled = true;
@@ -224,6 +307,11 @@ async function refresh() {
     selector.value = state.run || "";
     if (!state.run) {
       state.rows = [];
+      ++state.promptRequest;
+      state.promptRun = null;
+      state.prompts = [];
+      state.promptMessage = "No RL run selected.";
+      renderPrompts();
       state.renderedRows = null;
       state.episodeButtons.clear();
       byId("rl-metrics").replaceChildren();
@@ -232,6 +320,7 @@ async function refresh() {
       setStatus("No runs found");
       return;
     }
+    if (state.promptRun !== state.run || reloadPrompts) loadPrompts(state.run);
     const data = await getJson("/api/rl/runs/" + encodeURIComponent(state.run));
     state.rows = data.episodes || [];
     metrics(state.rows, data);
@@ -252,7 +341,7 @@ function schedule() {
     schedule();
   }, PERIOD_MS);
 }
-byId("rl-refresh").onclick = async () => { await refresh(); schedule(); };
+byId("rl-refresh").onclick = async () => { await refresh(true); schedule(); };
 byId("rl-run").onchange = async event => {
   state.run = event.target.value;
   state.selected = null;
@@ -263,6 +352,10 @@ byId("rl-run").onchange = async event => {
   schedule();
 };
 byId("rl-search").oninput = renderRows;
+byId("rl-prompt-search").oninput = () => { state.promptPage = 0; renderPrompts(); };
+byId("rl-prompt-category").onchange = () => { state.promptPage = 0; renderPrompts(); };
+byId("rl-prompt-prev").onclick = () => { state.promptPage -= 1; renderPrompts(); };
+byId("rl-prompt-next").onclick = () => { state.promptPage += 1; renderPrompts(); };
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) { refresh(); schedule(); }
 });
