@@ -31,6 +31,7 @@ from drawing.dataset_specs import validate_specs
 ROOT = Path(__file__).resolve().parents[1]
 JOBS = ROOT / 'episodes' / 'ui'
 RL_ROOT = Path(os.getenv('ARTSY_RL_ROOT', str(ROOT / 'checkpoints'))).expanduser().resolve()
+RL_DATASET = Path(os.environ['ARTSY_RL_DATASET']).expanduser().resolve() if os.getenv('ARTSY_RL_DATASET') else None
 LOCK = threading.Lock()
 ACTIVE = None
 PORT = int(os.getenv('ARTSY_UI_PORT', '4173'))
@@ -276,6 +277,12 @@ class Handler(SimpleHTTPRequestHandler):
         target = urlsplit(self.path).path
         if target == '/api/rl/runs':
             return self.send_json({'runs': rl_monitor.runs(RL_ROOT)})
+        match = re.fullmatch(r'/api/rl/runs/([^/]+)/prompts', target)
+        if match:
+            try:
+                return self.send_json(rl_monitor.prompts(RL_ROOT, match[1], RL_DATASET))
+            except (ValueError, OSError):
+                return self.send_json({'error': 'RL run unavailable.'}, 404)
         match = re.fullmatch(r'/api/rl/runs/([^/]+)', target)
         if match:
             try:
@@ -358,6 +365,7 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--rl-root', type=Path, help='RL checkpoints directory or one RL run; read-only monitoring')
+    parser.add_argument('--rl-dataset', type=Path, help='Original RL prompt JSONL for the full prompt browser')
     parser.add_argument('--dataset', type=Path, help='Prompt JSONL for Studio and prompt review (defaults to the frozen benchmark)')
     parser.add_argument('--candidates', type=Path, help='Candidate JSONL for SFT inspection and export')
     parser.add_argument('--review-output', type=Path, help='Prompt review output JSON')
@@ -366,6 +374,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.rl_root:
         RL_ROOT = args.rl_root.expanduser().resolve()
+    if args.rl_dataset:
+        RL_DATASET = args.rl_dataset.expanduser().resolve()
     CANDIDATE_DATASET = str(args.candidates.resolve()) if args.candidates else CANDIDATE_DATASET
     PROMPT_REVIEW_OUTPUT = args.review_output
     CANDIDATE_REVIEW_OUTPUT = args.candidate_review
