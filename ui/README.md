@@ -72,8 +72,12 @@ previews and complete model messages are not saved by the current RL trainer,
 so the monitor shows terminal artifacts and recorded bash commands only.
 Rollouts sharing one prompt and optimizer step are grouped under a single prompt
 heading, with each sampled variant selectable independently. Search retains
-original variant numbering. Final PNGs load on episode selection; final source
-is read when expanded.
+original variant numbering. Every saved final PNG appears as a lazy-loaded
+thumbnail alongside terminal reward, adherence, and outcome, so variants can be
+compared at a glance. Refusals or failed renders show a no-image placeholder.
+Selecting a tile opens the existing full-size image and detailed judgments;
+final source is read when expanded. Unchanged groups retain their DOM nodes
+between periodic polls so their images are not re-requested every 30 seconds.
 If training is on another host, mount/sync the output directory to the UI host.
 
 The UI is a separate read-only process, but filesystem reads are not literally

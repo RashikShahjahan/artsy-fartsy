@@ -21,7 +21,7 @@ __NAVIGATION__
     <button id="rl-refresh" type="button">Refresh now</button>
     <span id="rl-status" role="status">Loading…</span>
   </section>
-  <p class="rl-explanation">Polls every 30 seconds while this tab is visible. Reads at most 48 completed episodes from the latest three steps. Images and source code are fetched only when you select an episode. Results reflect the saved terminal scoring, not live model reasoning.</p>
+  <p class="rl-explanation">Polls every 30 seconds while this tab is visible. Reads at most 48 completed episodes from the latest three steps. Saved final images appear together as lazy-loaded thumbnails; source code is fetched only when you expand it. Results reflect the saved terminal scoring, not live model reasoning.</p>
   <div id="rl-metrics" class="rl-metrics" aria-label="Recent rollout metrics"></div>
   <div class="rl-layout">
     <section aria-label="Completed rollouts" class="rl-list-panel">
@@ -29,7 +29,7 @@ __NAVIGATION__
       <div id="rl-episodes"></div>
     </section>
     <section aria-label="Selected episode" id="rl-detail" class="rl-detail">
-      <h2>Episode details</h2><p>Select an episode to view its final image, tool commands, rewards, and source.</p>
+      <h2>Episode details</h2><p>Select an image tile for a larger view, commands, detailed rewards, and source.</p>
     </section>
   </div>
 </main>

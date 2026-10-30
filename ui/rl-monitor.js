@@ -1,7 +1,8 @@
 /* Passive RL monitor: fetch only saved artifacts, never talk to the trainer. */
 "use strict";
 const byId = id => document.getElementById(id);
-const state = {run: null, rows: [], selected: null, busy: false, detailRequest: 0};
+const state = {run: null, rows: [], selected: null, busy: false, detailRequest: 0,
+  renderedRows: null, episodeButtons: new Map()};
 const PERIOD_MS = 30000;
 let refreshTimer = null;
 
@@ -68,9 +69,16 @@ function groupEpisodeRows(rows, search = "") {
   })).filter(group => group.variants.length > 0);
 }
 function renderRows() {
+  const search = byId("rl-search").value;
+  // Keep image elements alive across the 30-second polling cycle. The API
+  // serves uncached PNGs; recreating tiles would repeatedly download them.
+  const signature = JSON.stringify([state.run, search, state.rows]);
+  if (signature === state.renderedRows) return;
+  state.renderedRows = signature;
   const list = byId("rl-episodes");
   list.replaceChildren();
-  const groups = groupEpisodeRows(state.rows, byId("rl-search").value);
+  state.episodeButtons.clear();
+  const groups = groupEpisodeRows(state.rows, search);
   if (!groups.length) {
     list.append(element("p", state.rows.length ? "No episodes match this filter." :
       "No completed episodes in the latest monitored steps.", "rl-empty"));
@@ -95,12 +103,29 @@ function renderRows() {
       const button = element("button", undefined, "rl-episode");
       button.type = "button";
       button.setAttribute("aria-pressed", String(state.selected === episodeKey(row)));
-      button.append(element("span", "Rollout " + number, "rl-rollout-label"));
-      button.append(element("span", "Reward " + fmt(row.score) +
-        " · " + (row.outcome || "unknown") +
-        " · " + row.bashCalls + " tool calls" +
-        (row.hasImage ? " · PNG" : ""), "rl-meta"));
+      const key = episodeKey(row);
+      const visual = element("div", undefined, "rl-rollout-visual");
+      if (row.hasImage) {
+        const image = element("img", undefined, "rl-rollout-image");
+        image.loading = "lazy";
+        image.decoding = "async";
+        image.alt = "Final image for rollout " + number;
+        image.src = artifactUrl(row, "image.png");
+        visual.append(image);
+      } else {
+        visual.append(element("span",
+          row.outcome === "refused" ? "Refused — no image" : "No final image",
+          "rl-no-image"));
+      }
+      const stats = element("div", undefined, "rl-rollout-stats");
+      stats.append(element("span", "Rollout " + number, "rl-rollout-label"));
+      stats.append(element("span", "Reward " + fmt(row.score), "rl-reward"));
+      stats.append(element("span", "Adherence " + fmt(row.adherence), "rl-adherence"));
+      stats.append(element("span", (row.outcome || "unknown") +
+        " · " + row.bashCalls + " tool calls", "rl-meta"));
+      button.append(visual, stats);
       button.onclick = () => selectEpisode(row);
+      state.episodeButtons.set(key, button);
       variants.append(button);
     }
     section.append(variants);
@@ -117,7 +142,10 @@ function detailsBlock(parent, label, object) {
 async function selectEpisode(e) {
   const serial = ++state.detailRequest;
   state.selected = episodeKey(e);
-  renderRows();
+  // A selection changes only aria-pressed; do not recreate gallery images.
+  for (const [key, button] of state.episodeButtons) {
+    button.setAttribute("aria-pressed", String(key === state.selected));
+  }
   const panel = byId("rl-detail");
   panel.replaceChildren(element("h2", "Episode details"),
     element("p", "Reading saved results…", "rl-empty"));
@@ -196,6 +224,8 @@ async function refresh() {
     selector.value = state.run || "";
     if (!state.run) {
       state.rows = [];
+      state.renderedRows = null;
+      state.episodeButtons.clear();
       byId("rl-metrics").replaceChildren();
       byId("rl-episodes").replaceChildren(element("p",
         "No RL training manifests found. Configure --rl-root to point at the checkpoints directory or a single run.", "rl-empty"));
