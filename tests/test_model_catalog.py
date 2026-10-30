@@ -7,13 +7,21 @@ import unittest
 from unittest.mock import patch
 
 from drawing.config import MODEL_ID, MODEL_REVISION
-from inference.model_catalog import FRONTIER_MODEL_ID, LARGE_MODEL_ID, ModelCatalogCache, model_catalog
+from inference.model_catalog import FRONTIER_MODEL_ID, LARGE_MODEL_ID, QWEN36_MODEL_ID, ModelCatalogCache, model_catalog
 
 
 class ModelCatalogTests(unittest.TestCase):
     def test_large_qwen_profile_enables_thinking(self):
         from inference.model_catalog import HOSTED_MODEL_PROFILES
         self.assertEqual(HOSTED_MODEL_PROFILES[LARGE_MODEL_ID]['renderer'], 'qwen3_8_disable_thinking')
+
+    def test_qwen36_profile_uses_native_vision_renderer_and_extended_context(self):
+        from inference.model_catalog import HOSTED_MODEL_PROFILES
+        profile = HOSTED_MODEL_PROFILES[QWEN36_MODEL_ID]
+        self.assertEqual(profile['renderer'], 'qwen3_5_disable_thinking')
+        self.assertEqual(profile['sampling_model'], QWEN36_MODEL_ID + ':peft:262144')
+        self.assertEqual(profile['context_window'], 262144)
+        self.assertEqual(len(profile['revision']), 40)
 
     def test_discovers_only_completed_compatible_sampler_checkpoints(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'ARTSY_TINKER_MODEL_PATH': ''}):
@@ -30,7 +38,7 @@ class ModelCatalogTests(unittest.TestCase):
             unfinished.mkdir()
             (unfinished / 'checkpoint-000001.json').write_text(json.dumps(valid))
             catalog = model_catalog(root)
-            self.assertEqual([entry['id'] for entry in catalog], [MODEL_ID, 'artsy/trained', LARGE_MODEL_ID, FRONTIER_MODEL_ID])
+            self.assertEqual([entry['id'] for entry in catalog], [MODEL_ID, 'artsy/trained', LARGE_MODEL_ID, QWEN36_MODEL_ID, FRONTIER_MODEL_ID])
             self.assertEqual(catalog[1]['model_path'], valid['sampler_path'])
             self.assertIn('step 29', catalog[1]['label'])
 

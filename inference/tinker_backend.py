@@ -13,7 +13,7 @@ class TinkerBackend:
         from tinker_cookbook import renderers
 
         if os.getenv('ARTSY_DISABLE_THINKING') == '1':
-            if model_id.startswith('Qwen/Qwen3.5-'):
+            if model_id.startswith(('Qwen/Qwen3.5-', 'Qwen/Qwen3.6-')):
                 renderer_name = 'qwen3_5_disable_thinking'
             elif model_id.startswith('Qwen/Qwen3.8-'):
                 renderer_name = 'qwen3_8_disable_thinking'
