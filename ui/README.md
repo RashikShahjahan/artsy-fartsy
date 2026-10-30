@@ -13,7 +13,8 @@ The app has five workspaces with shared navigation and styling:
 - **Studio** writes a freeform prompt or selects an ordinary drawing from a dataset, using one model selector, output panel, timeline, and artifact downloads.
 - **Prompt review** searches and reviews drawing and safety prompts, saves notes and decisions, and records named dataset approval. Choose Safety prompts to retain the separate safety-only approval workflow.
 - **SFT candidates** inspects full trajectories and images, saves manual decisions, and exports approved, structurally trainable examples.
-- **Runs** (`/runs`) launches evaluations, supervised fine-tuning, and GRPO jobs from validated CLI settings, with status, console output, history, and Stop controls.\n- **RL monitor** (`/rl`) browses all configured RL training prompts and passively inspects completed RL episode artifacts and rewards without launching or modifying training.
+- **Runs** (`/runs`) launches evaluations, supervised fine-tuning, and GRPO jobs from validated CLI settings, with status, console output, history, and Stop controls.
+- **RL monitor** (`/rl`) browses all configured RL training prompts and passively inspects completed RL episode artifacts and rewards without launching or modifying training.
 
 Run all workspaces with one command:
 
