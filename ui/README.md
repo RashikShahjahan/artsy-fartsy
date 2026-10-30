@@ -13,7 +13,7 @@ The app has four workspaces with shared navigation and styling:
 - **Studio** writes a freeform prompt or selects an ordinary drawing from a dataset, using one model selector, output panel, timeline, and artifact downloads.
 - **Prompt review** searches and reviews drawing and safety prompts, saves notes and decisions, and records named dataset approval. Choose Safety prompts to retain the separate safety-only approval workflow.
 - **SFT candidates** inspects full trajectories and images, saves manual decisions, and exports approved, structurally trainable examples.
-- **RL monitor** (`/rl`) passively inspects completed RL episode artifacts and rewards without launching or modifying training.
+- **RL monitor** (`/rl`) browses all configured RL training prompts and passively inspects completed RL episode artifacts and rewards without launching or modifying training.
 
 Run all three with one command:
 
@@ -64,6 +64,19 @@ By default it looks for RL run manifests under `checkpoints/`. To monitor a
 different output directory, start the UI with `--rl-root /path/to/checkpoints`
 (or point it directly at a single RL run). `ARTSY_RL_ROOT` also sets this root.
 
+The **RL training prompts** section lists every prompt selected in the run
+manifest, even prompts absent from recent rollouts. It offers full-text search,
+category filters (including safety/refusal categories), expandable original prompt
+text, and 50-prompt pagination. The viewer finds a matching prompt JSONL in
+`datasets/*/prompts.jsonl`, preferring `datasets/grpo-v2/prompts.jsonl`.
+For an external or nonstandard dataset path, pass
+`--rl-dataset /path/to/original/prompts.jsonl` or set `ARTSY_RL_DATASET`.
+The source file must match the **SHA-256 recorded when RL training began**;
+only manifest-selected IDs are displayed, respecting `--limit`. Missing or
+modified files produce a visible explanation instead of incorrect prompts.
+The full list loads only when a run is selected or Refresh now is clicked;
+it is not re-read on each 30-second rollout poll.
+
 The monitor makes **no changes to the trainer**, launches no Docker containers,
 and does not invoke any models or judges. It reads at most 48 completed
 `result.json` files from the latest three `rollouts/step-*/` directories,
@@ -82,6 +95,8 @@ If training is on another host, mount/sync the output directory to the UI host.
 
 The UI is a separate read-only process, but filesystem reads are not literally
 zero-cost. Disable the monitor or run it on another host if your training
-machine has constrained disk bandwidth. No data is copied, indexed, or written
-by the monitor. Runs can appear before they complete because the manifest is
+machine has constrained disk bandwidth. No data is indexed or written
+by the monitor. Prompt text is read from the original dataset on demand; runs can appear before they complete because the manifest is
 created at training startup.
+
+RL prompt browser tests: `python -m unittest ui.test_rl_monitor` and `node --test ui/test_rl_monitor.cjs`.
