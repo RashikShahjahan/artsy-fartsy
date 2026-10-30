@@ -177,6 +177,8 @@ def _alive(pid):
         return False
     except PermissionError:
         return True
+    except OSError:
+        return False
 
 
 def _state(record):
@@ -213,7 +215,9 @@ def get_run(run_id):
             record["console"] = stream.read().decode("utf-8", errors="replace")
     else:
         record["console"] = ""
-    record["can_cancel"] = run_id in PROCESSES and PROCESSES[run_id].poll() is None
+    with LOCK:
+        process = PROCESSES.get(run_id)
+        record["can_cancel"] = process is not None and process.poll() is None
     return record
 
 
@@ -237,9 +241,11 @@ def start(kind, settings):
     argv, output = command(kind, settings, run_id)
     with LOCK:
         # Prevent overlapping optimizer jobs; eval may run alongside training.
-        if kind in ("sft", "rl") and any(
-                p.poll() is None and _load(ident).get("kind") in ("sft", "rl")
-                for ident, p in PROCESSES.items()):
+        if kind in ("sft", "rl") and (
+                any(p.poll() is None and _load(ident).get("kind") in ("sft", "rl")
+                    for ident, p in PROCESSES.items())
+                or any(row.get("kind") in ("sft", "rl")
+                       and row.get("state") in ("running", "stopping") for row in list_runs())):
             raise RuntimeError("An SFT or RL training run is already active.")
         folder = RUNS / run_id
         folder.mkdir(parents=True, exist_ok=False)
