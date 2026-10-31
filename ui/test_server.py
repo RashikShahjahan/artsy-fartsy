@@ -198,7 +198,11 @@ class JobTests(unittest.TestCase):
 
     def test_studio_models_and_direct_routing(self):
         self.assertEqual([model['label'] for model in server.model_catalog()],
-                         ['Qwen3.5 · 4B', 'GPT-6 Luna'])
+                         ['Qwen3.5 · 4B', 'Qwen3.6 · 35B-A3B',
+                          'Qwen3.8 · 27B', 'GPT-6 Luna'])
+        for base in ('Qwen/Qwen3.6-35B-A3B', 'Qwen/Qwen3.8-27B'):
+            self.assertEqual(server.generation_request({
+                'prompt': 'circle', 'seed': 42, 'model': base})['model'], base)
         for model in server.DIRECT_MODELS:
             with tempfile.TemporaryDirectory() as temp, patch.object(server.subprocess, 'run') as run:
                 run.return_value.returncode = 0
