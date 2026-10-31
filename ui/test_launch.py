@@ -65,6 +65,64 @@ class LauncherTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid group_size"):
                 launch.command("rl", {"group_size": 1}, "e" * 32)
 
+    def test_existing_models_are_discovered_and_checkpoint_types_filtered(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(launch, "ROOT", Path(folder)):
+            root = Path(folder)
+            valid = root / "checkpoints" / "sft-good"
+            valid.mkdir(parents=True)
+            (valid / "final.json").write_text(json.dumps({
+                "step": 125, "state_path": "tinker://train/state",
+                "sampler_path": "tinker://sampler/weights",
+                "config": {"model": "Qwen/Qwen3.8-27B", "renderer": "qwen3_8_disable_thinking",
+                           "lora_rank": 32},
+            }))
+            invalid = root / "checkpoints" / "rl-finished"
+            invalid.mkdir()
+            (invalid / "final.json").write_text(json.dumps({
+                "state_path": "tinker://train/state", "sampler_path": "tinker://sampler/weights",
+                "config": {"algorithm": "GRPO", "model": "Qwen/Qwen3.8-27B",
+                           "renderer": "qwen3_8_disable_thinking", "lora_rank": 32},
+            }))
+            (root / "checkpoints" / "broken").mkdir()
+            (root / "checkpoints" / "broken" / "final.json").write_text("{")
+            entries = [
+                {"id": "Qwen/Qwen3.5-4B", "label": "Qwen3.5 base"},
+                {"id": "Qwen/Qwen3.8-27B", "label": "Qwen3.8 base"},
+                {"id": "artsy/trained", "label": "Existing tuned model"},
+            ]
+            with patch("inference.model_catalog.model_catalog", return_value=entries):
+                choices = launch.model_choices([
+                    {"id": "Qwen/Qwen3.8-27B"},
+                    {"id": "artsy/trained", "label": "Existing tuned model"},
+                ])
+            self.assertTrue(choices["bridge_online"])
+            self.assertEqual(choices["rl"][0]["value"], "checkpoints/sft-good/final.json")
+            self.assertEqual(len(choices["rl"]), 1)
+            eval_models = {item["value"]: item for item in choices["eval"]}
+            self.assertTrue(eval_models["artsy/trained"]["available"])
+            self.assertFalse(eval_models["Qwen/Qwen3.5-4B"]["available"])
+            self.assertEqual({item["value"] for item in choices["sft"]},
+                             {"Qwen/Qwen3.5-4B", "Qwen/Qwen3.8-27B"})
+            with patch("inference.model_catalog.model_catalog", return_value=entries):
+                offline = launch.model_choices()
+            self.assertFalse(offline["bridge_online"])
+            self.assertFalse(any(item["available"] for item in offline["eval"]))
+
+    def test_existing_model_options_api(self):
+        handler = object.__new__(server.Handler)
+        handler.headers = {"Host": f"127.0.0.1:{server.PORT}"}
+        handler.path = "/api/launches/models"
+        payload = {"eval": [{"value": "artsy/trained"}], "sft": [], "rl": [],
+                   "bridge_online": True}
+        with patch.object(server, "bridge_model_catalog", return_value=[
+                  {"id": "artsy/trained"}]) as bridge, \
+             patch.object(server.launch, "model_choices", return_value=payload) as choices, \
+             patch.object(handler, "send_json") as response:
+            handler.do_GET()
+            bridge.assert_called_once()
+            choices.assert_called_once_with([{"id": "artsy/trained"}])
+            self.assertEqual(response.call_args.args[0], payload)
+
     def test_process_status_logs_and_training_exclusion(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
