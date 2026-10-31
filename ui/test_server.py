@@ -44,6 +44,15 @@ class JobTests(unittest.TestCase):
                 self.assertIn('href="/rl/rollouts"', page)
                 self.assertNotIn('__RL_', page)
                 self.assertNotIn('__NAVIGATION__', page)
+                if view == 'prompts':
+                    self.assertIn('id="rl-prompt-list"', page)
+                    self.assertNotIn('id="rl-episodes"', page)
+                    self.assertNotIn('id="rl-search"', page)
+                else:
+                    self.assertIn('id="rl-episodes"', page)
+                    self.assertNotIn('id="rl-prompt-list"', page)
+                    self.assertNotIn('id="rl-prompt-search"', page)
+                self.assertIn('rl-monitor.js?v=rl-split-2', page)
 
     def test_review_mount_saves_to_the_configured_file_and_rejects_other_origins(self):
         from io import BytesIO
