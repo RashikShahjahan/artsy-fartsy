@@ -61,8 +61,9 @@ def model_catalog(root=ROOT):
                   or config.get('tokenizer_revision') not in (None, profile['revision'])):
                 continue
             name = file.parent.name
+            stage = 'RL' if config.get('algorithm') else 'SFT'
             entry = {'id': f'artsy/{name}',
-                     'label': f'{name} · {base_model.rsplit("/", 1)[-1]} · step {data.get("step", "final")}',
+                     'label': f'{name} · {stage} · {base_model.rsplit("/", 1)[-1]} · step {data.get("step", "final")}',
                      'model_path': path, 'base_model': base_model}
             if profile:
                 entry.update(profile)
