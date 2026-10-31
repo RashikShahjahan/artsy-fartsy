@@ -42,7 +42,12 @@ or workspace does not. Dataset runs preserve canonical prompt text, seed,
 dataset hash, and prompt ID. Saved runs are scoped to the dataset revision.
 
 Studio Generate launches the existing `evaluation.draw` CLI. Model calls use credits. No
-generated code is executed by the web server. Only one UI job runs at a time. The Studio model dropdown contains Qwen3.5 4B and GPT-6 Luna.
+generated code is executed by the web server. Only one UI job runs at a time. The Studio
+dropdown includes Qwen3.5 4B and GPT-6 Luna, plus any completed Qwen3.5,
+Qwen3.6 35B-A3B or Qwen3.8 27B fine-tunes currently advertised by the native
+bridge. Saved checkpoints come from `checkpoints/*/final.json` and retain their
+own tokenizers, renderers and sampler paths; restart `make serve` or wait for
+the bridge catalog to refresh to discover newly saved runs, then reload Studio.
 Qwen uses the local native Tinker sampling bridge. GPT-6 Luna uses OpenRouter's
 OpenAI-compatible endpoint with `OPENROUTER_API_KEY` from the environment or `.env`.
 Both use the same Docker drawing harness. GPT-6 Luna does not require the local bridge.
@@ -110,7 +115,8 @@ non-dry-run launch because these jobs can consume model credits and compute.
 
 The model selectors query the existing Artsy inference catalog and the local
 `checkpoints/*/final.json` records. **Evaluation** lists base and saved
-fine-tuned models, showing those currently advertised by the native bridge.
+Qwen3.5, Qwen3.6 35B-A3B and Qwen3.8 27B fine-tunes, showing those currently
+advertised by the native bridge.
 Choices not served by a connected bridge are disabled; if the bridge is
 offline, known options are still shown with an offline warning. **SFT** offers
 base Qwen3.5 4B, Qwen3.6 35B-A3B, and Qwen3.8 27B vision models supported by the SFT trainer. The older Qwen3.5 35B-A3B chat checkpoint is retired on Tinker; select the Qwen3.6 vision model instead.
