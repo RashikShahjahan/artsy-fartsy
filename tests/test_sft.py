@@ -653,6 +653,7 @@ class TrainingCLITests(unittest.TestCase):
         self.assertEqual(parser().parse_args(['--dataset', 'accepted.jsonl']).lr_schedule, 'cosine')
         self.assertEqual(parser().parse_args(['--dataset', 'accepted.jsonl']).loss_policy, LOSS_POLICY)
         for model, renderer in [('Qwen/Qwen3.5-4B', 'qwen3_5_disable_thinking'),
+                                ('Qwen/Qwen3.6-35B-A3B', 'qwen3_5_disable_thinking'),
                                 ('Qwen/Qwen3.8-27B', 'qwen3_8_disable_thinking')]:
             self.assertEqual(renderer_for_model(model + ':peft:262144'), renderer)
 
