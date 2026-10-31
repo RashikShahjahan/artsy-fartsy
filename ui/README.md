@@ -43,9 +43,9 @@ dataset hash, and prompt ID. Saved runs are scoped to the dataset revision.
 
 Studio Generate launches the existing `evaluation.draw` CLI. Model calls use credits. No
 generated code is executed by the web server. Only one UI job runs at a time. The Studio
-dropdown includes Qwen3.5 4B and GPT-6 Luna, plus any completed Qwen3.5,
-Qwen3.6 35B-A3B or Qwen3.8 27B fine-tunes currently advertised by the native
-bridge. Saved checkpoints come from `checkpoints/*/final.json` and retain their
+dropdown includes the SFT base-model choices (Qwen3.5 4B, Qwen3.6
+35B-A3B and Qwen3.8 27B), GPT-6 Luna, plus any completed fine-tunes
+currently advertised by the native bridge. Saved checkpoints come from `checkpoints/*/final.json` and retain their
 own tokenizers, renderers and sampler paths; restart `make serve` or wait for
 the bridge catalog to refresh to discover newly saved runs, then reload Studio.
 Qwen uses the local native Tinker sampling bridge. GPT-6 Luna uses OpenRouter's
