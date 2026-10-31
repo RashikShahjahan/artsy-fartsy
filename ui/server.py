@@ -406,8 +406,18 @@ class Handler(SimpleHTTPRequestHandler):
         if target in ('/runs', '/runs/'):
             page = (ROOT / 'ui/runs.html').read_text().replace('__NAVIGATION__', navigation('runs'))
             return self.send_page(page)
-        if target in ('/rl', '/rl/'):
-            page = (ROOT / 'ui/rl-monitor.html').read_text().replace('__NAVIGATION__', navigation('rl'))
+        if target in ('/rl', '/rl/', '/rl/rollouts', '/rl/rollouts/',
+                      '/rl/prompts', '/rl/prompts/'):
+            view = 'prompts' if target in ('/rl/prompts', '/rl/prompts/') else 'rollouts'
+            title = 'RL prompts' if view == 'prompts' else 'RL rollouts'
+            description = ('Browse the full prompt selection for an RL run.'
+                           if view == 'prompts'
+                           else 'Inspect completed rollout images, rewards, and saved episode artifacts.')
+            page = (ROOT / 'ui/rl-monitor.html').read_text()
+            page = (page.replace('__NAVIGATION__', navigation('rl-' + view))
+                        .replace('__RL_VIEW__', view)
+                        .replace('__RL_TITLE__', title)
+                        .replace('__RL_DESCRIPTION__', description))
             return self.send_page(page)
         if urlsplit(self.path).path in ('/', '/index.html', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
