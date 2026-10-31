@@ -44,10 +44,14 @@ dataset hash, and prompt ID. Saved runs are scoped to the dataset revision.
 Studio Generate launches the existing `evaluation.draw` CLI. Model calls use credits. No
 generated code is executed by the web server. Only one UI job runs at a time. The Studio
 dropdown includes the SFT base-model choices (Qwen3.5 4B, Qwen3.6
-35B-A3B and Qwen3.8 27B), GPT-6 Luna, plus any completed fine-tunes
-currently advertised by the native bridge. Saved checkpoints come from `checkpoints/*/final.json` and retain their
-own tokenizers, renderers and sampler paths; restart `make serve` or wait for
-the bridge catalog to refresh to discover newly saved runs, then reload Studio.
+35B-A3B and Qwen3.8 27B), GPT-6 Luna, plus saved SFT models,
+completed GRPO models, and intermediate GRPO step checkpoints advertised by
+the native bridge. Final checkpoints come from `checkpoints/*/final.json`;
+intermediate GRPO checkpoints are discovered via
+`checkpoints/*/training-manifest.json` and `checkpoints/*/checkpoints.jsonl`.
+Each checkpoint uses its own sampler path and model-specific tokenizer,
+renderer, and context profile. The bridge refreshes its model catalog
+periodically; reload Studio to see new options.
 Qwen uses the local native Tinker sampling bridge. GPT-6 Luna uses OpenRouter's
 OpenAI-compatible endpoint with `OPENROUTER_API_KEY` from the environment or `.env`.
 Both use the same Docker drawing harness. GPT-6 Luna does not require the local bridge.
@@ -113,10 +117,13 @@ Open **Runs** at http://127.0.0.1:4173/runs. Choose a workflow, edit
 its CLI settings, and click **Launch**. A confirmation is shown before every
 non-dry-run launch because these jobs can consume model credits and compute.
 
-The model selectors query the existing Artsy inference catalog and the local
-`checkpoints/*/final.json` records. **Evaluation** lists base and saved
-Qwen3.5, Qwen3.6 35B-A3B and Qwen3.8 27B fine-tunes, showing those currently
-advertised by the native bridge.
+The model selectors query the existing Artsy inference catalog and local
+checkpoint metadata. **Evaluation** lists base models, completed SFT/GRPO
+models, and saved intermediate GRPO sampler checkpoints (for example,
+`artsy/grpo-run--grpo-step-000023`) for supported Qwen3.5, Qwen3.6 35B-A3B,
+and Qwen3.8 27B models. GRPO steps can be evaluated before RL finishes; only
+records with a published Tinker sampler are listed. The dropdown distinguishes
+models currently advertised by the native bridge.
 Choices not served by a connected bridge are disabled; if the bridge is
 offline, known options are still shown with an offline warning. **SFT** offers
 base Qwen3.5 4B, Qwen3.6 35B-A3B, and Qwen3.8 27B vision models supported by the SFT trainer. The older Qwen3.5 35B-A3B chat checkpoint is retired on Tinker; select the Qwen3.6 vision model instead.
