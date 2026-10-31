@@ -91,8 +91,8 @@ def model_choices(bridge_models=None):
     # The SFT trainer validates these Qwen base model families; its --model
     # argument does not accept an existing fine-tune sampler checkpoint.
     sft = [
-        {"value": model_id, "label": known.get(model_id, model_id)}
-        for model_id in (MODEL_ID, LARGE_MODEL_ID)
+        {"value": MODEL_ID, "label": "Qwen3.5 · 4B · base"},
+        {"value": LARGE_MODEL_ID, "label": "Qwen3.8 · 27B · base"},
     ]
     checkpoints = []
     for file in (ROOT / "checkpoints").glob("*/final.json"):
