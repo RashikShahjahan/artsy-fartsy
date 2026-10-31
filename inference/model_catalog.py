@@ -39,14 +39,34 @@ def model_catalog(root=ROOT):
     for file in sorted((root / 'checkpoints').glob('*/final.json')):
         try:
             data = json.loads(file.read_text())
+            if not isinstance(data, dict):
+                continue
             config = data.get('config', {})
+            if not isinstance(config, dict):
+                continue
             path = data.get('sampler_path')
-            if (config.get('model') != MODEL_ID or config.get('tokenizer_revision') != MODEL_REVISION
-                    or not isinstance(path, str) or not path.startswith('tinker://')):
+            model = config.get('model')
+            if (not isinstance(model, str) or not isinstance(path, str)
+                    or not path.startswith('tinker://')):
+                continue
+            # Training may record a PEFT context suffix; the tokenizers and
+            # renderers are selected from the actual base model family.
+            base_model = model.split(':peft:', 1)[0]
+            profile = HOSTED_MODEL_PROFILES.get(base_model)
+            if base_model == MODEL_ID:
+                if config.get('tokenizer_revision') != MODEL_REVISION:
+                    continue
+            elif (base_model not in (LARGE_MODEL_ID, QWEN36_MODEL_ID)
+                  or config.get('renderer') != profile['renderer']
+                  or config.get('tokenizer_revision') not in (None, profile['revision'])):
                 continue
             name = file.parent.name
-            entries.append({'id': f'artsy/{name}', 'label': f'{name} · step {data.get("step", "final")}',
-                            'model_path': path})
+            entry = {'id': f'artsy/{name}',
+                     'label': f'{name} · {base_model.rsplit("/", 1)[-1]} · step {data.get("step", "final")}',
+                     'model_path': path, 'base_model': base_model}
+            if profile:
+                entry.update(profile)
+            entries.append(entry)
         except (OSError, ValueError, AttributeError, TypeError):
             continue
     entries.append({'id': LARGE_MODEL_ID, 'label': 'Qwen3.8 · 27B · Tinker base',
