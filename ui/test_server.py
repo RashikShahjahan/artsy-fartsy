@@ -212,6 +212,31 @@ class JobTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'available Studio model'):
                 server.generation_request({'prompt': 'circle', 'seed': 42, 'model': retired})
 
+    def test_completed_sft_model_is_selectable_in_studio_and_models_api(self):
+        saved = {'id': 'artsy/sft-qwen38', 'label': 'sft-qwen38 · Qwen3.8 · step 80',
+                 'model_path': 'tinker://sft-qwen38/sampler', 'base_model': 'Qwen/Qwen3.8-27B'}
+        malformed = {'id': 'artsy/invalid', 'label': 'not a checkpoint',
+                     'model_path': None, 'base_model': 'Qwen/Qwen3.8-27B'}
+        with patch.object(server, 'bridge_model_catalog', return_value=[saved, malformed]):
+            entries = server.model_catalog([saved, malformed])
+            self.assertEqual(entries[-1]['id'], saved['id'])
+            self.assertNotIn(malformed['id'], [entry['id'] for entry in entries])
+            self.assertEqual(server.generation_request({
+                'prompt': 'Draw a circle', 'seed': 42, 'model': saved['id']})['model'], saved['id']
+            )
+            handler = object.__new__(server.Handler)
+            handler.headers = {'Host': f'127.0.0.1:{server.PORT}'}
+            handler.path = '/api/models'
+            with patch.object(handler, 'send_json') as send:
+                handler.do_GET()
+            result = send.call_args.args[0]
+            self.assertIn(saved['id'], [entry['id'] for entry in result['models']])
+            self.assertIn(saved['id'], result['bridge_models'])
+        with patch.object(server, 'bridge_model_catalog', return_value=None):
+            with self.assertRaisesRegex(ValueError, 'available Studio model'):
+                server.generation_request({'prompt': 'Draw a circle', 'seed': 42,
+                                           'model': saved['id']})
+
     def test_failure_is_recorded(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
