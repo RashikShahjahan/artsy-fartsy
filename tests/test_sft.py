@@ -653,8 +653,34 @@ class TrainingCLITests(unittest.TestCase):
         self.assertEqual(parser().parse_args(['--dataset', 'accepted.jsonl']).lr_schedule, 'cosine')
         self.assertEqual(parser().parse_args(['--dataset', 'accepted.jsonl']).loss_policy, LOSS_POLICY)
         for model, renderer in [('Qwen/Qwen3.5-4B', 'qwen3_5_disable_thinking'),
+                                ('Qwen/Qwen3.6-35B-A3B', 'qwen3_5_disable_thinking'),
                                 ('Qwen/Qwen3.8-27B', 'qwen3_8_disable_thinking')]:
             self.assertEqual(renderer_for_model(model + ':peft:262144'), renderer)
+
+    def test_qwen36_35b_a3b_can_start_sft_without_model_validation_error(self):
+        import contextlib
+        import io
+        from types import SimpleNamespace
+        from training.sft import main
+
+        datum = SimpleNamespace(model_input=SimpleNamespace(length=10),
+                                loss_fn_inputs={"weights": SimpleNamespace(data=[0, 1])})
+        with tempfile.TemporaryDirectory() as temp, \
+             patch("training.sft.load_examples", return_value=([{"id": "sample"}],
+                   {"unreviewed_records": 0})), \
+             patch("training.sft.create_encoder", return_value=lambda example: [datum]) as encoder, \
+             patch("training.sft.train") as train, \
+             contextlib.redirect_stdout(io.StringIO()):
+            main(["--dataset", "accepted.jsonl", "--output-dir", str(Path(temp) / "sft"),
+                  "--model", "Qwen/Qwen3.6-35B-A3B"])
+            encoder.assert_called_once()
+            self.assertEqual(encoder.call_args.args[0], "Qwen/Qwen3.6-35B-A3B")
+            train.assert_called_once()
+            self.assertEqual(train.call_args.args[0].model, "Qwen/Qwen3.6-35B-A3B")
+            with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                main(["--dataset", "accepted.jsonl", "--output-dir", str(Path(temp) / "other"),
+                      "--model", "Qwen/Qwen3.5-35B-A3B-Base"])
+            self.assertEqual(train.call_count, 1)
 
     def test_preflight_does_not_create_a_service_client(self):
         import contextlib

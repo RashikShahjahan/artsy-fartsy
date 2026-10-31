@@ -13,6 +13,7 @@ import random
 
 from training.data import LOSS_POLICIES, LOSS_POLICY, ROOT, digest, load_examples
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION, MODEL_CONTEXT_WINDOW
+from inference.model_catalog import QWEN36_MODEL_ID
 
 RENDERER = "qwen3_5_disable_thinking"
 
@@ -226,7 +227,7 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--dataset", type=Path, required=True, help="Recorded training dataset JSONL")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/sft-warmup")
-    p.add_argument("--model", default=MODEL_ID, help="Hosted Qwen3.5 or Qwen3.8 vision model ID")
+    p.add_argument("--model", default=MODEL_ID, help="Hosted Qwen3.5, Qwen3.6 or Qwen3.8 vision model ID")
     p.add_argument("--dry-run", action="store_true", help="Validate artifacts and print a converted example; no API calls")
     p.add_argument("--export", type=Path, help="Write converted conversation JSONL with trainable message indices")
     p.add_argument("--sample-id", help="Record ID to display in dry-run")
@@ -276,8 +277,10 @@ def main(argv=None):
                 "Review them or use --allow-unreviewed for an experimental run.")
     if not args.check_batch and not args.resume_from_checkpoint and args.output_dir.exists() and any(args.output_dir.iterdir()):
         p.error("Output directory is not empty; choose a fresh directory or --resume-from-checkpoint")
-    if not (args.model.startswith("Qwen/Qwen3.5-") or args.model.split(":", 1)[0] == "Qwen/Qwen3.8-27B") or "Base" in args.model:
-        p.error("Use a Qwen3.5 or Qwen3.8 vision chat model with a disabled-thinking renderer")
+    base_model = args.model.split(":", 1)[0]
+    if not (args.model.startswith("Qwen/Qwen3.5-")
+            or base_model in (QWEN36_MODEL_ID, "Qwen/Qwen3.8-27B")) or "Base" in args.model:
+        p.error("Use a supported Qwen3.5, Qwen3.6 or Qwen3.8 vision chat model with a disabled-thinking renderer")
 
     encoder = create_encoder(args.model.split(":", 1)[0], args.max_length)
     data = [datum for example in examples for datum in encoder(example)]
