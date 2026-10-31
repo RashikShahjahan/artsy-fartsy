@@ -42,6 +42,41 @@ class ModelCatalogTests(unittest.TestCase):
             self.assertEqual(catalog[1]['model_path'], valid['sampler_path'])
             self.assertIn('step 29', catalog[1]['label'])
 
+    def test_discovers_qwen36_and_qwen38_sft_sampler_checkpoints(self):
+        from inference.model_catalog import HOSTED_MODEL_PROFILES, LARGE_MODEL_ID, QWEN36_MODEL_ID
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            rows = [
+                ('sft-qwen38', LARGE_MODEL_ID, 'qwen3_8_disable_thinking', None),
+                ('sft-qwen36', QWEN36_MODEL_ID, 'qwen3_5_disable_thinking', None),
+                ('invalid-renderer', QWEN36_MODEL_ID, 'qwen3_8_disable_thinking', None),
+                ('invalid-revision', LARGE_MODEL_ID, 'qwen3_8_disable_thinking', 'wrong'),
+                ('unsupported', 'Qwen/Unrecognized', 'qwen3_8_disable_thinking', None),
+            ]
+            for name, model, renderer, revision in rows:
+                folder = root / 'checkpoints' / name
+                folder.mkdir(parents=True)
+                (folder / 'final.json').write_text(json.dumps({
+                    'step': 42,
+                    'config': {'model': model, 'renderer': renderer,
+                               'tokenizer_revision': revision},
+                    'sampler_path': f'tinker://{name}/sampler',
+                    'state_path': f'tinker://{name}/state',
+                }))
+            records = {entry['id']: entry for entry in model_catalog(root)}
+            self.assertTrue({'artsy/sft-qwen38', 'artsy/sft-qwen36'} <= records.keys())
+            self.assertNotIn('artsy/invalid-renderer', records)
+            self.assertNotIn('artsy/invalid-revision', records)
+            self.assertNotIn('artsy/unsupported', records)
+            for name, model in [('sft-qwen38', LARGE_MODEL_ID),
+                                ('sft-qwen36', QWEN36_MODEL_ID)]:
+                record = records['artsy/' + name]
+                self.assertEqual(record['base_model'], model)
+                self.assertEqual(record['model_path'], f'tinker://{name}/sampler')
+                for key in ('sampling_model', 'revision', 'renderer', 'context_window'):
+                    self.assertEqual(record[key], HOSTED_MODEL_PROFILES[model][key])
+                self.assertIn('step 42', record['label'])
+
     def test_legacy_configured_checkpoint_is_labeled(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'ARTSY_TINKER_MODEL_PATH': 'tinker://legacy'}):
             base = model_catalog(Path(temp))[0]
