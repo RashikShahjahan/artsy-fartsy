@@ -90,6 +90,12 @@ class ModelCatalogTests(unittest.TestCase):
                           'renderer': renderer, 'tokenizer_revision': None}
                 (folder / 'training-manifest.json').write_text(
                     json.dumps({'config': config, 'total_steps': 500}))
+                if run == 'grpo-qwen38':
+                    (folder / 'final.json').write_text(json.dumps({
+                        'step': 25, 'config': config,
+                        'state_path': 'tinker://grpo-qwen38/state/final',
+                        'sampler_path': 'tinker://grpo-qwen38/sampler/final',
+                    }))
                 records = [
                     {'name': '000023', 'batch': 23,
                      'state_path': f'tinker://{run}/state/23',
@@ -113,6 +119,9 @@ class ModelCatalogTests(unittest.TestCase):
                     ''.join(json.dumps(row) + '\n' for row in records)
                     + '{"name":"unfinished"')
             catalog = {row['id']: row for row in model_catalog(root)}
+            self.assertEqual(catalog['artsy/grpo-qwen38']['model_path'],
+                             'tinker://grpo-qwen38/sampler/final')
+            self.assertIn('GRPO', catalog['artsy/grpo-qwen38']['label'])
             self.assertEqual(
                 sorted(name for name in catalog if '--grpo-step-' in name),
                 ['artsy/grpo-qwen36--grpo-step-000023',
