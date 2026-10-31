@@ -11,30 +11,36 @@ const script = fs.readFileSync(path.join(__dirname, "rl-monitor.js"), "utf8");
 function createNode(tag = "div") {
   return {
     tag, children: [], attributes: {}, textContent: "", className: "", value: "",
+    dataset: {},
+    get options() { return this.children; },
     append(...nodes) { this.children.push(...nodes); },
     replaceChildren(...nodes) { this.children = nodes; },
     setAttribute(name, value) { this.attributes[name] = value; }
   };
 }
-function fixture(fetchImpl = () => { throw new Error("Unexpected network request"); }) {
+function fixture(fetchImpl = () => { throw new Error("Unexpected network request"); },
+                 view = "rollouts", visible = false) {
   const nodes = new Map();
-  for (const name of ["rl-episodes", "rl-search", "rl-run", "rl-refresh", "rl-detail",
+  for (const name of ["rl-main", "rl-status", "rl-metrics", "rl-episodes",
+    "rl-search", "rl-run", "rl-refresh", "rl-detail",
     "rl-prompt-search", "rl-prompt-category", "rl-prompts-status", "rl-prompt-total",
     "rl-prompt-list", "rl-prompt-pager", "rl-prompt-prev", "rl-prompt-next", "rl-prompt-page"]) {
     nodes.set(name, createNode());
   }
+  nodes.get("rl-main").dataset.rlView = view;
   const document = {
     hidden: true, // No network traffic or timers from the browser startup.
     createElement: tag => createNode(tag),
     getElementById: id => nodes.get(id),
     addEventListener() {}
   };
-  const result = vm.runInNewContext(script + "\n;({state, groupEpisodeRows, renderRows, renderPrompts, loadPrompts})", {
+  const result = vm.runInNewContext(script + "\n;({state, groupEpisodeRows, renderRows, renderPrompts, loadPrompts, refresh})", {
     document,
     clearTimeout() {},
     setTimeout() {},
     fetch: fetchImpl
   });
+  document.hidden = !visible;
   return {nodes, ...result};
 }
 function row(step, promptId, episodeId, values = {}) {
@@ -236,4 +242,41 @@ test("unavailable prompt data shows a dataset repair instruction instead of roll
   await loadPrompts("grpo-v4");
   assert.equal(nodes.get("rl-prompt-list").children.length, 0);
   assert.match(nodes.get("rl-prompts-status").textContent, /--rl-dataset/);
+});
+
+test("RL prompt workspace fetches only the full run prompt dataset", async () => {
+  const urls = [];
+  const {state, refresh} = fixture(async url => {
+    urls.push(url);
+    const data = url === "/api/rl/runs"
+      ? {runs: [{id: "training", finished: false}]}
+      : {run: "training", available: true, prompts: [
+          {index: 1, id: "p1", prompt: "Draw a circle", category: "drawing", skills: []}
+        ]};
+    return {ok: true, json: async () => data};
+  }, "prompts", true);
+  await refresh();
+  assert.deepEqual(urls, ["/api/rl/runs", "/api/rl/runs/training/prompts"]);
+  assert.equal(state.prompts.length, 1);
+  await refresh();
+  assert.deepEqual(urls, ["/api/rl/runs", "/api/rl/runs/training/prompts", "/api/rl/runs"]);
+  await refresh(true);
+  assert.equal(urls.at(-1), "/api/rl/runs/training/prompts");
+});
+
+test("RL rollouts workspace fetches only recent episodes", async () => {
+  const urls = [];
+  const {state, refresh} = fixture(async url => {
+    urls.push(url);
+    const data = url === "/api/rl/runs"
+      ? {runs: [{id: "training", finished: false}]}
+      : {steps: ["step-000001"], maxEpisodes: 48, episodes: [
+          row("step-000001", "p1", "e1")
+        ]};
+    return {ok: true, json: async () => data};
+  }, "rollouts", true);
+  await refresh();
+  assert.deepEqual(urls, ["/api/rl/runs", "/api/rl/runs/training"]);
+  assert.equal(state.rows.length, 1);
+  assert.equal(state.prompts.length, 0);
 });
