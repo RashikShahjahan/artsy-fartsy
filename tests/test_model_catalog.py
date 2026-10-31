@@ -77,6 +77,73 @@ class ModelCatalogTests(unittest.TestCase):
                     self.assertEqual(record[key], HOSTED_MODEL_PROFILES[model][key])
                 self.assertIn('step 42', record['label'])
 
+    def test_discovers_grpo_step_checkpoints_before_training_finishes(self):
+        from inference.model_catalog import HOSTED_MODEL_PROFILES, LARGE_MODEL_ID, QWEN36_MODEL_ID
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for run, base, renderer in (
+                    ('grpo-qwen38', LARGE_MODEL_ID, 'qwen3_8_disable_thinking'),
+                    ('grpo-qwen36', QWEN36_MODEL_ID, 'qwen3_5_disable_thinking')):
+                folder = root / 'checkpoints' / run
+                folder.mkdir(parents=True)
+                config = {'algorithm': 'tinker-cookbook-ppo-v1', 'model': base,
+                          'renderer': renderer, 'tokenizer_revision': None}
+                (folder / 'training-manifest.json').write_text(
+                    json.dumps({'config': config, 'total_steps': 500}))
+                records = [
+                    {'name': '000023', 'batch': 23,
+                     'state_path': f'tinker://{run}/state/23',
+                     'sampler_path': f'tinker://{run}/sampler/23'},
+                    {'name': '000024', 'batch': 24,
+                     'state_path': f'tinker://{run}/state/24',
+                     'sampler_path': f'tinker://{run}/sampler/24'},
+                    {'name': 'final', 'batch': 25,
+                     'state_path': f'tinker://{run}/state/final',
+                     'sampler_path': f'tinker://{run}/sampler/final'},
+                    {'name': 'continuation', 'batch': 0,
+                     'state_path': f'tinker://{run}/state/0',
+                     'sampler_path': f'tinker://{run}/sampler/0'},
+                    {'name': '000025', 'batch': 25,
+                     'state_path': f'tinker://{run}/state/25'},
+                    {'name': '000026', 'batch': 26,
+                     'state_path': f'tinker://{run}/state/26',
+                     'sampler_path': 'https://not-a-tinker-checkpoint'},
+                ]
+                (folder / 'checkpoints.jsonl').write_text(
+                    ''.join(json.dumps(row) + '\n' for row in records)
+                    + '{"name":"unfinished"')
+            catalog = {row['id']: row for row in model_catalog(root)}
+            self.assertEqual(
+                sorted(name for name in catalog if '--grpo-step-' in name),
+                ['artsy/grpo-qwen36--grpo-step-000023',
+                 'artsy/grpo-qwen36--grpo-step-000024',
+                 'artsy/grpo-qwen38--grpo-step-000023',
+                 'artsy/grpo-qwen38--grpo-step-000024'])
+            for run, base in (('grpo-qwen38', LARGE_MODEL_ID),
+                              ('grpo-qwen36', QWEN36_MODEL_ID)):
+                choice = catalog[f'artsy/{run}--grpo-step-000024']
+                self.assertEqual(choice['model_path'], f'tinker://{run}/sampler/24')
+                self.assertEqual(choice['base_model'], base)
+                self.assertIn('GRPO · step 24', choice['label'])
+                self.assertEqual(choice['sampling_model'],
+                                 HOSTED_MODEL_PROFILES[base]['sampling_model'])
+
+    def test_grpo_steps_require_valid_manifest_and_published_sampler(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cases = [('bad-stage', {'algorithm': 'different', 'model': LARGE_MODEL_ID,
+                                    'renderer': 'qwen3_8_disable_thinking'}),
+                     ('bad-renderer', {'algorithm': 'tinker-cookbook-ppo-v1', 'model': LARGE_MODEL_ID,
+                                      'renderer': 'wrong'})]
+            for name, config in cases:
+                folder = root / 'checkpoints' / name
+                folder.mkdir(parents=True)
+                (folder / 'training-manifest.json').write_text(json.dumps({'config': config}))
+                (folder / 'checkpoints.jsonl').write_text(json.dumps({
+                    'name': '000001', 'batch': 1,
+                    'state_path': 'tinker://state', 'sampler_path': 'tinker://sampler'}) + '\n')
+            self.assertFalse(any('--grpo-step-' in row['id'] for row in model_catalog(root)))
+
     def test_legacy_configured_checkpoint_is_labeled(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'ARTSY_TINKER_MODEL_PATH': 'tinker://legacy'}):
             base = model_catalog(Path(temp))[0]
