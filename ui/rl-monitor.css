@@ -67,3 +67,13 @@
 .rl-prompt-pager button:disabled{opacity:.5;cursor:default}
 .rl-prompt-pager[hidden]{display:none}
 @media(max-width:600px){.rl-prompt-controls{width:100%}.rl-prompt-controls input{flex:1;min-width:0}.rl-training-prompts{grid-template-columns:1fr}}
+
+/* Each RL workspace owns its own controls and data loading. */
+.rl-main[data-rl-view="prompts"] .rl-rollouts-view,
+.rl-main[data-rl-view="rollouts"] .rl-prompts-view{display:none}
+.rl-prompts-view,.rl-rollouts-view{margin-top:20px}
+.rl-prompts-view .rl-prompt-browser{margin-bottom:0}
+.rl-rollout-filter{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.rl-rollout-filter label{font-size:13px;font-weight:650;color:#455d53}
+.rl-rollout-filter input{font:inherit;font-size:13px;min-width:240px;max-width:100%;border:1px solid #bdcec4;border-radius:8px;padding:9px;background:#fff}
+@media(max-width:480px){.rl-rollout-filter input{flex:1;min-width:0}}

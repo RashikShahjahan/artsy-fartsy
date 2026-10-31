@@ -26,6 +26,25 @@ class JobTests(unittest.TestCase):
             handler.do_GET()
             self.assertEqual(response.call_args.args[1], 404)
 
+    def test_rl_prompts_and_rollouts_are_separate_navigation_workspaces(self):
+        handler = object.__new__(server.Handler)
+        handler.headers = {'Host': f'127.0.0.1:{server.PORT}'}
+        for route, view in (('/rl/prompts', 'prompts'),
+                            ('/rl/rollouts', 'rollouts'),
+                            ('/rl', 'rollouts')):
+            with self.subTest(route=route):
+                handler.path = route
+                with patch.object(handler, 'send_page') as serve:
+                    handler.do_GET()
+                page = serve.call_args.args[0]
+                self.assertIn(f'data-rl-view="{view}"', page)
+                self.assertIn(f'<h1>RL {view}</h1>', page)
+                self.assertIn(f'aria-current="page">RL {view}', page)
+                self.assertIn('href="/rl/prompts"', page)
+                self.assertIn('href="/rl/rollouts"', page)
+                self.assertNotIn('__RL_', page)
+                self.assertNotIn('__NAVIGATION__', page)
+
     def test_review_mount_saves_to_the_configured_file_and_rejects_other_origins(self):
         from io import BytesIO
         with tempfile.TemporaryDirectory() as folder:

@@ -3,26 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Artsy · RL monitor</title>
+<title>Artsy · __RL_TITLE__</title>
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/rl-monitor.css">
 <script src="/rl-monitor.js" defer></script>
 </head>
 <body>
 __NAVIGATION__
-<main class="rl-main">
+<main id="rl-main" class="rl-main" data-rl-view="__RL_VIEW__">
   <div class="page-heading">
-    <div><p class="eyebrow">READ-ONLY OBSERVABILITY</p><h1>RL monitor</h1></div>
-    <p class="page-description">Completed rollouts only. No changes to the RL trainer or sampling loop.</p>
+    <div><p class="eyebrow">READ-ONLY OBSERVABILITY</p><h1>__RL_TITLE__</h1></div>
+    <p class="page-description">__RL_DESCRIPTION__</p>
   </div>
-  <section class="rl-toolbar" aria-label="RL monitor settings">
+  <section class="rl-toolbar" aria-label="RL run settings">
     <label for="rl-run">RL run</label><select id="rl-run"></select>
-    <label for="rl-search">Filter</label><input id="rl-search" type="search" placeholder="Prompt, ID, outcome…">
     <button id="rl-refresh" type="button">Refresh now</button>
     <span id="rl-status" role="status">Loading…</span>
   </section>
-  <p class="rl-explanation">Polls every 30 seconds while this tab is visible. Reads at most 48 completed episodes from the latest three steps. Saved final images appear together as lazy-loaded thumbnails; source code is fetched only when you expand it. Results reflect the saved terminal scoring, not live model reasoning.</p>
-  <div id="rl-metrics" class="rl-metrics" aria-label="Recent rollout metrics"></div>
+  <section class="rl-prompts-view" aria-label="RL training prompts workspace">
   <section class="rl-prompt-browser" aria-label="All RL training prompts">
     <div class="rl-prompts-heading">
       <div>
@@ -44,6 +42,14 @@ __NAVIGATION__
       <button id="rl-prompt-next" type="button">Next</button>
     </div>
   </section>
+  </section>
+  <section class="rl-rollouts-view" aria-label="RL rollouts workspace">
+    <div class="rl-rollout-filter">
+      <label for="rl-search">Filter rollouts</label>
+      <input id="rl-search" type="search" placeholder="Prompt, ID, outcome…">
+    </div>
+    <p class="rl-explanation">Polls every 30 seconds while this tab is visible. Reads at most 48 completed episodes from the latest three steps. Saved final images appear together as lazy-loaded thumbnails; source code is fetched only when you expand it. Results reflect the saved terminal scoring, not live model reasoning.</p>
+    <div id="rl-metrics" class="rl-metrics" aria-label="Recent rollout metrics"></div>
   <div class="rl-layout">
     <section aria-label="Completed rollouts" class="rl-list-panel">
       <h2>Rollouts by prompt</h2>
@@ -53,6 +59,7 @@ __NAVIGATION__
       <h2>Episode details</h2><p>Select an image tile for a larger view, commands, detailed rewards, and source.</p>
     </section>
   </div>
+  </section>
 </main>
 </body>
 </html>

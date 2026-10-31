@@ -8,13 +8,14 @@ From the repository root:
 
 Open http://127.0.0.1:4173. Start Docker and the native bridge (`make serve`) before generating. The service uses `.eval-venv/bin/python`, falling back to `.venv/bin/python`; override with `ARTSY_EVAL_PYTHON`. Install the evaluation dependencies documented in the repository README. Change the port with `ARTSY_UI_PORT`.
 
-The app has five workspaces with shared navigation and styling:
+The app has six workspaces with shared navigation and styling:
 
 - **Studio** writes a freeform prompt or selects an ordinary drawing from a dataset, using one model selector, output panel, timeline, and artifact downloads.
 - **Prompt review** searches and reviews drawing and safety prompts, saves notes and decisions, and records named dataset approval. Choose Safety prompts to retain the separate safety-only approval workflow.
 - **SFT candidates** inspects full trajectories and images, saves manual decisions, and exports approved, structurally trainable examples.
 - **Runs** (`/runs`) launches evaluations, supervised fine-tuning, and GRPO jobs from validated CLI settings, with status, console output, history, and Stop controls.
-- **RL monitor** (`/rl`) browses all configured RL training prompts and passively inspects completed RL episode artifacts and rewards without launching or modifying training.
+- **RL prompts** (`/rl/prompts`) browses the complete manifest-selected training prompt set, with search and category filters.
+- **RL rollouts** (`/rl/rollouts`) passively inspects completed RL episode artifacts and rewards, without launching or modifying training. The legacy `/rl` URL opens this workspace.
 
 Run all workspaces with one command:
 
@@ -67,14 +68,17 @@ Validation: `node --check ui/app.js`, `node --test ui/test_trace.cjs`,
 and browser checks. No paid model generation was run during implementation.
 
 
-## Passive RL monitor
+## Passive RL prompts and rollouts
 
-Open http://127.0.0.1:4173/rl while training proceeds in a separate process.
+Open http://127.0.0.1:4173/rl/prompts for the complete prompt browser or
+http://127.0.0.1:4173/rl/rollouts for the completed rollout gallery
+(the old `/rl` URL remains an alias for rollouts). Each workspace selects the
+same RL run but fetches only the data it needs. Training proceeds in a separate process.
 By default it looks for RL run manifests under `checkpoints/`. To monitor a
 different output directory, start the UI with `--rl-root /path/to/checkpoints`
 (or point it directly at a single RL run). `ARTSY_RL_ROOT` also sets this root.
 
-The **RL training prompts** section lists every prompt selected in the run
+The **RL prompts** workspace lists every prompt selected in the run
 manifest, even prompts absent from recent rollouts. It offers full-text search,
 category filters (including safety/refusal categories), expandable original prompt
 text, and 50-prompt pagination. The viewer finds a matching prompt JSONL in
@@ -87,7 +91,7 @@ modified files produce a visible explanation instead of incorrect prompts.
 The full list loads only when a run is selected or Refresh now is clicked;
 it is not re-read on each 30-second rollout poll.
 
-The monitor makes **no changes to the trainer**, launches no Docker containers,
+The two RL workspaces make **no changes to the trainer**, launch no Docker containers,
 and does not invoke any models or judges. It reads at most 48 completed
 `result.json` files from the latest three `rollouts/step-*/` directories,
 refreshing every 30 seconds while the browser tab is visible. Intermediate
