@@ -201,15 +201,18 @@ def complete(body: dict):
         with SAMPLER_LOCK:
             samplers = getattr(app.state, 'samplers', {})
             app.state.samplers = samplers
-            profile = HOSTED_MODEL_PROFILES.get(model_id)
-            key = model_id if profile else selected['model_path']
+            base_model = selected.get('base_model') or model_id
+            profile = HOSTED_MODEL_PROFILES.get(base_model)
+            model_path = selected.get('model_path')
+            key = (base_model, model_path) if profile else model_path
             if key not in samplers:
                 if profile:
                     from .tinker_backend import TinkerBackend
-                    candidate = TinkerBackend(model_id, profile['revision'], IMAGE_SIZE,
+                    candidate = TinkerBackend(base_model, profile['revision'], IMAGE_SIZE,
+                        **({'model_path': model_path} if model_path else {}),
                         sampling_model_id=profile['sampling_model'], renderer_name=profile['renderer'])
                 else:
-                    candidate = backend.with_model_path(selected['model_path'])
+                    candidate = backend.with_model_path(model_path)
                 if len(samplers) >= 3:
                     samplers.pop(next(iter(samplers)))
                 samplers[key] = candidate
