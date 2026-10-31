@@ -118,8 +118,8 @@ The model selectors query the existing Artsy inference catalog and the local
 Qwen3.5, Qwen3.6 35B-A3B and Qwen3.8 27B fine-tunes, showing those currently
 advertised by the native bridge.
 Choices not served by a connected bridge are disabled; if the bridge is
-offline, known options are still shown with an offline warning. **SFT** offers
-base Qwen3.5 4B, Qwen3.6 35B-A3B, and Qwen3.8 27B vision models supported by the SFT trainer. The older Qwen3.5 35B-A3B chat checkpoint is retired on Tinker; select the Qwen3.6 vision model instead.
+offline, known options are still shown with an offline warning. **SFT** defaults to `Qwen/Qwen3.6-35B-A3B:peft:262144` (256K-context Tinker training model) and also offers
+Qwen3.5 4B and Qwen3.8 27B vision base models. The suffix is sent unchanged to Tinker; the tokenizer and image processor are loaded using the unsuffixed Hugging Face model ID. The older Qwen3.5 35B-A3B chat checkpoint is retired on Tinker; select the Qwen3.6 vision model instead.
 **RL** offers completed SFT checkpoint files as its initialization choices;
 RL final checkpoints are deliberately excluded. A **Refresh models** button
 finds newly saved checkpoints without restarting the UI, and each selector
