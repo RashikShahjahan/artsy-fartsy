@@ -15,6 +15,7 @@ from ui import rl_monitor, launch
 from urllib.request import urlopen
 
 from drawing.config import MODEL_ID
+from inference.model_catalog import LARGE_MODEL_ID, QWEN36_MODEL_ID
 from drawing.dataset_client import OPENROUTER_MODEL_URL
 from evaluation.suite import dataset_path
 
@@ -22,9 +23,27 @@ DIRECT_MODELS = [
     {"id": "openai/gpt-6-luna", "label": "GPT-6 Luna", "direct": True},
 ]
 
-def model_catalog():
-    return [{"id": MODEL_ID, "label": "Qwen3.5 · 4B", "model_path": None},
-            *[dict(model) for model in DIRECT_MODELS]]
+def model_catalog(bridge_models=None):
+    """Studio's default models plus saved fine-tunes advertised by the bridge."""
+    entries = [{"id": MODEL_ID, "label": "Qwen3.5 · 4B", "model_path": None},
+               {"id": QWEN36_MODEL_ID, "label": "Qwen3.6 · 35B-A3B", "model_path": None},
+               {"id": LARGE_MODEL_ID, "label": "Qwen3.8 · 27B", "model_path": None},
+               *[dict(model) for model in DIRECT_MODELS]]
+    known = {entry["id"] for entry in entries}
+    for entry in bridge_models or []:
+        model_id = entry.get("id")
+        if (not isinstance(model_id, str)
+                or not re.fullmatch(r"artsy/[A-Za-z0-9_.-]{1,150}", model_id)
+                or model_id in known
+                or not isinstance(entry.get("model_path"), str)
+                or not entry["model_path"].startswith("tinker://")
+                or entry.get("base_model") not in
+                    ("Qwen/Qwen3.5-4B", "Qwen/Qwen3.6-35B-A3B", "Qwen/Qwen3.8-27B")):
+            continue
+        entries.append({"id": model_id, "label": str(entry.get("label") or model_id)[:200],
+                        "model_path": entry["model_path"], "base_model": entry["base_model"]})
+        known.add(model_id)
+    return entries
 
 from drawing.dataset_specs import validate_specs
 
@@ -72,6 +91,9 @@ def generation_request(body):
         raise ValueError('Invalid request.')
     prompt, seed, model = body.get('prompt'), body.get('seed'), body.get('model')
     origin = {}
+    available_models = {item['id'] for item in model_catalog()}
+    if isinstance(model, str) and model.startswith("artsy/"):
+        available_models.update(item['id'] for item in model_catalog(bridge_model_catalog()))
     if 'prompt_id' in body:
         dataset = drawing_dataset()
         if body.get('dataset_sha256') != dataset['sha256']:
@@ -80,7 +102,7 @@ def generation_request(body):
         if not spec:
             raise ValueError('Drawing prompt not found in this dataset.')
         prompt, seed = spec['prompt'], spec['seed']
-        if model not in {item['id'] for item in model_catalog()}:
+        if model not in available_models:
             raise ValueError('Choose an available Studio model.')
         origin = {'prompt_id': spec['id'], 'dataset_sha256': dataset['sha256'],
                   'dataset_path': dataset['path']}
@@ -90,7 +112,7 @@ def generation_request(body):
         raise ValueError('Seed must be a nonnegative safe integer.')
     if not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9_./:-]{1,200}', model):
         raise ValueError('Enter a valid model ID.')
-    if model not in {item['id'] for item in model_catalog()}:
+    if model not in available_models:
         raise ValueError('Choose an available Studio model.')
     return {'prompt': prompt.strip(), 'seed': seed, 'model': model, **origin}
 
@@ -346,7 +368,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({'error': str(error)}, 400)
         if self.path == '/api/models':
             served = bridge_model_catalog()
-            catalog = {item['id']: item for item in model_catalog()}
+            catalog = {item['id']: item for item in model_catalog(served)}
             for item in served or []:
                 if item['id'] in catalog:
                     catalog[item['id']].update(item)

@@ -266,6 +266,35 @@ class CompletionTest(unittest.TestCase):
                 sampling_model_id=profile['sampling_model'], renderer_name=profile['renderer'])
             self.assertEqual(backend.generate.call_args.args[3], 262144)
 
+    def test_qwen36_and_qwen38_sft_model_use_matching_processors_and_saved_weights(self):
+        from drawing.config import IMAGE_SIZE
+        from inference.model_catalog import LARGE_MODEL_ID, QWEN36_MODEL_ID, HOSTED_MODEL_PROFILES
+        for base_model in (QWEN36_MODEL_ID, LARGE_MODEL_ID):
+            with self.subTest(base_model=base_model):
+                profile = HOSTED_MODEL_PROFILES[base_model]
+                entry = {
+                    'id': 'artsy/sft-vision', 'label': 'Completed SFT run',
+                    'base_model': base_model,
+                    'model_path': 'tinker://sft/sampler/weights',
+                    **profile,
+                }
+                app.state.samplers = {}
+                with patch('inference.server.model_catalog', return_value=[entry]), \
+                     patch('inference.tinker_backend.TinkerBackend') as backend_class:
+                    sampler = backend_class.return_value
+                    sampler.generate.return_value = (self.raw, 3, 2)
+                    for _ in range(2):
+                        response = complete({**self.body, 'model': entry['id']})
+                        self.assertEqual(response['model'], entry['id'])
+                    backend_class.assert_called_once_with(
+                        base_model, profile['revision'], IMAGE_SIZE,
+                        model_path=entry['model_path'],
+                        sampling_model_id=profile['sampling_model'],
+                        renderer_name=profile['renderer'])
+                    self.assertEqual(sampler.generate.call_args.args[3], 262144)
+                    self.assertEqual(sampler.generate.call_count, 2)
+                app.state.tinker.with_model_path.assert_not_called()
+
     def test_frontier_model_uses_native_tool_calls_and_its_context_limit(self):
         from inference.model_catalog import FRONTIER_MODEL_ID, HOSTED_MODEL_PROFILES
         app.state.samplers = {}
