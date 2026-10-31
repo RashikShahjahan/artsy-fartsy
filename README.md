@@ -14,7 +14,7 @@ artifacts have been retired; references to earlier releases below describe histo
 
 ## Unified UI
 
-Launch Studio, prompt and safety review, and SFT candidate inspection in one app:
+Launch Studio, reviews, inspection, training, and evaluation in one app:
 
 ```sh
 .venv/bin/python -m ui.server --dataset datasets/sft-v2/prompts.jsonl \
@@ -24,8 +24,10 @@ Launch Studio, prompt and safety review, and SFT candidate inspection in one app
 Open http://127.0.0.1:4173. Studio shares one generation workspace for freeform
 and dataset prompts; Prompt review and SFT candidates use the same navigation.
 See [UI setup and review outputs](ui/README.md). Docker and `make serve` are needed
-for generation; browsing and review work independently. The read-only RL monitor
-is available at `/rl` and reads completed rollout artifacts without instrumenting training.
+for generation; browsing and review work independently. The **Runs**
+workspace at `/runs` launches evaluation, SFT, and GRPO jobs with validated
+settings and live console output. The read-only RL monitor at `/rl` reads
+completed rollout artifacts without instrumenting training.
 ## Setup
 
 Requires Python 3.14 and `uv`.

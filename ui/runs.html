@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Artsy · Runs</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/runs.css">
+<script src="/runs.js" defer></script>
+</head>
+<body>
+__NAVIGATION__
+<main class="runs-main">
+  <div class="page-heading">
+    <div><p class="eyebrow">EXPERIMENT CONTROL</p><h1>Runs</h1></div>
+    <p class="page-description">Launch evaluation, supervised fine-tuning, or reinforcement learning with the existing Artsy CLIs.</p>
+  </div>
+  <div class="runs-layout">
+    <section class="runs-card" aria-label="New experiment">
+      <h2>New run</h2>
+      <p class="note">All runs use a unique local output directory. Training consumes Tinker credits; evaluations may also call model and judge services.</p>
+      <form id="launch-form">
+        <label for="run-kind">Workflow</label>
+        <select id="run-kind">
+          <option value="eval">Evaluation</option>
+          <option value="sft">SFT training</option>
+          <option value="rl">RL / GRPO training</option>
+        </select>
+        <p class="runs-help" id="kind-note"></p>
+        <div id="run-fields"></div>
+        <details class="runs-advanced" id="advanced">
+          <summary>Advanced settings</summary>
+          <div id="advanced-fields"></div>
+        </details>
+        <button class="primary" type="submit" id="launch-button">Launch evaluation</button>
+        <p class="runs-help">Only launching starts a job; changing settings does not.</p>
+        <p id="launch-status" role="status"></p>
+      </form>
+    </section>
+    <section class="runs-right" aria-label="Experiment history and output">
+      <div class="runs-card">
+        <div class="runs-heading"><h2>Run history</h2><button type="button" id="refresh-runs">Refresh</button></div>
+        <div id="runs-history" class="runs-history"><p class="note">Loading runs…</p></div>
+      </div>
+      <div class="runs-card runs-detail" aria-label="Selected experiment">
+        <div class="runs-heading"><h2 id="detail-title">Run details</h2><span id="detail-state" role="status">No run selected</span></div>
+        <p id="detail-meta" class="runs-help">Select a run to inspect its state, console output, and saved output directory.</p>
+        <div class="runs-actions">
+          <button id="cancel-run" type="button" hidden>Stop run</button>
+          <a id="monitor-link" href="/rl" hidden>View RL rollouts</a>
+        </div>
+        <details class="runs-advanced"><summary>Launch command</summary><pre id="run-command">—</pre></details>
+        <div class="runs-heading runs-console-heading"><h3>Console output (latest 100 KB)</h3><span id="run-updated" class="runs-help"></span></div>
+        <pre id="run-console" class="runs-console" aria-live="off">No output yet.</pre>
+      </div>
+    </section>
+  </div>
+</main>
+</body>
+</html>

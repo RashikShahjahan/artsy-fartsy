@@ -1,0 +1,34 @@
+.runs-main{max-width:1420px}
+.runs-layout{display:grid;grid-template-columns:minmax(290px,380px) minmax(0,1fr);gap:24px;align-items:start}
+.runs-right{min-width:0;display:grid;gap:20px}
+.runs-card{background:white;border:1px solid var(--border);border-radius:12px;padding:23px;min-width:0}
+.runs-card h2{font-size:17px;margin:0 0 12px}
+.runs-card h3{font-size:13px;margin:0}
+.runs-card label{margin-top:17px}
+.runs-card input,.runs-card select{width:100%}
+.runs-help{color:var(--muted);font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+.runs-input{margin:16px 0}
+.runs-input label{display:block;margin:0 0 7px}
+.runs-input small{display:block;margin:5px 0 0;font-size:11px}
+.runs-input input[type=checkbox]{width:auto;min-height:0}
+.runs-input.check{display:flex;align-items:center;gap:9px}
+.runs-input.check label{margin:0;cursor:pointer}
+.runs-advanced{margin:14px 0;border-top:1px solid var(--border);padding-top:14px}
+.runs-advanced summary{cursor:pointer;font-size:12px;font-weight:600}
+#launch-button{width:100%;margin-top:12px}
+#launch-status{font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+#launch-status.error{color:#9b4938}
+.runs-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.runs-heading button{font-size:12px;padding:6px 10px}
+.runs-history{max-height:320px;overflow-y:auto;display:grid;gap:7px}
+.runs-history button{padding:10px 12px;text-align:left;display:flex;gap:10px;justify-content:space-between;align-items:center;min-width:0}
+.runs-history button[aria-current=true]{border-color:var(--accent);background:#edf3eb}
+.runs-entry-name{min-width:0;overflow-wrap:anywhere;font-size:12px}
+.runs-entry-state{font-size:11px;color:var(--muted);white-space:nowrap}
+.runs-entry-meta{display:block;font-size:11px;color:var(--muted);margin-top:3px}
+.runs-actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:12px 0}
+.runs-actions button{border-color:#bc715e;color:#9b4938}
+.runs-console-heading{margin:22px 0 9px}
+.runs-console{background:#18231e;color:#daebde;min-height:220px;max-height:560px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5;margin:0}
+#detail-state{font-size:12px;color:var(--muted)}
+@media(max-width:850px){.runs-layout{grid-template-columns:minmax(0,1fr)}.runs-history{max-height:230px}}

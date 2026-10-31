@@ -11,7 +11,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 from urllib.parse import urlsplit, parse_qs
 from ui.shell import navigation, review_page, empty_page
-from ui import rl_monitor
+from ui import rl_monitor, launch
 from urllib.request import urlopen
 
 from drawing.config import MODEL_ID
@@ -248,6 +248,26 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({'error': 'Local requests only.'}, 403)
         if self.serve_workspace():
             return
+        if self.path == '/api/launches':
+            try:
+                size = int(self.headers.get('Content-Length', '0'))
+                if not 0 < size <= 20000:
+                    raise ValueError('Invalid request size.')
+                body = json.loads(self.rfile.read(size))
+                if not isinstance(body, dict):
+                    raise ValueError('Invalid launch request.')
+                result = launch.start(body.get('kind'), body.get('settings'))
+            except (OSError, ValueError, TypeError) as error:
+                return self.send_json({'error': str(error)}, 400)
+            except RuntimeError as error:
+                return self.send_json({'error': str(error)}, 409)
+            return self.send_json(result, 202)
+        cancel = re.fullmatch(r'/api/launches/([a-f0-9]{32})/cancel', self.path)
+        if cancel:
+            try:
+                return self.send_json(launch.cancel(cancel[1]))
+            except (ValueError, OSError) as error:
+                return self.send_json({'error': str(error)}, 409)
         if self.path != '/api/runs':
             return self.send_json({'error': 'Not found.'}, 404)
         try:
@@ -275,6 +295,14 @@ class Handler(SimpleHTTPRequestHandler):
         if self.serve_workspace():
             return
         target = urlsplit(self.path).path
+        if target == '/api/launches':
+            return self.send_json({'runs': launch.list_runs()})
+        launched = re.fullmatch(r'/api/launches/([a-f0-9]{32})', target)
+        if launched:
+            try:
+                return self.send_json(launch.get_run(launched[1]))
+            except (ValueError, OSError):
+                return self.send_json({'error': 'Run not found.'}, 404)
         if target == '/api/rl/runs':
             return self.send_json({'runs': rl_monitor.runs(RL_ROOT)})
         match = re.fullmatch(r'/api/rl/runs/([^/]+)/prompts', target)
@@ -351,13 +379,16 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(status)
         if self.path.startswith('/api/'):
             return self.send_json({'error': 'Not found.'}, 404)
+        if target in ('/runs', '/runs/'):
+            page = (ROOT / 'ui/runs.html').read_text().replace('__NAVIGATION__', navigation('runs'))
+            return self.send_page(page)
         if target in ('/rl', '/rl/'):
             page = (ROOT / 'ui/rl-monitor.html').read_text().replace('__NAVIGATION__', navigation('rl'))
             return self.send_page(page)
         if urlsplit(self.path).path in ('/', '/index.html', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
             return self.send_page(page)
-        if self.path not in ('/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css'):
+        if self.path not in ('/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 
