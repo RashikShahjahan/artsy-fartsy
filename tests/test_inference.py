@@ -295,6 +295,27 @@ class CompletionTest(unittest.TestCase):
                     self.assertEqual(sampler.generate.call_count, 2)
                 app.state.tinker.with_model_path.assert_not_called()
 
+    def test_grpo_step_alias_loads_the_published_checkpoint_sampler(self):
+        from drawing.config import IMAGE_SIZE
+        from inference.model_catalog import LARGE_MODEL_ID, HOSTED_MODEL_PROFILES
+        profile = HOSTED_MODEL_PROFILES[LARGE_MODEL_ID]
+        record = {'id': 'artsy/grpo-test--grpo-step-000023',
+                  'label': 'GRPO step 23', 'base_model': LARGE_MODEL_ID,
+                  'model_path': 'tinker://rl/sampler_weights/000023', **profile}
+        app.state.samplers = {}
+        with patch('inference.server.model_catalog', return_value=[record]), \
+             patch('inference.tinker_backend.TinkerBackend') as backend_class:
+            sampler = backend_class.return_value
+            sampler.generate.return_value = (self.raw, 3, 2)
+            response = complete({**self.body, 'model': record['id']})
+            self.assertEqual(response['model'], record['id'])
+            backend_class.assert_called_once_with(
+                LARGE_MODEL_ID, profile['revision'], IMAGE_SIZE,
+                model_path=record['model_path'],
+                sampling_model_id=profile['sampling_model'],
+                renderer_name=profile['renderer'])
+            self.assertEqual(sampler.generate.call_args.args[3], 262144)
+
     def test_frontier_model_uses_native_tool_calls_and_its_context_limit(self):
         from inference.model_catalog import FRONTIER_MODEL_ID, HOSTED_MODEL_PROFILES
         app.state.samplers = {}
