@@ -15,6 +15,7 @@ from ui import rl_monitor, launch
 from urllib.request import urlopen
 
 from drawing.config import MODEL_ID
+from inference.model_catalog import LARGE_MODEL_ID, QWEN36_MODEL_ID
 from drawing.dataset_client import OPENROUTER_MODEL_URL
 from evaluation.suite import dataset_path
 
@@ -25,6 +26,8 @@ DIRECT_MODELS = [
 def model_catalog(bridge_models=None):
     """Studio's default models plus saved fine-tunes advertised by the bridge."""
     entries = [{"id": MODEL_ID, "label": "Qwen3.5 · 4B", "model_path": None},
+               {"id": QWEN36_MODEL_ID, "label": "Qwen3.6 · 35B-A3B", "model_path": None},
+               {"id": LARGE_MODEL_ID, "label": "Qwen3.8 · 27B", "model_path": None},
                *[dict(model) for model in DIRECT_MODELS]]
     known = {entry["id"] for entry in entries}
     for entry in bridge_models or []:
