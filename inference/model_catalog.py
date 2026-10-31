@@ -113,7 +113,8 @@ def _grpo_step_entries(root):
                     except (ValueError, TypeError, AttributeError):
                         # Ignore incomplete lines while training appends records.
                         continue
-            entries.extend(entry for _, entry in sorted(steps.items()))
+            # Offer the newest saved policy first in large GRPO runs.
+            entries.extend(entry for _, entry in sorted(steps.items(), reverse=True))
         except (OSError, ValueError, TypeError, AttributeError):
             continue
     return entries
