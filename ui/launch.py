@@ -62,6 +62,67 @@ OPTIONS = {
     },
 }
 MODULES = {"eval": "evaluation.evaluate", "sft": "training.sft", "rl": "training.grpo"}
+
+
+def model_choices(bridge_models=None):
+    """Existing inference models and trainable SFT checkpoints for run forms.
+
+    A served model is selectable for evaluation. Checkpoint discovery is local
+    and metadata-only; it neither loads sampler weights nor starts a model.
+    """
+    from drawing.config import MODEL_ID
+    from inference.model_catalog import LARGE_MODEL_ID, model_catalog as inference_models
+
+    served = {row["id"] for row in bridge_models or []
+              if isinstance(row, dict) and isinstance(row.get("id"), str)}
+    known = {}
+    for entry in inference_models(ROOT):
+        model_id = entry.get("id")
+        if isinstance(model_id, str) and model_id:
+            known[model_id] = entry.get("label") or model_id
+    # Show bridge-advertised models even when they were not in the local cache.
+    for entry in bridge_models or []:
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+            known.setdefault(entry["id"], entry.get("label") or entry["id"])
+    evaluation = [
+        {"value": model_id, "label": label, "available": model_id in served}
+        for model_id, label in known.items()
+    ]
+    # The SFT trainer validates these Qwen base model families; its --model
+    # argument does not accept an existing fine-tune sampler checkpoint.
+    sft = [
+        {"value": MODEL_ID, "label": "Qwen3.5 · 4B · base"},
+        {"value": LARGE_MODEL_ID, "label": "Qwen3.8 · 27B · base"},
+    ]
+    checkpoints = []
+    for file in (ROOT / "checkpoints").glob("*/final.json"):
+        try:
+            record = json.loads(file.read_text(encoding="utf-8"))
+            config = record.get("config")
+            if not isinstance(config, dict) or config.get("algorithm") is not None:
+                continue  # GRPO final.json is not a valid SFT initialization.
+            base_model = config.get("model")
+            if (not isinstance(base_model, str) or not base_model.startswith("Qwen/")
+                    or not isinstance(config.get("renderer"), str)
+                    or type(config.get("lora_rank")) is not int or config["lora_rank"] < 1
+                    or any(not isinstance(record.get(key), str)
+                           or not record[key].startswith("tinker://")
+                           for key in ("state_path", "sampler_path"))):
+                continue
+            relative = file.relative_to(ROOT).as_posix()
+            checkpoints.append((file.stat().st_mtime, {
+                "value": relative,
+                "label": f"{file.parent.name} · {base_model} · step {record.get('step', 'final')}",
+                "model": base_model,
+            }))
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+    checkpoints.sort(key=lambda entry: entry[0], reverse=True)
+    return {
+        "eval": evaluation, "sft": sft,
+        "rl": [entry for _, entry in checkpoints],
+        "bridge_online": bridge_models is not None,
+    }
 IDENTIFIER = re.compile(r"[a-f0-9]{32}\Z")
 MODEL = re.compile(r"[a-zA-Z0-9_./:+-]{1,200}\Z")
 

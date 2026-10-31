@@ -32,3 +32,9 @@
 .runs-console{background:#18231e;color:#daebde;min-height:220px;max-height:560px;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5;margin:0}
 #detail-state{font-size:12px;color:var(--muted)}
 @media(max-width:850px){.runs-layout{grid-template-columns:minmax(0,1fr)}.runs-history{max-height:230px}}
+
+/* Existing model and checkpoint selection in the run launcher. */
+.runs-model-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0;padding:12px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.runs-model-toolbar .runs-help{flex:1;min-width:180px}
+.runs-model-toolbar button{font-size:12px;white-space:nowrap;padding:7px 10px}
+.runs-input select+input[type=text]:not([hidden]){margin-top:8px}

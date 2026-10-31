@@ -4,7 +4,7 @@
 // interpolated into shell commands; the server builds the argv itself.
 const fields = {
   eval: [
-    ["model", "Evaluation model", "text", "", "e.g. Qwen/Qwen3.5-4B", "Must match the connected inference endpoint."],
+    ["model", "Evaluation model", "catalog", "", "e.g. Qwen/Qwen3.5-4B", "Choose a model advertised by the inference bridge, or enter an ID manually."],
     ["dataset", "Prompt dataset (optional)", "text", "", "Defaults to the frozen evaluation benchmark.", ""],
     ["limit", "Limit samples", "int", "", "All prompts", ""],
     ["max_samples", "Concurrent samples", "int", "10", "", ""],
@@ -16,7 +16,7 @@ const fields = {
   ],
   sft: [
     ["dataset", "Accepted training JSONL", "text", "datasets/sft-v2/accepted.jsonl", "", "Required. Use SFT candidates to export approved data."],
-    ["model", "Base model (optional)", "text", "", "CLI default", "Qwen3.5 / Qwen3.8 vision model."],
+    ["model", "SFT base model", "catalog", "", "Qwen/Qwen3.8-27B", "The SFT trainer accepts Qwen3.5 or Qwen3.8 base models, not saved fine-tune sampler IDs."],
     ["epochs", "Epochs", "int", "1", "", ""],
     ["batch_size", "Batch size", "int", "8", "", ""],
     ["learning_rate", "Learning rate", "float", "0.0002", "", "", true],
@@ -28,7 +28,7 @@ const fields = {
   ],
   rl: [
     ["dataset", "RL prompt dataset", "text", "datasets/grpo-v2/prompts.jsonl", "", ""],
-    ["init_checkpoint", "Initial SFT checkpoint", "text", "", "CLI default", "Path to final.json from an SFT run."],
+    ["init_checkpoint", "Initial SFT checkpoint", "catalog", "", "checkpoints/run/final.json", "Choose a completed SFT checkpoint; GRPO uses its optimizer and sampler state."],
     ["continue_from", "Continue from previous RL run (optional)", "text", "", "checkpoints/previous-run", "Forks an existing completed run with optimizer state.", true],
     ["additional_steps", "Additional updates when continuing", "int", "", "Required only for continuation", "", true],
     ["max_steps", "Maximum optimizer updates", "int", "", "All updates", ""],
@@ -50,6 +50,8 @@ const descriptions = {
 };
 const $ = id => document.getElementById(id);
 const saved = {};
+let modelChoices = {eval: [], sft: [], rl: []};
+let bridgeOnline = false;
 let selectedId = new URLSearchParams(location.hash.slice(1)).get("run");
 let activeKind = "eval";
 let refreshing = false;
@@ -57,7 +59,27 @@ let submitting = false;
 
 function fieldValue(input) {
   if (input.type === "checkbox") return input.checked;
+  if (input.tagName === "SELECT" && input.dataset.option && input.value === "__custom__") {
+    return document.getElementById(input.id + "-custom").value.trim();
+  }
   return input.value.trim();
+}
+function updateManualInput(select, input) {
+  const custom = select.value === "__custom__";
+  input.hidden = !custom;
+  input.disabled = !custom;
+}
+async function loadModelChoices() {
+  const result = await request("/api/launches/models");
+  saveFields();
+  modelChoices = {eval: result.eval || [], sft: result.sft || [], rl: result.rl || []};
+  bridgeOnline = Boolean(result.bridge_online);
+  const wasOpen = $("advanced").open;
+  renderFields(activeKind);
+  $("advanced").open = wasOpen;
+  $("model-choice-status").textContent =
+    modelChoices.eval.length + " inference models, " + modelChoices.rl.length +
+    " saved SFT checkpoints" + (bridgeOnline ? "" : " · inference bridge offline");
 }
 function saveFields() {
   const values = saved[activeKind] || {};
@@ -77,7 +99,42 @@ function makeField(spec, value) {
   input.dataset.option = name;
   labelEl.htmlFor = input.id;
   labelEl.textContent = label;
-  if (type === "bool") {
+  if (type === "catalog") {
+    const select = document.createElement("select");
+    select.id = input.id;
+    select.dataset.option = name;
+    const fallback = document.createElement("option");
+    fallback.value = "";
+    fallback.textContent = name === "init_checkpoint" ? "Use CLI default checkpoint" : "Use CLI default model";
+    select.append(fallback);
+    for (const item of modelChoices[activeKind]) {
+      const option = document.createElement("option");
+      option.value = item.value;
+      option.textContent = item.label +
+        (activeKind === "eval" && bridgeOnline && !item.available ? " · not served" : "");
+      if (activeKind === "eval" && bridgeOnline && !item.available) option.disabled = true;
+      select.append(option);
+    }
+    const custom = document.createElement("option");
+    custom.value = "__custom__";
+    custom.textContent = "Enter a custom " + (name === "init_checkpoint" ? "checkpoint path" : "model ID") + "…";
+    select.append(custom);
+    const manual = document.createElement("input");
+    manual.id = select.id + "-custom";
+    manual.type = "text";
+    manual.placeholder = placeholder || "Enter a value";
+    const existing = [...select.options].some(option => option.value === value && !option.disabled);
+    select.value = existing ? value : "__custom__";
+    if (!existing && value) manual.value = value;
+    updateManualInput(select, manual);
+    wrapper.append(labelEl, select, manual);
+    select.addEventListener("change", () => {
+      updateManualInput(select, manual);
+      saveFields();
+      updateContinuation();
+    });
+    manual.addEventListener("input", () => { saveFields(); updateContinuation(); });
+  } else if (type === "bool") {
     input.type = "checkbox";
     input.checked = Boolean(value);
     wrapper.append(input, labelEl);
@@ -95,8 +152,10 @@ function makeField(spec, value) {
     note.textContent = help;
     wrapper.append(note);
   }
-  input.addEventListener("input", () => { saveFields(); updateContinuation(); });
-  input.addEventListener("change", () => { saveFields(); updateContinuation(); });
+  if (type !== "catalog") {
+    input.addEventListener("input", () => { saveFields(); updateContinuation(); });
+    input.addEventListener("change", () => { saveFields(); updateContinuation(); });
+  }
   return wrapper;
 }
 function updateContinuation() {
@@ -264,7 +323,13 @@ $("cancel-run").addEventListener("click", async () => {
   } catch (error) { message(error.message, true); }
 });
 $("refresh-runs").addEventListener("click", () => refresh().catch(error => message(error.message, true)));
+$("refresh-models").addEventListener("click", () => loadModelChoices().catch(error => {
+  $("model-choice-status").textContent = "Model discovery failed: " + error.message;
+}));
 renderFields(activeKind);
+loadModelChoices().catch(error => {
+  $("model-choice-status").textContent = "Model discovery failed: " + error.message + " · enter a custom value.";
+});
 refresh().catch(error => message(error.message, true));
 window.setInterval(() => {
   if (!document.hidden) refresh().catch(error => message(error.message, true));

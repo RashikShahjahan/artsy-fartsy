@@ -108,6 +108,18 @@ Open **Runs** at http://127.0.0.1:4173/runs. Choose a workflow, edit
 its CLI settings, and click **Launch**. A confirmation is shown before every
 non-dry-run launch because these jobs can consume model credits and compute.
 
+The model selectors query the existing Artsy inference catalog and the local
+`checkpoints/*/final.json` records. **Evaluation** lists base and saved
+fine-tuned models, showing those currently advertised by the native bridge.
+Choices not served by a connected bridge are disabled; if the bridge is
+offline, known options are still shown with an offline warning. **SFT** offers
+base Qwen3.5 4B and Qwen3.8 27B models supported by the SFT trainer.
+**RL** offers completed SFT checkpoint files as its initialization choices;
+RL final checkpoints are deliberately excluded. A **Refresh models** button
+finds newly saved checkpoints without restarting the UI, and each selector
+retains a custom-entry option. These selectors do not change which models
+the underlying bridge can actually serve or which models Tinker supports.
+
 - **Evaluation** calls `evaluation.evaluate` using `.eval-venv/bin/python` when
   available, falling back to `.venv`. Set an evaluation model that is actually
   served by your configured bridge/provider; evaluation is not limited to

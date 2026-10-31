@@ -295,6 +295,8 @@ class Handler(SimpleHTTPRequestHandler):
         if self.serve_workspace():
             return
         target = urlsplit(self.path).path
+        if target == '/api/launches/models':
+            return self.send_json(launch.model_choices(bridge_model_catalog()))
         if target == '/api/launches':
             return self.send_json({'runs': launch.list_runs()})
         launched = re.fullmatch(r'/api/launches/([a-f0-9]{32})', target)
