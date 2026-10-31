@@ -113,7 +113,7 @@ The model selectors query the existing Artsy inference catalog and the local
 fine-tuned models, showing those currently advertised by the native bridge.
 Choices not served by a connected bridge are disabled; if the bridge is
 offline, known options are still shown with an offline warning. **SFT** offers
-base Qwen3.5 4B and Qwen3.8 27B models supported by the SFT trainer.
+base Qwen3.5 4B, Qwen3.6 35B-A3B, and Qwen3.8 27B vision models supported by the SFT trainer. The older Qwen3.5 35B-A3B chat checkpoint is retired on Tinker; select the Qwen3.6 vision model instead.
 **RL** offers completed SFT checkpoint files as its initialization choices;
 RL final checkpoints are deliberately excluded. A **Refresh models** button
 finds newly saved checkpoints without restarting the UI, and each selector
