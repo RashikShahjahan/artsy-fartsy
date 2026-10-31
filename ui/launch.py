@@ -71,7 +71,7 @@ def model_choices(bridge_models=None):
     and metadata-only; it neither loads sampler weights nor starts a model.
     """
     from drawing.config import MODEL_ID
-    from inference.model_catalog import LARGE_MODEL_ID, model_catalog as inference_models
+    from inference.model_catalog import LARGE_MODEL_ID, QWEN36_MODEL_ID, model_catalog as inference_models
 
     served = {row["id"] for row in bridge_models or []
               if isinstance(row, dict) and isinstance(row.get("id"), str)}
@@ -92,6 +92,7 @@ def model_choices(bridge_models=None):
     # argument does not accept an existing fine-tune sampler checkpoint.
     sft = [
         {"value": MODEL_ID, "label": "Qwen3.5 · 4B · base"},
+        {"value": QWEN36_MODEL_ID, "label": "Qwen3.6 · 35B-A3B · base"},
         {"value": LARGE_MODEL_ID, "label": "Qwen3.8 · 27B · base"},
     ]
     checkpoints = []
