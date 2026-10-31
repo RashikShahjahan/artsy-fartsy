@@ -1,6 +1,7 @@
 /* Passive RL monitor: fetch only saved artifacts, never talk to the trainer. */
 "use strict";
 const byId = id => document.getElementById(id);
+const view = byId("rl-main").dataset.rlView === "prompts" ? "prompts" : "rollouts";
 const state = {run: null, rows: [], selected: null, busy: false, detailRequest: 0,
   renderedRows: null, episodeButtons: new Map(), prompts: [], promptRun: null,
   promptPage: 0, promptRequest: 0, promptMessage: null};
@@ -306,27 +307,37 @@ async function refresh(reloadPrompts = false) {
     }
     selector.value = state.run || "";
     if (!state.run) {
-      state.rows = [];
-      ++state.promptRequest;
-      state.promptRun = null;
-      state.prompts = [];
-      state.promptMessage = "No RL run selected.";
-      renderPrompts();
-      state.renderedRows = null;
-      state.episodeButtons.clear();
-      byId("rl-metrics").replaceChildren();
-      byId("rl-episodes").replaceChildren(element("p",
-        "No RL training manifests found. Configure --rl-root to point at the checkpoints directory or a single run.", "rl-empty"));
+      if (view === "prompts") {
+        ++state.promptRequest;
+        state.promptRun = null;
+        state.prompts = [];
+        state.promptMessage = "No RL run selected.";
+        renderPrompts();
+      } else {
+        state.rows = [];
+        state.renderedRows = null;
+        state.episodeButtons.clear();
+        byId("rl-metrics").replaceChildren();
+        byId("rl-episodes").replaceChildren(element("p",
+          "No RL training manifests found. Configure --rl-root to point at the checkpoints directory or a single run.", "rl-empty"));
+      }
       setStatus("No runs found");
       return;
     }
-    if (state.promptRun !== state.run || reloadPrompts) loadPrompts(state.run);
-    const data = await getJson("/api/rl/runs/" + encodeURIComponent(state.run));
-    state.rows = data.episodes || [];
-    metrics(state.rows, data);
-    renderRows();
-    setStatus("Updated " + new Date().toLocaleTimeString() +
-      (data.limited ? " · showing most recent " + data.maxEpisodes + " episodes" : ""));
+    if (view === "prompts") {
+      // The full dataset is independent of the bounded rollout feed.
+      // Avoid polling or downloading episode artifacts on the prompts page.
+      if (state.promptRun !== state.run || reloadPrompts) await loadPrompts(state.run);
+      setStatus("Updated " + new Date().toLocaleTimeString());
+    } else {
+      // The rollouts page never reads the full prompt dataset.
+      const data = await getJson("/api/rl/runs/" + encodeURIComponent(state.run));
+      state.rows = data.episodes || [];
+      metrics(state.rows, data);
+      renderRows();
+      setStatus("Updated " + new Date().toLocaleTimeString() +
+        (data.limited ? " · showing most recent " + data.maxEpisodes + " episodes" : ""));
+    }
   } catch (err) {
     setStatus(String(err));
   } finally {
@@ -344,10 +355,12 @@ function schedule() {
 byId("rl-refresh").onclick = async () => { await refresh(true); schedule(); };
 byId("rl-run").onchange = async event => {
   state.run = event.target.value;
-  state.selected = null;
-  ++state.detailRequest;
-  byId("rl-detail").replaceChildren(element("h2", "Episode details"),
-    element("p", "Select an episode to inspect.", "rl-empty"));
+  if (view === "rollouts") {
+    state.selected = null;
+    ++state.detailRequest;
+    byId("rl-detail").replaceChildren(element("h2", "Episode details"),
+      element("p", "Select an episode to inspect.", "rl-empty"));
+  }
   await refresh();
   schedule();
 };
