@@ -19,7 +19,7 @@ function createNode(tag = "div") {
   };
 }
 function fixture(fetchImpl = () => { throw new Error("Unexpected network request"); },
-                 view = "rollouts", visible = false) {
+                 view = "rollouts", visible = false, onlyCurrent = false) {
   const nodes = new Map();
   for (const name of ["rl-main", "rl-status", "rl-metrics", "rl-episodes",
     "rl-search", "rl-run", "rl-refresh", "rl-detail",
@@ -28,6 +28,14 @@ function fixture(fetchImpl = () => { throw new Error("Unexpected network request
     nodes.set(name, createNode());
   }
   nodes.get("rl-main").dataset.rlView = view;
+  if (onlyCurrent) {
+    const missing = view === "rollouts"
+      ? ["rl-prompt-search", "rl-prompt-category", "rl-prompts-status",
+         "rl-prompt-total", "rl-prompt-list", "rl-prompt-pager",
+         "rl-prompt-prev", "rl-prompt-next", "rl-prompt-page"]
+      : ["rl-search", "rl-episodes", "rl-metrics", "rl-detail"];
+    for (const id of missing) nodes.delete(id);
+  }
   const document = {
     hidden: true, // No network traffic or timers from the browser startup.
     createElement: tag => createNode(tag),
@@ -279,4 +287,32 @@ test("RL rollouts workspace fetches only recent episodes", async () => {
   assert.deepEqual(urls, ["/api/rl/runs", "/api/rl/runs/training"]);
   assert.equal(state.rows.length, 1);
   assert.equal(state.prompts.length, 0);
+});
+
+test("two physically separate RL pages work without controls from the other page", async () => {
+  for (const view of ["prompts", "rollouts"]) {
+    const urls = [];
+    const {state, refresh, nodes} = fixture(async url => {
+      urls.push(url);
+      const data = url === "/api/rl/runs"
+        ? {runs: [{id: "training", finished: false}]}
+        : view === "prompts"
+          ? {run: "training", available: true, prompts: [
+              {index: 1, id: "p1", prompt: "Draw a circle", category: "drawing", skills: []}
+            ]}
+          : {steps: ["step-000001"], maxEpisodes: 48,
+             episodes: [row("step-000001", "p1", "e1")]};
+      return {ok: true, json: async () => data};
+    }, view, true, true);
+    await refresh();
+    assert.deepEqual(urls, ["/api/rl/runs", view === "prompts"
+      ? "/api/rl/runs/training/prompts" : "/api/rl/runs/training"]);
+    if (view === "prompts") {
+      assert.equal(state.prompts.length, 1);
+      assert.equal(nodes.has("rl-episodes"), false);
+    } else {
+      assert.equal(state.rows.length, 1);
+      assert.equal(nodes.has("rl-prompt-list"), false);
+    }
+  }
 });
