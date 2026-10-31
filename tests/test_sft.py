@@ -671,12 +671,14 @@ class TrainingCLITests(unittest.TestCase):
              patch("training.sft.create_encoder", return_value=lambda example: [datum]) as encoder, \
              patch("training.sft.train") as train, \
              contextlib.redirect_stdout(io.StringIO()):
+            variant = "Qwen/Qwen3.6-35B-A3B:peft:262144"
             main(["--dataset", "accepted.jsonl", "--output-dir", str(Path(temp) / "sft"),
-                  "--model", "Qwen/Qwen3.6-35B-A3B"])
+                  "--model", variant])
             encoder.assert_called_once()
             self.assertEqual(encoder.call_args.args[0], "Qwen/Qwen3.6-35B-A3B")
             train.assert_called_once()
-            self.assertEqual(train.call_args.args[0].model, "Qwen/Qwen3.6-35B-A3B")
+            self.assertEqual(train.call_args.args[0].model, variant)
+            self.assertEqual(train.call_args.args[0].max_length, 262144)
             with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
                 main(["--dataset", "accepted.jsonl", "--output-dir", str(Path(temp) / "other"),
                       "--model", "Qwen/Qwen3.5-35B-A3B-Base"])

@@ -16,7 +16,7 @@ const fields = {
   ],
   sft: [
     ["dataset", "Accepted training JSONL", "text", "datasets/sft-v2/accepted.jsonl", "", "Required. Use SFT candidates to export approved data."],
-    ["model", "SFT base model", "catalog", "", "Qwen/Qwen3.8-27B", "The SFT trainer accepts Qwen3.5 4B, Qwen3.6 35B-A3B, or Qwen3.8 27B base models, not saved fine-tune sampler IDs."],
+    ["model", "SFT training model", "catalog", "Qwen/Qwen3.6-35B-A3B:peft:262144", "Qwen/Qwen3.6-35B-A3B:peft:262144", "Defaults to Qwen3.6 35B-A3B with 256K context. Other base training models can be selected; saved fine-tune sampler aliases are not supported."],
     ["epochs", "Epochs", "int", "1", "", ""],
     ["batch_size", "Batch size", "int", "8", "", ""],
     ["learning_rate", "Learning rate", "float", "0.0002", "", "", true],

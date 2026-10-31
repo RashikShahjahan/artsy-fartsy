@@ -92,7 +92,8 @@ def model_choices(bridge_models=None):
     # argument does not accept an existing fine-tune sampler checkpoint.
     sft = [
         {"value": MODEL_ID, "label": "Qwen3.5 · 4B · base"},
-        {"value": QWEN36_MODEL_ID, "label": "Qwen3.6 · 35B-A3B · base"},
+        {"value": QWEN36_MODEL_ID + ":peft:262144",
+         "label": "Qwen3.6 · 35B-A3B · 256K context"},
         {"value": LARGE_MODEL_ID, "label": "Qwen3.8 · 27B · base"},
     ]
     checkpoints = []

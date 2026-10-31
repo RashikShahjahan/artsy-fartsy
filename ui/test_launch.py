@@ -49,6 +49,12 @@ class LauncherTests(unittest.TestCase):
                                            "dry_run": True}, "b" * 32)
             self.assertIn("--dataset", sft)
             self.assertIn("--dry-run", sft)
+            variant = "Qwen/Qwen3.6-35B-A3B:peft:262144"
+            variant_command, _ = launch.command("sft", {
+                "dataset": "accepted.jsonl", "model": variant
+            }, "b" * 32)
+            self.assertEqual(variant_command[
+                variant_command.index("--model") + 1], variant)
             with self.assertRaisesRegex(ValueError, "Additional steps requires"):
                 launch.command("rl", {"additional_steps": 5}, "c" * 32)
             with self.assertRaisesRegex(ValueError, "inherits training settings"):
@@ -102,7 +108,11 @@ class LauncherTests(unittest.TestCase):
             self.assertTrue(eval_models["artsy/trained"]["available"])
             self.assertFalse(eval_models["Qwen/Qwen3.5-4B"]["available"])
             self.assertEqual({item["value"] for item in choices["sft"]},
-                             {"Qwen/Qwen3.5-4B", "Qwen/Qwen3.6-35B-A3B", "Qwen/Qwen3.8-27B"})
+                             {"Qwen/Qwen3.5-4B", "Qwen/Qwen3.6-35B-A3B:peft:262144",
+                              "Qwen/Qwen3.8-27B"})
+            qwen36 = next(item for item in choices["sft"]
+                          if item["value"].startswith("Qwen/Qwen3.6-"))
+            self.assertIn("256K", qwen36["label"])
             with patch("inference.model_catalog.model_catalog", return_value=entries):
                 offline = launch.model_choices()
             self.assertFalse(offline["bridge_online"])
