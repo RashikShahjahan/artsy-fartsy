@@ -88,7 +88,9 @@ def generation_request(body):
         raise ValueError('Invalid request.')
     prompt, seed, model = body.get('prompt'), body.get('seed'), body.get('model')
     origin = {}
-    available_models = {item['id'] for item in model_catalog(bridge_model_catalog())}
+    available_models = {item['id'] for item in model_catalog()}
+    if isinstance(model, str) and model.startswith("artsy/"):
+        available_models.update(item['id'] for item in model_catalog(bridge_model_catalog()))
     if 'prompt_id' in body:
         dataset = drawing_dataset()
         if body.get('dataset_sha256') != dataset['sha256']:
