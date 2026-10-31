@@ -364,11 +364,14 @@ byId("rl-run").onchange = async event => {
   await refresh();
   schedule();
 };
-byId("rl-search").oninput = renderRows;
-byId("rl-prompt-search").oninput = () => { state.promptPage = 0; renderPrompts(); };
-byId("rl-prompt-category").onchange = () => { state.promptPage = 0; renderPrompts(); };
-byId("rl-prompt-prev").onclick = () => { state.promptPage -= 1; renderPrompts(); };
-byId("rl-prompt-next").onclick = () => { state.promptPage += 1; renderPrompts(); };
+if (view === "rollouts") {
+  byId("rl-search").oninput = renderRows;
+} else {
+  byId("rl-prompt-search").oninput = () => { state.promptPage = 0; renderPrompts(); };
+  byId("rl-prompt-category").onchange = () => { state.promptPage = 0; renderPrompts(); };
+  byId("rl-prompt-prev").onclick = () => { state.promptPage -= 1; renderPrompts(); };
+  byId("rl-prompt-next").onclick = () => { state.promptPage += 1; renderPrompts(); };
+}
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) { refresh(); schedule(); }
 });
