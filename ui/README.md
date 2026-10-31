@@ -72,8 +72,10 @@ and browser checks. No paid model generation was run during implementation.
 
 Open http://127.0.0.1:4173/rl/prompts for the complete prompt browser or
 http://127.0.0.1:4173/rl/rollouts for the completed rollout gallery
-(the old `/rl` URL remains an alias for rollouts). Each workspace selects the
-same RL run but fetches only the data it needs. Training proceeds in a separate process.
+(the old `/rl` URL remains an alias for rollouts). Each workspace has its own
+HTML page, so the other workspace cannot appear even if old CSS is cached.
+They share a run selector but fetch only their own data. Training proceeds in a separate process.
+After updating, restart `python -m ui.server` so the new routes load.
 By default it looks for RL run manifests under `checkpoints/`. To monitor a
 different output directory, start the UI with `--rl-root /path/to/checkpoints`
 (or point it directly at a single RL run). `ARTSY_RL_ROOT` also sets this root.
