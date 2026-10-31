@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Artsy · __RL_TITLE__</title>
+<link rel="stylesheet" href="/style.css?v=rl-split-2">
+<link rel="stylesheet" href="/rl-monitor.css?v=rl-split-2">
+<script src="/rl-monitor.js?v=rl-split-2" defer></script>
+</head>
+<body>
+__NAVIGATION__
+<main id="rl-main" class="rl-main" data-rl-view="__RL_VIEW__">
+  <div class="page-heading">
+    <div><p class="eyebrow">READ-ONLY OBSERVABILITY</p><h1>__RL_TITLE__</h1></div>
+    <p class="page-description">__RL_DESCRIPTION__</p>
+  </div>
+  <section class="rl-toolbar" aria-label="RL run settings">
+    <label for="rl-run">RL run</label><select id="rl-run"></select>
+    <button id="rl-refresh" type="button">Refresh now</button>
+    <span id="rl-status" role="status">Loading…</span>
+  </section>
+  <section class="rl-prompts-view" aria-label="RL training prompts workspace">
+  <section class="rl-prompt-browser" aria-label="All RL training prompts">
+    <div class="rl-prompts-heading">
+      <div>
+        <h2>RL training prompts <span id="rl-prompt-total"></span></h2>
+        <p>Every prompt selected for this run, including those not in recent rollouts. The original dataset must match the training manifest.</p>
+      </div>
+      <div class="rl-prompt-controls">
+        <label for="rl-prompt-search">Search prompts</label>
+        <input id="rl-prompt-search" type="search" placeholder="Text, ID, skill, family…">
+        <label for="rl-prompt-category">Category</label>
+        <select id="rl-prompt-category"><option value="">All categories</option></select>
+      </div>
+    </div>
+    <p id="rl-prompts-status" role="status" class="rl-empty">Loading run prompts…</p>
+    <div id="rl-prompt-list" class="rl-training-prompts"></div>
+    <div class="rl-prompt-pager" id="rl-prompt-pager" hidden>
+      <button id="rl-prompt-prev" type="button">Previous</button>
+      <span id="rl-prompt-page"></span>
+      <button id="rl-prompt-next" type="button">Next</button>
+    </div>
+  </section>
+  </section>
+</main>
+</body>
+</html>
