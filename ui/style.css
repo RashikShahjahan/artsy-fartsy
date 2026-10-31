@@ -50,3 +50,8 @@ label,.field-label{display:block;font-size:12px;font-weight:550;margin:0 0 9px}i
 .candidates-page .message-card{margin:14px 0;border:1px solid var(--border);border-radius:8px;padding:16px}.candidates-page .message-card>summary{font-weight:600;text-transform:capitalize}
 .candidates-page .image-dialog{width:min(95vw,1200px);max-height:95vh;border:1px solid var(--border);border-radius:12px;padding:20px}.candidates-page .image-dialog::backdrop{background:#182a21b3}.candidates-page .image-dialog img{display:block;max-width:100%;height:auto;margin:16px auto 0}.candidates-page figure>button{display:block;margin-top:8px}
 @media(max-width:700px){.candidates-page .record-field{grid-template-columns:minmax(0,1fr);gap:4px}.candidates-page .candidate-tabs button{flex:1}.candidates-page .field-list{padding-left:8px}}
+
+/* Main navigation adapts to the two independently addressable RL views. */
+.app-header{flex-wrap:wrap;column-gap:24px;row-gap:0}
+.app-header nav{flex-wrap:wrap;gap:0 18px}
+@media(max-width:950px){.app-header{padding-top:10px;padding-bottom:10px;gap:10px 24px}.app-header nav{order:3;width:100%;align-self:auto}.app-header nav a{padding:10px 0}.prototype{margin-left:auto}}
