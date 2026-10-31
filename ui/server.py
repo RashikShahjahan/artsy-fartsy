@@ -413,7 +413,8 @@ class Handler(SimpleHTTPRequestHandler):
             description = ('Browse the full prompt selection for an RL run.'
                            if view == 'prompts'
                            else 'Inspect completed rollout images, rewards, and saved episode artifacts.')
-            page = (ROOT / 'ui/rl-monitor.html').read_text()
+            template = 'rl-prompts.html' if view == 'prompts' else 'rl-monitor.html'
+            page = (ROOT / 'ui' / template).read_text()
             page = (page.replace('__NAVIGATION__', navigation('rl-' + view))
                         .replace('__RL_VIEW__', view)
                         .replace('__RL_TITLE__', title)
@@ -422,7 +423,7 @@ class Handler(SimpleHTTPRequestHandler):
         if urlsplit(self.path).path in ('/', '/index.html', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
             return self.send_page(page)
-        if self.path not in ('/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css'):
+        if target not in ('/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 
