@@ -102,7 +102,7 @@ class LauncherTests(unittest.TestCase):
             self.assertTrue(eval_models["artsy/trained"]["available"])
             self.assertFalse(eval_models["Qwen/Qwen3.5-4B"]["available"])
             self.assertEqual({item["value"] for item in choices["sft"]},
-                             {"Qwen/Qwen3.5-4B", "Qwen/Qwen3.8-27B"})
+                             {"Qwen/Qwen3.5-4B", "Qwen/Qwen3.6-35B-A3B", "Qwen/Qwen3.8-27B"})
             with patch("inference.model_catalog.model_catalog", return_value=entries):
                 offline = launch.model_choices()
             self.assertFalse(offline["bridge_online"])
