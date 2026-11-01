@@ -201,7 +201,21 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                     }).encode())
                 return response()
 
-            with patch("training.cookbook_env._docker", new=AsyncMock(side_effect=docker)):
+            image_judges_started = set()
+            both_started = asyncio.Event()
+            original_judge = session._judge
+
+            async def concurrent_judge(role, *args, **kwargs):
+                if role in {"safety", "adherence"}:
+                    image_judges_started.add(role)
+                    if len(image_judges_started) == 2:
+                        both_started.set()
+                    # Sequential judging would time out here.
+                    await asyncio.wait_for(both_started.wait(), timeout=1)
+                return await original_judge(role, *args, **kwargs)
+
+            with patch("training.cookbook_env._docker", new=AsyncMock(side_effect=docker)), \
+                 patch.object(session, "_judge", side_effect=concurrent_judge):
                 reward, metrics = await session.grade([])
             self.assertEqual(reward, 0.0)
             self.assertEqual(metrics["render_valid"], 1.0)

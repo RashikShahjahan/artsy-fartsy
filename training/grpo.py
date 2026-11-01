@@ -264,7 +264,7 @@ async def train(args, specs, plan, total):
     from tinker_cookbook.rl import train as cookbook
     from training.cookbook_env import configure_concurrency
 
-    configure_concurrency(args.max_samples)
+    configure_concurrency(args.max_samples, args.group_size)
     config = make_cookbook_config(args, specs, plan, total)
     await cookbook.main(config)
     # Retain Artsy's model-catalog format for make serve, evaluation and the UI.

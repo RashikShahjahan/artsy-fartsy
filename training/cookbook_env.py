@@ -34,12 +34,14 @@ SOURCE_BYTES = 64 * 1024
 NO_TOOL_REMINDER = 'Every response must contain a bash tool call with {"command":"..."}.'
 
 _session_limit: asyncio.Semaphore | None = None
+_group_limit: asyncio.Semaphore | None = None
 
 
-def configure_concurrency(max_samples: int) -> None:
+def configure_concurrency(max_samples: int, group_size: int = 4) -> None:
     """Limit concurrent long-lived Docker workspaces across all prompt groups."""
-    global _session_limit
+    global _session_limit, _group_limit
     _session_limit = asyncio.Semaphore(max_samples)
+    _group_limit = asyncio.Semaphore(max(1, max_samples // group_size))
 
 
 def _run(argv: list[str], *, stdin: bytes | None = None, timeout: float = 30) -> subprocess.CompletedProcess:
@@ -277,14 +279,15 @@ class DockerSession:
                 result["imageHash"] = hashlib.sha256(png).hexdigest()
                 result["scores"]["render_valid"] = 1.0
                 self.png = png
-                judgment = await self._judge("safety", safety_judge_prompt(self.spec["prompt"]),
-                                             parse_safety_judgment, png)
-                result["imageSafety"] = judgment
-                result["unsafe"] |= judgment["harmful"]
-                judgment = await self._judge("adherence", adherence_rubric_prompt(self.spec["prompt"]),
-                                             parse_adherence_rubric, png)
-                result["judgment"] = judgment
-                result["scores"]["adherence"] = judgment["score"] / 4.0
+                safety, adherence = await asyncio.gather(
+                    self._judge("safety", safety_judge_prompt(self.spec["prompt"]),
+                                parse_safety_judgment, png),
+                    self._judge("adherence", adherence_rubric_prompt(self.spec["prompt"]),
+                                parse_adherence_rubric, png))
+                result["imageSafety"] = safety
+                result["unsafe"] |= safety["harmful"]
+                result["judgment"] = adherence
+                result["scores"]["adherence"] = adherence["score"] / 4.0
         self.result = result
         (self.directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
         return 0.0, {
@@ -344,6 +347,7 @@ class ArtsyGroupBuilder:
         self.normalize_rewards = normalize_rewards
         self.model, self.renderer, self.revision = model, renderer, revision
         self.sessions: list[DockerSession] = []
+        self._owns_group_slot = False
 
     async def make_envs(self):
         from tinker_cookbook.rl.message_env import EnvFromMessageEnv, MessageStepResult
@@ -377,6 +381,11 @@ class ArtsyGroupBuilder:
                     self._countdown()
                 return result
 
+        # Admit whole groups so partially started groups cannot exhaust slots
+        # while waiting for trajectories needed before group cleanup.
+        if _group_limit is not None:
+            await _group_limit.acquire()
+            self._owns_group_slot = True
         environments = []
         for _ in range(self.group_size):
             session = DockerSession(self.spec,
@@ -408,8 +417,13 @@ class ArtsyGroupBuilder:
         return environments
 
     async def cleanup(self):
-        await asyncio.gather(*(session.close() for session in self.sessions))
-        self.sessions.clear()
+        try:
+            await asyncio.gather(*(session.close() for session in self.sessions))
+        finally:
+            self.sessions.clear()
+            if self._owns_group_slot:
+                _group_limit.release()
+                self._owns_group_slot = False
 
     async def compute_group_rewards(self, trajectories, envs):
         """Return final reward adjustments, leaving mean-centering to Cookbook."""
