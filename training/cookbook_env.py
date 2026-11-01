@@ -408,7 +408,9 @@ class ArtsyGroupBuilder:
                 terminate_on_parse_error=True, terminate_on_length=True,
                 max_trajectory_tokens=self.max_length,
                 # Runner clips each response to remaining context space.
-                max_generation_tokens=None,
+                # Reserve one output token: an exactly full prompt cannot sample.
+                # The runner still clips the actual response to remaining capacity.
+                max_generation_tokens=1,
                 context_overflow_reward=0.0,
                 rollout_limits=RolloutLimits(
                     max_turns=agent_settings()["agent"]["step_limit"],

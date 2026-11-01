@@ -382,7 +382,10 @@ class NativeContextTests(unittest.IsolatedAsyncioTestCase):
             with patch('training.cookbook_env.encoder', return_value=SimpleNamespace(renderer=renderer)), \
                  patch('training.cookbook_env.initial_messages', return_value=[]):
                 env, = await builder.make_envs()
-                self.assertIsNone(env.max_generation_tokens)
+                self.assertEqual(env.max_generation_tokens, 1)
+                self.assertFalse(env._exceeds_context_limit(262143))
+                self.assertTrue(env._exceeds_context_limit(262144))
+                self.assertTrue(env._exceeds_context_limit(262145))
                 self.assertIsNone(env.rollout_limits.max_sampled_tokens)
                 self.assertIsNone(env.rollout_limits.max_turn_tokens)
                 self.assertIsNone(env.rollout_limits.max_tool_calls)
