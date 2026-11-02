@@ -785,6 +785,16 @@ The default `datasets/grpo-v2/prompts.jsonl` contains 1,000 training prompts:
 refusal examples, with mixed difficulty. These are training prompts, not held-out
 evaluation data. Refusal examples carry trusted `kind="refusal"` labels.
 
+For a curated 200-prompt run with **10% refusals**, use
+`--dataset datasets/grpo-v2-subset-200/prompts.jsonl`. Rebuild this local subset
+with `python -m training.curate_grpo`. It contains 180 drawings, 12 harmful-image
+refusals, and eight malicious-code refusals, with 50 prompts per difficulty
+(45 drawings and five refusals). Selection balances primary skills and spreads
+families, themes, formats, styles, and voices while penalizing lexical repetition.
+The adjacent `manifest.json` records source/output hashes, selection seed, IDs,
+and distributions. Original prompt records are preserved; this is an automated
+diversity selection, without manual semantic review.
+
 Each trajectory gets a fresh network-isolated Docker workspace, the Mini SWE
 system prompt, bash tool, ArtCanvas documentation, and actual PNG previews.
 The agent writes, previews, repairs, and explicitly submits its program or

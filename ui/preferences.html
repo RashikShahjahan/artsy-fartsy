@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Artsy · Blind ranking</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/preferences.css"><script src="/preferences.js" defer></script></head>
+<body>__NAVIGATION__<main class="preference-main">
+<div class="page-heading"><div><p class="eyebrow">HUMAN EVALUATION</p><h1>Blind image ranking</h1></div></div>
+<p>Compare three outputs for the same prompt and seed. Judge how well each follows the prompt and its visual quality. Model identities and judge scores stay hidden until you finish.</p>
+<form id="start"><label>Reviewer name <input id="reviewer" required maxlength="80" autocomplete="name"></label><button type="submit">Start / resume review</button></form>
+<p id="status" role="status" aria-live="polite"></p>
+<section id="review" hidden><div class="preference-toolbar"><button id="previous" type="button">Previous</button><span id="position"></span><button id="next" type="button">Next</button><button id="unranked" type="button">Next unranked</button></div>
+<h2 id="prompt"></h2><div class="preference-images" id="images"></div>
+<p>1 = best, 3 = worst. Equal ranks mean a tie; use 1, 1, 1 if all are equal. Click an image to inspect it at full size.</p>
+<div class="preference-toolbar"><button id="save" type="button">Save ranking and continue</button><button id="reveal" type="button" disabled>Finish and reveal preference scores</button></div>
+<p>All 40 drawing prompts appear once, including benign boundary prompts. Each model uses its first valid, automatically screened saved image across the three repetitions. If none exists, its card shows no image; rank that outcome alongside the others. Authored refusal prompts are excluded.</p></section>
+<section id="results" hidden><h2>Your preference scores</h2><p>Pairwise win = 1, tie = ½, loss = 0. Scores run from 0–100 and give every unique prompt equal weight. Rankings are now locked to preserve the blind review.</p><div id="score-table"></div></section>
+<dialog id="zoom"><button id="close-zoom" type="button">Close image</button><img alt="Full-size anonymous output"></dialog>
+</main></body></html>

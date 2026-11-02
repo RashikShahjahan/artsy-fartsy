@@ -7,6 +7,7 @@ def navigation(current):
     links = [('studio', '/', 'Studio'), ('review', '/review', 'Prompt review'),
              ('candidates', '/candidates', 'SFT candidates'),
              ('runs', '/runs', 'Runs'),
+             ('preferences', '/preferences', 'Blind ranking'),
              ('rl-prompts', '/rl/prompts', 'RL prompts'),
              ('rl-rollouts', '/rl/rollouts', 'RL rollouts')]
     return '<header class="app-header"><a class="brand" href="/">Artsy<span class="brand-dot">.</span></a><nav aria-label="Main navigation">' + ''.join(

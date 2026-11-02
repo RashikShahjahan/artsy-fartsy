@@ -11,7 +11,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 from urllib.parse import urlsplit, parse_qs
 from ui.shell import navigation, review_page, empty_page
-from ui import rl_monitor, launch
+from ui import rl_monitor, launch, preferences
 from urllib.request import urlopen
 
 from drawing.config import MODEL_ID
@@ -175,6 +175,17 @@ def run_job(directory, request):
             ACTIVE = None
 
 
+PREFERENCE_REVIEW = None
+
+
+def preference_review():
+    global PREFERENCE_REVIEW
+    with LOCK:
+        if PREFERENCE_REVIEW is None:
+            PREFERENCE_REVIEW = preferences.Review(ROOT)
+        return PREFERENCE_REVIEW
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT / 'ui'), **kwargs)
@@ -270,6 +281,20 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({'error': 'Local requests only.'}, 403)
         if self.serve_workspace():
             return
+        if self.path in ('/api/preferences/rank', '/api/preferences/reveal'):
+            try:
+                size = int(self.headers.get('Content-Length', '0'))
+                if not 0 < size <= 4096:
+                    raise ValueError('Invalid request size.')
+                body = json.loads(self.rfile.read(size))
+                if not isinstance(body, dict):
+                    raise ValueError('Expected an object.')
+                review = preference_review()
+                result = (review.results(body.get('reviewer')) if self.path.endswith('/reveal') else
+                          review.save(body.get('reviewer'), body.get('case'), body.get('ranks')))
+                return self.send_json(result)
+            except (ValueError, TypeError) as error:
+                return self.send_json({'error': str(error)}, 400)
         if self.path == '/api/launches':
             try:
                 size = int(self.headers.get('Content-Length', '0'))
@@ -317,6 +342,28 @@ class Handler(SimpleHTTPRequestHandler):
         if self.serve_workspace():
             return
         target = urlsplit(self.path).path
+        if target in ('/preferences', '/preferences/'):
+            return self.send_page((ROOT/'ui/preferences.html').read_text().replace(
+                '__NAVIGATION__', navigation('preferences')))
+        if target == '/api/preferences' or target.startswith('/api/preferences/image/'):
+            try:
+                name = parse_qs(urlsplit(self.path).query).get('reviewer', [''])[0]
+                review = preference_review()
+                if target == '/api/preferences':
+                    return self.send_json(review.packet(name))
+                match = re.fullmatch(r'/api/preferences/image/([a-f0-9]{24})/([012])', target)
+                if not match:
+                    raise ValueError('Unknown image.')
+                data = review.image(name, match[1], int(match[2]))
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/png')
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            except (ValueError, TypeError) as error:
+                return self.send_json({'error': str(error)}, 400)
         if target == '/api/launches/models':
             return self.send_json(launch.model_choices(bridge_model_catalog()))
         if target == '/api/launches':
@@ -423,7 +470,7 @@ class Handler(SimpleHTTPRequestHandler):
         if urlsplit(self.path).path in ('/', '/index.html', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
             return self.send_page(page)
-        if target not in ('/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css'):
+        if target not in ('/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 

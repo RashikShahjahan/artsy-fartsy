@@ -177,3 +177,24 @@ to explicitly choose an interpreter.
 
 Local checks: `python -m unittest ui.test_launch ui.test_server`,
 `node --check ui/runs.js`.
+
+## Blind ranking
+
+Open `/preferences` to rank Base, Parent SFT, and New GRPO outputs for all 40
+unique drawing prompts, once each (including benign boundary cases). Enter a
+reviewer name to start or resume. For each model, select the earliest repetition
+with a matching prompt/seed, verified image hash, valid render, and no automatic
+harmful-image or malicious-code flag. If none exists, show a no-image outcome
+rather than omitting the prompt. This uses existing outputs without generation.
+
+Images appear as A/B/C in a stable, independently shuffled order per case and
+reviewer. Model names, paths, and automatic scores are not included in ranking
+responses. Rank 1 is best; equal ranks are ties. Save all cases before revealing
+scores. Revealing permanently locks that reviewer's votes. Each pairwise win earns
+1, a tie 0.5, and a loss 0; each model's two comparisons are averaged, then unique prompts are averaged and multiplied by 100.
+Scores are separate per reviewer, not an automatic quality/safety metric.
+
+Rankings persist in `eval-results/human-preferences/rankings.json`; per-reviewer
+score JSON files are exported there on reveal. The private mapping stays on the
+server. Changing image bytes creates new case IDs rather than reusing old votes.
+This is a local trusted-reviewer workflow, not authenticated multi-user access.
