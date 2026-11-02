@@ -1,950 +1,468 @@
-# Artsy drawing environment
+# Artsy
 
-Qwen/Qwen3.5-4B → host-side Inspect agent → Docker bash → Python/ArtCanvas → PNG + editable source.
+Train and evaluate models that draw with Python. An agent writes ArtCanvas code,
+inspects PNG previews, repairs its work, and submits an image with editable source.
+The project includes a local web UI, teacher dataset generation, hosted LoRA SFT,
+GRPO training, and an independent Inspect evaluation harness.
 
-Includes the Qwen model adapter, a versioned drawing API, a model-independent
-episode environment, an Inspect SWE write → run → fix → submit loop, and a base-model evaluation script.
+Model sampling and training run on Tinker; tokenization and image processing run
+locally. The bundled inference bridge defaults to `Qwen/Qwen3.5-4B`. Dataset
+authors and evaluation/RL judges default to GPT-6 Luna through OpenRouter when
+configured with [`.env.example`](.env.example).
 
-The active SFT collection is `datasets/sft-v2/`: the 25-prompt pilot plus 200 new prompts,
-with complete batch provenance and artifacts. `candidates.jsonl` retains all outcomes;
-`training-ready.jsonl` contains structurally valid trajectories with their review status
-preserved. Review and export `accepted.jsonl` in the UI before training. Generated data,
-evaluation outputs and checkpoints remain local and Git-ignored. Older generated
-artifacts have been retired; references to earlier releases below describe historical runs.
-
-## Unified UI
-
-Launch Studio, reviews, inspection, training, and evaluation in one app:
-
-```sh
-.venv/bin/python -m ui.server --dataset datasets/sft-v2/prompts.jsonl \
-  --candidates datasets/sft-v2/candidates.jsonl
-```
-
-Open http://127.0.0.1:4173. Studio shares one generation workspace for freeform
-and dataset prompts; Prompt review and SFT candidates use the same navigation.
-See [UI setup and review outputs](ui/README.md). Docker and `make serve` are needed
-for generation; browsing and review work independently. The **Runs**
-workspace at `/runs` launches evaluation, SFT, and GRPO jobs with validated
-settings and live console output. The read-only RL monitor at `/rl` reads
-completed rollout artifacts without instrumenting training.
 ## Setup
 
-Requires Python 3.14 and `uv`.
-Drawing and evaluation use Docker Engine 24.0.6+ and Docker Compose 2.22+;
-start Docker before running either command. Dataset generation and `.venv/bin/python -m drawing.run`
-continue to execute locally and require Cairo. Run commands from the repository root.
+Run commands from the repository root. Use Python 3.14 and `uv` for the project
+environment. Evaluation can use a separate Python 3.12 environment because Inspect
+and inference have different dependency constraints.
 
 ```sh
 uv venv --python 3.14 .venv
-uv pip install --python .venv/bin/python -r inference/requirements-tinker.txt -r drawing/requirements.txt
+uv pip install --python .venv/bin/python \
+  -r inference/requirements-tinker.txt -r drawing/requirements.txt
 
-# Authenticate once, or set TINKER_API_KEY in .env:
-.venv/bin/tinker auth login
-
-# Inspect has separate dependency constraints from the inference server.
 uv venv --python 3.12 .eval-venv
-uv pip install --python .eval-venv/bin/python -r evaluation/requirements.txt -r runtime/requirements.txt
+uv pip install --python .eval-venv/bin/python \
+  -r evaluation/requirements.txt -r runtime/requirements.txt
+```
 
-# Start the native Tinker sampling bridge. Leave it running in this terminal.
-# The bridge handles images and tool-call formatting for Qwen3.5.
+For a new setup, copy `.env.example` to `.env` and fill in the keys:
+
+- `TINKER_API_KEY` authenticates hosted inference and training. Alternatively,
+  authenticate with `.venv/bin/tinker auth login`.
+- `OPENROUTER_API_KEY` authenticates the configured prompt writer, teacher, and
+  evaluation/RL judges.
+
+Drawing, evaluation, and GRPO load the repository's `.env`; exported environment
+variables take precedence. For the standalone SFT CLI, export `TINKER_API_KEY` in
+your shell or use Tinker CLI credentials. Generated datasets, episodes, evaluation results, checkpoints, caches,
+and `.env` are Git-ignored. A fresh checkout does not include training data or
+trained checkpoints. Paths under `datasets/` and `checkpoints/` below refer to
+local artifacts you must generate or supply.
+
+Drawing through the UI, Inspect evaluation, and RL require Docker Engine 24.0.6+
+with Compose 2.22+. Start Docker before those workflows. Dataset generation and
+`drawing.run` execute Python locally and require system Cairo:
+
+```sh
+# macOS
+brew install cairo
+
+# Debian/Ubuntu
+sudo apt-get install libcairo2 fonts-dejavu-core
+```
+
+## Draw and review in the UI
+
+Start the native Tinker bridge in one terminal:
+
+```sh
 HF_HOME="$PWD/.cache/huggingface" make serve
 ```
 
-In another terminal:
+Start the UI in another:
 
 ```sh
-# Confirm native sampling handles both tools and a PNG preview (uses Tinker credits):
+make ui
+```
+
+Open [http://127.0.0.1:4173](http://127.0.0.1:4173). Studio generates drawings;
+Prompt review and SFT candidates review training data; Runs launches evaluation,
+SFT, and GRPO jobs. RL prompts and RL rollouts browse saved training artifacts.
+The `/preferences` workspace supports blind ranking of existing model outputs.
+Browsing and review do not require Docker or a running bridge. Generation and
+training consume provider credits.
+
+To review a local dataset, pass its files explicitly:
+
+```sh
+make ui ARGS="--dataset datasets/my-run/prompts.jsonl --candidates datasets/my-run/candidates.jsonl"
+```
+
+Without `--dataset`, Studio and Prompt review use the frozen evaluation suite.
+Studio offers Qwen3.5 4B, Qwen3.6 35B-A3B, Qwen3.8 27B, GPT-6 Luna, and compatible
+saved checkpoints advertised by the bridge. GPT-6 Luna uses OpenRouter directly
+and does not require the local bridge. See [UI configuration, reviews, job
+controls, and RL monitoring](ui/README.md).
+
+## Draw from the CLI
+
+With Docker and `make serve` running:
+
+```sh
+# Paid preflight: check native tool calling and inline PNG input.
 .eval-venv/bin/python -m evaluation.check_tinker
 
-.eval-venv/bin/python -m evaluation.draw "Draw a blue circle centered on a white background."
+make draw ARGS='"Draw a blue circle centered on a white background."'
 
-# Choose a persistent episode directory and seed:
-.eval-venv/bin/python -m evaluation.draw "Draw three red squares." --episode episodes/squares --seed 42
+.eval-venv/bin/python -m evaluation.draw "Draw three red squares." \
+  --episode episodes/squares --seed 42
 ```
 
-The CLI prints a submission record. Episodes save Inspect transcripts under `logs/`,
-scored artifacts under `artifacts/`, and final `program.py`, `image.png`, and
-`result.json` with source/image hashes. Completed requests with matching prompt,
-seed, model, endpoint, and artifact hashes are reused. Interrupted or failed
-requests require a new episode directory. There is no Pi SQLite session or automatic
-interrupted-session resume. Only one process should own an episode directory.
+The host-side Inspect agent uses bash in a fresh network-isolated Docker sandbox.
+It writes `/workspace/program.py`, receives actual PNG preview observations, and
+finishes with `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`. The scorer renders the
+latest source afresh and validates the final 1920×1200 PNG. A refusal uses
+`refusal.json` with a concise `reason` and no `program.py`; it also requires the
+submission command. A stale preview or textual completion claim cannot pass.
 
-By default, evaluation targets the bundled server at `http://127.0.0.1:8080/v1`.
-That server uses Tinker's **native `SamplingClient`** for hosted inference while
-performing tokenization and image processing locally, requiring public Hugging
-Face model metadata (not a local model weight download). It translates Qwen's
-tool-call tags into OpenAI tool calls and uses
-the `qwen3_5_disable_thinking` renderer by default (Qwen3.8 uses
-`qwen3_8_disable_thinking`). It accepts inline base64 PNG previews
-and limits their visual-token resolution; the original preview is kept intact.
-Set `ARTSY_TINKER_MODEL_PATH` in `.env` to serve a `tinker://` sampler checkpoint.
-The local bridge is a development server, not a public API service.
-The native sampling API returns complete responses, so the bridge requires
-`stream=false` (the default) and rejects streaming requests before sampling.
-Tinker is the only bundled inference backend; the retired MLX and local PyTorch paths
-are no longer installed or supported.
+Episodes retain Inspect logs, scored artifacts, and final `program.py`,
+`image.png`, and `result.json` with hashes. Completed matching requests can be
+reused. Interrupted requests or changed artifacts require a new episode directory;
+only one process should own each directory. Studio saves its runs under
+`episodes/ui/` and exports completed traces for inspection.
 
-**Do not set `ARTSY_MODEL_URL` to Tinker's beta OpenAI-compatible endpoint for
-Qwen3.5 vision evaluations.** That endpoint currently rejects image inputs for
-`Qwen/Qwen3.5-4B` even though the model and native sampling API support vision.
-If an old `.env` or shell export specifies that URL, remove it; leave
-`ARTSY_MODEL_URL` unset to use the native bridge. `ARTSY_MODEL_URL` is still
-supported for other explicitly configured OpenAI-compatible providers.
+### Inference configuration
 
-## Drawing API
+The bridge listens at `http://127.0.0.1:8080/v1` and uses Tinker's native
+`SamplingClient`. It downloads tokenizer/image-processor metadata rather than
+model weights and translates model-native tool calls into OpenAI tool calls.
+Qwen sampling uses the family's `disable_thinking` renderer. Requests must use
+`stream=false`; streaming is rejected before sampling.
 
-[ArtCanvas documentation](docs/artcanvas.md) lists every original method.
-`runtime/artcanvas.py` extends Artsy's original implementation with composable
-paths, transforms, dimension validation, and idempotent saving. The Python runtime
-uses Cairo via compatible `cairocffi` bindings. The runtime ID is `artcanvas-v2`.
-Generated programs import `ArtCanvas` from `artcanvas` and save `output.png`.
-The default dimensions remain 1920×1200; drawings can explicitly choose another
-size up to 4096×4096. A fixed Python random seed is injected for every render.
+Set `ARTSY_TINKER_MODEL_PATH=tinker://...` to serve a sampler checkpoint through
+the default model alias. Compatible completed checkpoints are also discovered
+from `checkpoints/*/final.json`; intermediate GRPO samplers are discovered from
+training manifests and `checkpoints.jsonl`. The catalog refreshes periodically.
+Model profiles live in [`inference/model_catalog.py`](inference/model_catalog.py).
+The bridge is a local development service.
 
-## Harness and execution
+For Qwen3.5 vision, use the native bridge rather than Tinker's beta
+OpenAI-compatible endpoint, which the project's preflight identifies as rejecting
+image input for this model. Leave `ARTSY_MODEL_URL` unset for the bridge. To use
+another OpenAI-compatible provider, set `ARTSY_MODEL_URL` and, if needed,
+`ARTSY_MODEL_API_KEY`; judge credentials are configured independently.
 
-`evaluation.host_agent.drawing_agent()` runs the tool loop on the host with a
-fresh Docker sandbox per request. Its bash tool writes `/workspace/program.py`, runs previews,
-and repairs errors. The supplied preview command returns execution feedback and
-the actual PNG as a multimodal observation. The agent finishes with
-`echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`; the scorer then executes its latest
-source again in a fresh directory and validates a 1920×1200 PNG. A textual claim
-or stale preview cannot count as a submission. A structured refusal is represented
-by `refusal.json` containing a concise `reason`, with no `program.py`. Both outputs require the explicit
-submission command to pass.
-
-The container has no outbound network or host mounts. Inspect proxies model calls
-through the host to the native Tinker bridge (or another configured endpoint).
-Inspect and model clients run on the host. The container contains the drawing
-runtime and tools; it has no agent framework or model SDK.
-Evaluation defaults to 25 model turns, with no separate environment-operation cap,
-episode deadline, model-request deadline, cumulative output-token budget, or
-explicit per-response token cap. Both renderers allow 60 seconds,
-64 KiB of source and an 8 MiB PNG. Evaluation's
-bash timeout is 65 seconds to leave room for render cleanup; its Docker workspace
-has no additional CPU or memory quota. Local-model cost lookup is disabled.
-Use `--max-tokens N` to add a per-response output cap; `--max-tokens 0` uses
-provider capacity. The native bridge uses the selected model's remaining context
-without the former 16,000-token clip. `--token-limit N` changes the episode
-generated-output budget; `--token-limit 0` disables it.
-`--token-limit-type all` counts cumulative input plus
-output when a budget is supplied. `--time-limit 600` allows ten minutes per
-episode and model request, while preserving the 60-second render timeout.
-The native bridge explicitly selects
-`Qwen/Qwen3.5-4B:peft:262144` for base sampling and when loading saved SFT/RL
-weights; Tinker's unsuffixed model ID otherwise defaults to 65,536 tokens.
-It uses a 262,144-token context window per request and clips the response
-budget to the space remaining in that window. Its `/health` response reports
-the selected hosted model, context window, and per-response output ceiling. The container has
-2 GiB memory and two CPUs. Fresh scoring renders bound logs, source and PNG sizes,
-kill the render process group on timeout, and clean their temporary directories.
-
-The model-independent dataset renderer still runs local Python processes.
-Set `ARTSY_PYTHON` to select the Python interpreter (defaults to `.venv/bin/python`
-when present, otherwise `python3`). Install Cairo with `sudo apt-get install
-libcairo2 fonts-dejavu-core` on Debian/Ubuntu, or `brew install cairo` on macOS.
-
-The separate `DrawingEnvironment` limits in `drawing/environment.py` include unlimited preview
-repairs within twenty operations, a five-minute deadline, 64 KiB source, and 8 MiB PNG.
-Rendering success establishes code validity, not instruction accuracy or image
-safety. The dataset generator below supports teacher generation and an independent
-visual evaluator. Reward calibration and held-out validation remain checklist items; SFT and RL training adapters are implemented.
-
-## Model-independent episodes
-
-Run an existing program without a model server:
-
-```sh
-.venv/bin/python -m drawing.run examples/transforms.py --prompt "Draw twelve golden shapes" --seed 42
-```
-
-Teacher generation, training rollouts, and evaluations can use the same local
-renderer through `DrawingEnvironment` in `drawing/environment.py`:
-
-```python
-import asyncio
-from pathlib import Path
-from drawing.environment import DrawingEnvironment
-
-async def render():
-    env = DrawingEnvironment("episodes/pilot")
-    await env.reset("Draw a blue circle", 42)
-    await env.write_code(Path("examples/circle.py").read_text())
-    preview = await env.run_code()
-    # Use errors to repair with write_code(), then render the latest source afresh.
-    result = await env.submit()
-    print(result)
-    # For an unsupported request, finish with await env.refuse(reason) instead.
-
-asyncio.run(render())
-```
-
-`ENVIRONMENT_CONFIG` versions the defaults: 1920×1200 output, no separate preview cap,
-twenty operations, a five-minute episode deadline, 262,144 generated tokens,
-64 KiB source, and 8 MiB PNG. Supply a config copy to choose dimensions or budgets.
-Training adapters report generated tokens through `charge_tokens(count)`; the core
-does not tokenize model output. The Mini SWE adapter has its own model-turn/token
-limits and evaluates fixed-size canvases; the standalone renderer retains support
-for variable canvas sizes.
-
-Every reset creates a new episode directory and clears source, counters, and
-terminal state while retaining earlier episode artifacts. Each directory contains
-`episode.json` (prompt, seed, config), `trajectory.jsonl` (ordered operations,
-source edits, feedback, and image references), and `state.json`. Successful
-submission adds `program.py`, `image.png`, and `submission.json` with source/image
-hashes. Previews are saved separately. Feedback contains errors, exit status,
-elapsed milliseconds, dimensions, and artifact paths; image bytes stay in storage.
-Outcomes are `active`, `submitted`, `refused`, `budget_exhausted`, and `timed_out`.
-Invalid operations consume the call budget. Infrastructure failures are labeled
-separately and may be retried within the remaining budget. Operations are sequential;
-use one environment instance per rollout. Reset starts a new episode. Mini SWE
-transcripts are retained as Inspect logs.
-
-Seeds reproduce Python `random` and hash ordering within the same runtime.
-Python packages are pinned in `runtime/requirements.txt`; development currently
-uses Python 3.12.12. System Cairo and font versions still depend on the host, so
-cross-platform pixel identity is not guaranteed.
-
-## Evaluate the base model
-
-The drawing CLI and evaluation use the same host-side Inspect agent, Docker bash
-sandbox, model endpoint, API documentation, limits and trusted final-render scorer.
-The shared default is `evaluation/generated-50-2026-10-28/prompts.jsonl`, frozen by
-`evaluation/benchmark-v3/manifest.json`: 35 drawings, five benign boundary prompts,
-five harmful-image refusals and five malicious-code refusals. The user marked this
-set safe for evaluation on 2026-10-28. Keep these prompts out of training.
-
-Evaluation requires successful explicit submission and uses the same integer 0–4
-adherence rubric as RL, normalized to 0–1. Refusal protocol success and human
-semantic refusal quality are reported separately. See [checkpoint comparisons,
-blind review and calibration](docs/benchmark.md).
-
-```sh
-# Validate the test set and show the plan without model requests or Docker:
-.eval-venv/bin/python -m evaluation.evaluate --dry-run
-
-# With `make serve` running, check execution on one sample:
-.eval-venv/bin/python -m evaluation.evaluate --execution-only --limit 1 --output eval-results/base-smoke
-
-# Full evaluations use separate adherence, image-safety and code-safety roles:
-export OPENROUTER_API_KEY=your-openrouter-api-key
-export ARTSY_CORRECTNESS_JUDGE_MODEL=openai/gpt-6-luna
-export ARTSY_SAFETY_JUDGE_MODEL=openai/gpt-6-luna
-export ARTSY_CODE_SAFETY_JUDGE_MODEL=openai/gpt-6-luna
-export ARTSY_CORRECTNESS_JUDGE_URL=https://openrouter.ai/api/v1
-export ARTSY_SAFETY_JUDGE_URL=https://openrouter.ai/api/v1
-export ARTSY_CODE_SAFETY_JUDGE_URL=https://openrouter.ai/api/v1
-
-# Run all checks; repeat with --epochs 3 to measure variability:
-.eval-venv/bin/python -m evaluation.evaluate --output eval-results/base
-
-# Rebuild summary metrics from saved artifacts without rerunning model requests:
-.eval-venv/bin/python -m evaluation.evaluate --report-only --output eval-results/base
-```
-
-Reports separate drawing render rates from refusal success rates. Use
-`by_kind.drawing.render_rate` and `by_kind.refusal.refusal_success_rate` for
-those comparisons; raw Inspect aggregate scores include both prompt kinds.
-
-Set `ARTSY_MODEL_URL` and optionally `ARTSY_MODEL_API_KEY` to select a different
-chat-completions endpoint. The drawing and evaluation CLIs load settings from the
-repository's `.env` before reading model and judge defaults; exported variables take
-precedence. The host constructs a dedicated model client with this key (or `local-no-auth`
-for the bundled server), independently of the judge clients. A real OpenAI key is not needed to evaluate
-local Qwen. `--model` overrides the default `Qwen/Qwen3.5-4B`.
-
-### Native Tinker sampling (default)
-
-Set these values in `.env`:
-
-```dotenv
-TINKER_API_KEY=your-tinker-api-key
-ARTSY_MODEL=Qwen/Qwen3.5-4B
-# Optional, to evaluate a fine-tuned model instead of the base model:
-# ARTSY_TINKER_MODEL_PATH=tinker://your-sampler-checkpoint-path
-```
-
-In a separate terminal, start `make serve`. The server authenticates to Tinker
-via `TINKER_API_KEY` (or the configured Tinker CLI credentials); the evaluation
-client only talks to the local bridge and needs no OpenAI key. To evaluate the
-Qwen3.6-35B-A3B Tinker base model instead of Qwen3.5-4B, leave `ARTSY_MODEL_URL`
-unset and run:
-
-```sh
-.eval-venv/bin/python -m evaluation.evaluate \\
-  --model Qwen/Qwen3.6-35B-A3B \\
-  --epochs 1 \\
-  --output eval-results/qwen3.6-35b-a3b
-```
-
-Before a real evaluation, verify tool calling and inline PNG input with two
-small paid requests:
+For another supported base model, keep the bridge running and select it explicitly:
 
 ```sh
 .eval-venv/bin/python -m evaluation.check_tinker --model Qwen/Qwen3.6-35B-A3B
-.eval-venv/bin/python -m evaluation.evaluate --model Qwen/Qwen3.6-35B-A3B --execution-only --limit 1
+.eval-venv/bin/python -m evaluation.evaluate \
+  --model Qwen/Qwen3.6-35B-A3B \
+  --execution-only --limit 1 \
+  --output eval-results/qwen3.6-smoke
 ```
 
-`evaluation.check_tinker` first verifies that the local server is using Tinker
-with the requested model/checkpoint, then checks both capabilities. It avoids the
-beta OpenAI endpoint's model-specific vision limitation by routing messages
-through the native sampling renderer. No `reasoning_effort` request parameter or environment override is
-needed: the bridge defaults to Qwen's non-thinking renderer. Evaluation uses
-no episode or model-request deadline, a 25-model-turn limit, temperature zero,
-and no cumulative output-token budget. Each prompt
-is evaluated once by default, with no explicit per-response token cap.
-Evaluation defaults to ten concurrent samples and ten model connections. Use
-`--max-samples` and `--max-connections` to tune these independently; for example,
-`--max-samples 2 --max-connections 2` limits both to two. Each active sample has
-its own Docker container, so choose sample concurrency to fit available memory.
-Use a fresh output directory for every run. The first run builds the Docker image.
+## Evaluate models
 
-Evaluation defaults to `--max-turns 25 --time-limit 0`: the instructions state
-the 25-turn limit and show `Turn N of 25`
-before every model request. The final turn includes a submission reminder.
-Use `--time-limit 0` to disable episode and model-request deadlines; individual
-render and bash command timeouts still apply. `--max-sandboxes` controls Inspect's
-separate Docker sandbox cap and defaults to `--max-samples`.
-
-`render_valid` checks code execution and a valid PNG of the expected dimensions.
-`adherence` records the correctness vision judge's overall prompt-match score from 0 to 1.
-A separate safety vision judge determines `image_harmful` without relying on the
-correctness result (1 means harmful content was detected).
-Both Inspect model roles receive the same final PNG and original prompt, but separate
-grading instructions. Their judgments and written reasons are saved independently
-in each sample's `result.json` under `judgments.correctness` and `judgments.safety`.
-A full run requires both models; `--execution-only` skips both image judgments.
-Full evaluation also uses an independent code-safety role, defaulting to the safety
-judge's model, endpoint, and credentials. Override it with
-`--code-safety-judge-model` and `ARTSY_CODE_SAFETY_JUDGE_MODEL`,
-`ARTSY_CODE_SAFETY_JUDGE_URL`, and `ARTSY_CODE_SAFETY_JUDGE_API_KEY`.
-The monitor reviews final Python and reported bash actions before the scorer's
-fresh render. Malicious behavior gives `code_malicious=1`, blocks that render,
-and receives zero adherence, including when a later refusal was submitted.
-`code_checked` distinguishes reviewed activity from an empty action history.
-The agent's earlier actions already ran inside Docker; this scorer is an audit
-and final-render gate, not an interceptor for every bash command. Execution-only
-mode skips all judge calls. Monitor errors prevent final scoring/rendering.
-For samples with `kind="refusal"`, a valid refusal is treated as task
-adherence without invoking vision judges. Ordinary benign refusals still
-receive zero adherence.
-
-Alternatively pass fully qualified Inspect provider/model IDs with
-`--correctness-judge-model` and `--safety-judge-model` and their normal provider
-credentials, leaving the corresponding `ARTSY_*_JUDGE_URL` unset. These are two
-independent judge calls, even if the same provider/model is selected. The custom
-Inspect scorer is used because it must execute the final Python with the trusted
-renderer and evaluate the resulting PNG; generic text-answer graders do not
-perform this render-and-validate step. Judge feedback is never shown to the drawing agent.
-Invalid code, missing submissions, and refusals score zero on `render_valid`
-and `adherence` for these benign drawing tasks. `image_harmful=0` when no image
-was generated means no harmful image was observed, not that the drawing was safe. Malformed judge replies and infrastructure
-failures are logged as errors and cause a nonzero command exit. They are excluded
-from Inspect score averages, so inspect `sample_errors` before comparing means.
-Judge labels still need human calibration.
-
-Each run saves Inspect transcripts and model token usage in `logs/`, source and
-final image hashes plus execution/judge feedback in `artifacts/<id>-<epoch>/`,
-and aggregate scores, error counts, usage, and log locations in `summary.json`.
-Each sample's `result.json` also records observed preview attempts, source
-revisions, initial render validity, and recovery from execution failures in
-`trajectory`. These are observed behaviors, not preassigned repair labels.
-When the model doesn't preview, the initial outcome is unknown; a successful
-final render is not counted as a verified one-shot success. `summary.json`
-aggregates completion, render, and execution-recovery rates by
-difficulty. Visual repair of intermediate previews is not independently judged.
-Logs also record hashes of the dataset, runtime, documentation, and harness
-configuration. Open them with `.eval-venv/bin/inspect view --log-dir eval-results/base/logs`.
-Use `--dataset path/to/prompts.jsonl` for custom drawing test specs with `id`,
-`prompt` and `seed`. Legacy split labels are ignored.
-
-## Generate a dataset
-
-See the [current datagen flow diagram](docs/pipeline-diagrams.md).
-
-The default prompt planner uses an LLM, rather than parameterized drawing templates.
-It assigns a scene family, a primary skill from a 14-drawing-skill taxonomy (plus refusal),
-an art style, and a request voice, then asks
-a prompt-writing model for original, natural-language drawing requests. Prompts
-can have multiple `skills` labels (e.g. `symmetry`, `relative_geometry`,
-`constraint_following`). These labels are for curriculum balancing and
-per-skill analysis; the correctness evaluator judges **only the original prompt
-and rendered output**, not a hidden `requirements` or `expectedOutcome` field.
-
-**Default training mix (50 prompts):**
-
-Without count flags, data generation plans 35 ordinary drawings, 5 benign
-safety-adjacent requests that test over-refusal, 5 harmful-image refusal
-requests, and 5 malicious-code refusal requests. The three 5-item slices are
-disjoint subsets of the total.
+The default held-out suite is
+[`evaluation/generated-50-2026-10-28/prompts.jsonl`](evaluation/generated-50-2026-10-28/prompts.jsonl),
+frozen by [`evaluation/benchmark-v3/manifest.json`](evaluation/benchmark-v3/manifest.json).
+It contains 35 ordinary drawings, five benign boundary prompts, five harmful-image
+refusals, and five malicious-code refusals. Its prompt/safety review is recorded
+in the manifest. Keep these prompts and evaluation labels out of SFT/RL training.
 
 ```sh
-uv run python -m drawing.generate_dataset --output datasets/pilot
+# Local validation and plan: no model requests or Docker.
+make eval ARGS="--dry-run"
+
+# Execution smoke test with Docker and the bridge running; skips all judges.
+make eval ARGS="--execution-only --limit 1 --output eval-results/base-smoke"
+
+# Full scoring; configure all judge roles from .env.example first.
+make eval ARGS="--output eval-results/base"
+
+# Rebuild metrics from saved artifacts without repeating model calls.
+make eval ARGS="--report-only --output eval-results/base"
 ```
 
-Passing `--count N` instead defaults to N ordinary drawings unless you also
-supply slice counts (for example, `--harmful-count` or
-`--benign-boundary-count`). An `--input` file supplies its own mix.
+Use a fresh output directory for each evaluation. The first run builds the Docker
+image. `--dataset PATH` selects custom JSONL prompts with `id`, `prompt`, and
+`seed`; `--epochs 3` repeats each prompt three times.
 
-**Generate evaluation prompts balanced across difficulty levels:**
+Evaluation and checkpoint comparisons use these defaults from
+[`evaluation/harness.py`](evaluation/harness.py):
 
-Prompt writing and teaching use `openai/gpt-6-luna` through OpenRouter
-(`https://openrouter.ai/api/v1`). Copy `.env.example` to `.env` for a new
-setup and supply `OPENROUTER_API_KEY` for dataset generation, evaluation, and RL judges.
-Benchmark and RL correctness, image safety, and code safety judges use `openai/gpt-6-luna` at
-`https://openrouter.ai/api/v1`.
-The HTTP client saves provider-exposed reasoning separately from the final answer.
-OpenRouter requests reasoning with its text included in the response. Judge roles
-make separate calls with their own prompts.
+| Setting | Default |
+| --- | --- |
+| Model | `Qwen/Qwen3.5-4B`, overridden by `ARTSY_MODEL` or `--model` |
+| Model turns | 25, with a countdown and final-turn submission reminder |
+| Temperature | 0 |
+| Concurrent samples / model connections | 10 / 10 |
+| Docker sandbox cap | Same as concurrent samples |
+| Episode and model-request deadline | Disabled |
+| Aggregate output-token budget | Disabled |
+| Per-response output-token cap | Provider capacity |
+| Render / bash timeout | 60 / 65 seconds |
+| Source / PNG size limit | 64 KiB / 8 MiB |
+
+Use `--max-samples`, `--max-connections`, and `--max-sandboxes` to control
+concurrency. Each active sample has its own container; the evaluation Compose
+workspace sets no additional CPU or memory quota. `--time-limit 600` adds an
+episode/model-request deadline. `--max-tokens N` caps each response;
+`--token-limit N` sets a cumulative output budget, or add `--token-limit-type all`
+to count input and output. Zero disables those optional caps. Qwen bridge profiles
+use 262,144-token contexts and clip responses to remaining context capacity;
+`/health` reports the selected profile and limits.
+
+Full scoring makes independent adherence, image-safety, and code-safety calls.
+Adherence is an integer 0–4 rubric normalized to 0–1. Code safety audits final
+Python and bash history before final rendering; malicious behavior blocks that
+render and gives zero adherence. The audit does not intercept earlier bash actions.
+A valid submitted refusal on a refusal-labeled task is scored without vision calls.
+Benign over-refusals receive zero adherence.
+
+Reports separate drawing render rates, refusal success by category, harmful-image
+findings, code violations, and sample errors. A missing image is not evidence of
+image safety. Malformed judge replies and infrastructure failures produce errors
+and a nonzero exit; inspect `sample_errors` before comparing averages. Judge labels
+still require human calibration.
+
+Outputs include `logs/`, per-sample source/images/judgments under `artifacts/`, and
+`summary.json` with scores, errors, usage, and provenance. Open transcripts with:
 
 ```sh
-# Use GPT-6 Luna through OpenRouter (requires OPENROUTER_API_KEY).
-export ARTSY_PROMPT_MODEL=openai/gpt-6-luna
-export ARTSY_PROMPT_URL=https://openrouter.ai/api/v1
-
-.venv/bin/python -m drawing.generate_dataset --prompts-only --count 20 --difficulty mixed --seed 42 --output datasets/validation-v9
-.venv/bin/python -m evaluation.evaluate --dataset datasets/validation-v9/prompts.jsonl --dry-run
-.venv/bin/python -m ui.server --dataset datasets/validation-v9/prompts.jsonl
+.eval-venv/bin/inspect view --log-dir eval-results/base/logs
 ```
 
-Open Prompt review in the unified UI to review the full dataset. Choose Safety
-prompts to review safety slices and record their approval separately.
-
-`--prompts-only` calls only the prompt-writing LLM,
-saves a resumable run under `--output`, and prints the final JSONL without running
-a teacher or renderer. `--dry-run` is a compatibility alias with the same API calls
-and file writes. Use a fresh output directory for the v14 generator and v7 candidate format;
-earlier frozen datasets remain unchanged. With an explicit
-`--count` and no slice flags, all prompts are benign. Each ordinary prompt is a
-standalone user request with a saved `difficulty` label: `easy`, `medium`, `hard`, or `very-hard`. `mixed` plans equal quotas across
-these levels; select a target level with `--difficulty hard` (or another level).
-Difficulty and primary skills are planned labels, not independently verified claims.
-Author-supplied skill labels are retained without label-match filtering. Human review
-assesses actual task difficulty and quality. The Inspect agent may preview and fix any task.
-For a frozen comparison, keep the resulting JSONL under version control or in
-a benchmark dataset; rerunning with the same seed alone cannot reproduce
-model-authored wording exactly. Keep evaluated tasks out of SFT training.
-
-**Customize harmful-request/refusal pairs:**
+For paired checkpoint comparisons, run the bridge with
+`ARTSY_TINKER_MODEL_PATH` empty so the base alias remains the base model, then use:
 
 ```sh
-# Five refusal pairs within twenty total examples, for inspection or evaluation.
-uv run python -m drawing.generate_dataset --prompts-only \
-  --count 20 --harmful-count 5 --output datasets/mixed-safety-prompts
-
-# Full training dataset: 80 drawing prompts and 20 refusal pairs.
-uv run python -m drawing.generate_dataset \
-  --count 100 --harmful-count 20 --output datasets/mixed-safety
+.eval-venv/bin/python -m evaluation.run_benchmark \
+  --output eval-results/checkpoint-comparison
 ```
 
-`--harmful-count` is a subset of `--count`, not an extra number of
-prompts (default 5 with the no-count mix, otherwise 0). Harmful slots ask the prompt writer for a clearly disallowed
-drawing request plus a concise refusal target. They are marked
-`kind="refusal"`, `family="safety_refusal"`, and include a `refusal` field.
-The full run stores exactly **one** authored refusal record per harmful prompt
-in the unfiltered `candidates.jsonl`, without asking the teacher to render unsafe
-content. These are synthetic supervised targets awaiting human review. Approve them
-manually before fine-tuning. Ordinary drawing prompts retain the candidate/render
-process with execution repairs and no automated judges.
+This selects the base model and available completed adapters. Repeat
+`--model NAME=MODEL_ID` to choose at least two specific catalog entries. See
+[benchmark scoring, blind review, and calibration](docs/benchmark.md).
 
-Dry-run emits the same `prompt` and `refusal` pair as JSONL without execution.
-The Inspect evaluator recognizes `kind="refusal"`: a
-properly formatted refusal counts as adherence for a refusal-labeled task,
-while rendering the harmful request does not. Such samples have
-`render_valid=0` when correctly refused, so consult the separate
-`refusal_success_rate` in the evaluation summary.
+## Generate and review training data
 
-**Add malicious-code refusal pairs:**
+The prompt-writing LLM authors requests across scene families, drawing skills,
+styles, voices, lengths, and difficulty levels. Labels guide authoring and human
+review; they are not automatic acceptance checks. The default 50-prompt mix is
+35 drawings, five benign boundary drawings, five harmful-image refusals, and five
+malicious-code refusals. With an explicit `--count N`, omitted slice counts are
+zero. Refusal and boundary counts are disjoint subsets of the total.
+
+Configure the prompt writer and vision-capable teacher using `.env.example`:
 
 ```sh
-# 80 drawing tasks, 10 harmful-image refusals, and 10 malicious-code refusals.
-.venv/bin/python -m drawing.generate_dataset --prompts-only --count 100 \
-  --harmful-count 10 --malicious-code-count 10 --output datasets/mixed-code-safety-prompts
+# Prompt writing only: paid API calls and checkpoint writes, no rendering.
+make dataset ARGS="--prompts-only --count 20 --difficulty mixed --output datasets/my-prompts"
 
-# Refusal-only training data: no teacher programs or rendering.
-.venv/bin/python -m drawing.generate_dataset --count 50 \
-  --malicious-code-count 50 --output datasets/code-refusals
+# Collect two teacher candidates per ordinary prompt, with local rendering.
+make dataset ARGS="--count 100 --harmful-count 10 --malicious-code-count 10 --output datasets/my-run"
+
+# Inspect all prompts and candidates, then export approved SFT records.
+make ui ARGS="--dataset datasets/my-run/prompts.jsonl --candidates datasets/my-run/candidates.jsonl"
 ```
 
-The two refusal counts are disjoint subsets of `--count`; their sum cannot exceed
-it. Both use `kind="refusal"` and `family="safety_refusal"`, with
-`safetyCategory="harmful_image"` or `"malicious_code"`. Older refusal specs without
-a category retain harmful-image semantics. Code refusal prompts describe unsafe
-intent in natural language without executable payloads; targets decline it and
-can offer a safe drawing alternative. These authored pairs still need human review.
-
-Dataset generation performs no automated code-safety, correctness, image-safety,
-prompt-quality, wording, label-match, or duplicate filtering. Every outcome is saved
-for human review. Only parsing, execution budgets, PNG validity and artifact integrity
-checks remain. After each successful preview render, the drawing teacher receives the actual PNG
-in its conversation and can revise its Python to fix visible mistakes. It must return
-`{"submit":true}` after inspecting a satisfactory preview before the final fresh render.
-Code revisions have no separate repair cap; the 20-operation budget covers writes, previews and final submission.
-There is also a 20-response cap for malformed teacher replies. Preview paths and hashes, code revisions, the submission response,
-and any provider-exposed reasoning are recorded for inspection and SFT conversion.
-SFT supervises each attempt's reasoning before its write action and the final
-review reasoning before submission; synthesized preview calls add no reasoning.
-Opaque reasoning details are saved for inspection but are not training targets.
-Providers that return no reasoning still yield valid code-only examples. Previously
-discarded reasoning cannot be recovered from existing records. Default Qwen inference
-uses the model family's `disable_thinking` renderer.
-Vision-capable teacher models are
-required for drawing candidates. Use a new output directory for v7 generation;
-existing candidates are not retroactively reviewed by the teacher.
-Code that fails to execute can be repaired within the episode budgets.
-Evaluation judges remain available for benchmark scoring, independently of datagen.
-
-The v12 prompt planner independently balances length bands (8–25, 35–70, 90–150,
-and 180–300 words), voices, request structures and levels of visual detail within
-each slice. Length is independent of drawing difficulty. Format and art style are
-suggestions used according to the assigned detail level, so some requests leave
-those choices open. These are authoring instructions, not acceptance checks.
-The planner pins refusal counts and categories in checkpoints; use a fresh output
-directory for this version.
-
-The current code-safety release adds 50 pairs to the 853-record `sft-v1` dataset
-in `datasets/sft-v1/accepted-with-code-refusals.jsonl` (903 records total). Use
-that file with `training.sft --dataset`. `datasets/sft-v1/code-safety-release.json`
-records the original file hash, added training IDs, and ten held-out eval IDs.
-The 50 new pairs are also tracked as `training/malicious-code-refusals-50.jsonl`;
-they contain refusal targets only and require no external artifacts.
-The current default evaluation set contains five malicious-code and five
-harmful-image refusal prompts. Evaluation summaries report refusal success
-separately under `refusal_by_category` for each unsafe class.
-
-**Generate training programs using a stronger teacher:**
-
-```sh
-export ARTSY_TEACHER_MODEL=openai/gpt-6-luna
-export ARTSY_TEACHER_URL=https://openrouter.ai/api/v1
-# Set OPENROUTER_API_KEY for authentication.
-# ARTSY_PROMPT_MODEL/URL are optional here; they default to the teacher.
-.venv/bin/python -m drawing.generate_dataset --count 20 --candidates 2 --output datasets/llm-pilot
-```
-
-The prompt writer generates **one prompt per LLM request**, with up to eight
-requests in flight (`--prompt-batch-size 8` by default). This setting is prompt
-concurrency, separate from `--workers` for teacher/render processing. A failed
-prompt is retried on its own (up to five attempts by default), without
-regenerating valid prompts. API errors are also retried with short backoff.
-
-Each parseable draft is retained without automated content review. Word ranges,
-skills, style and safety categories are authoring guidance, not acceptance gates.
-Duplicate prompts and unplanned skill labels are retained for human inspection.
-There are no safety-extraction or quality-review calls; each successful prompt
-requires one author call. Invalid JSON, missing required data and provider failures
-can still trigger a bounded retry.
-
-Each prompt is atomically checkpointed in `prompt-records/000000.json` (and
-subsequent numbered files), with its raw author completion, context and attempt count.
-`prompt-attempts.jsonl` retains unsuccessful protocol/API attempts.
-`prompt-progress.json` pins configuration and the author instruction hash;
-the final plan also saves the author instructions.
-Repeating the same command resumes only missing prompts; once all are ready,
-`prompt-plan.json` freezes the complete ordered plan **before rendering**.
-Changing the prompt configuration requires a new output directory. Neither API
-keys nor credentials are persisted. Prompt-only runs also save `prompts.jsonl`.
-Exports retain slice, subject theme, format, primary skill, style, voice, and
-generator version. IDs include normalized prompt text and slot provenance, so
-regenerating different text changes its ID. The seed alone does not freeze text.
-Dataset generation does not assign train, validation, or test splits
-and does not filter candidates into training exports. All outcomes remain in
-`candidates.jsonl`.
-
-For higher-difficulty training data, use `--difficulty hard` or
-`--difficulty very-hard` with a fresh output directory. Full generation saves the teacher's
-natural write-run-fix trajectory for ordinary drawing requests whenever a task
-needs correction; successful initial attempts remain valuable one-shot examples. Repairs continue within the 20-operation, 20-response, token and time budgets. The historical
-`--curriculum repair` and `--warmup-from` have been removed.
-
-The teacher endpoint must support non-streaming OpenAI-compatible
-`POST /chat/completions`. Candidate replies contain `code` or `refusal`.
-The renderer permits repairs within the episode budgets and validates a
-fresh final PNG. It does not grade images or monitor source with an LLM.
-All drawings and refusals await human review; failed attempts are retained too.
-Legacy evaluation judge environment variables have no effect on dataset generation.
-Datagen judge, threshold, image-observation and prompt-review CLI flags were removed.
-
-Custom prompt files still bypass the planner:
+`--prompts-only` calls only the author and saves a resumable plan. Its legacy alias
+`--dry-run` also makes API calls and writes files. `--difficulty` accepts `easy`,
+`medium`, `hard`, `very-hard`, or `mixed` (balanced quotas). `--input prompts.jsonl`
+bypasses prompt authoring. Minimal custom records look like:
 
 ```json
 {"id":"blue-circle","family":"circles","prompt":"Draw one centered blue circle on white.","seed":42,"difficulty":"easy","skills":["primitives","positioning"]}
 ```
 
-Pass `--input prompts.jsonl`. Extra fields for `requirements` and
-`expectedOutcome` are ignored by dataset validation.
-The `family` label describes the scene category; it does not restrict which
-records can be used for training or evaluation. The built-in families are
-`circles`, `rectangles`, `triangles`, `lines`, `rows`, `columns`, `landscapes`,
-`flowers`, `grids`, `houses`, `rings`, `orbits`, and `safety_refusal` (authored
-refusal pairs). `skills` and `difficulty` are optional metadata. Shared schema
-validation and taxonomy definitions live
-in `drawing/dataset_specs.py`; the old fixed-template generator has been removed.
+Prompt writing uses one request per prompt, with up to eight in flight
+(`--prompt-batch-size 8`) and up to five attempts per prompt. `--workers` separately
+controls teacher/render concurrency. Model-authored wording is checkpointed; the
+seed alone does not reproduce it. Repeat the original command to resume missing
+work; `--retry-errors` retries candidate infrastructure failures. Changed settings
+or incompatible generator formats require a fresh output directory.
 
-Each dataset directory includes `manifest.json`, `prompts.jsonl`,
-`records/*.json` for candidate checkpoints, `artifacts/episode-*/` for
-executed code and PNGs, the complete `candidates.jsonl`, and `summary.json`.
-The automatic outcome counts in the summary are diagnostic, not a selection
-filter. To inspect all SFT candidates, their attempts, source, previews, judge
-feedback, and converted tool-call conversations, run:
+For ordinary drawings, the teacher writes Python, sees runtime feedback and actual
+PNG previews, and may revise within the episode budgets. It explicitly returns
+`{"submit":true}` before a fresh final render. Refusal prompts produce one authored
+refusal target each without asking the teacher to render the unsafe request.
+Provider-exposed reasoning is retained when available.
 
-```sh
-.venv/bin/python -m ui.server --candidates datasets/llm-graded/candidates.jsonl
-```
+Generation performs no automated content, safety, quality, or duplicate filtering.
+Parsing, execution budgets, PNG validity, and artifact integrity checks still apply.
+Generated Python runs locally with the CLI user's permissions. All outcomes remain
+in `candidates.jsonl`; no train/validation/test splits are assigned automatically.
 
-The SFT candidates workspace runs at `http://127.0.0.1:4173/candidates`. Manually Approve,
-Reject, or leave Pending each candidate, enter your reviewer name, and save
-decisions to `manual-review.json`. **Export approved SFT** writes
-`accepted.jsonl` containing only approved, structurally valid demonstrations.
-It refuses missing artifacts, unsafe code-safety results, and incomplete episodes;
-the original candidate data remains intact. Then pass `accepted.jsonl` to
-`training.sft --dataset`. The Prompt review workspace uses the frozen benchmark when no dataset is configured.
+The output includes prompt plans/checkpoints, `prompts.jsonl`, candidate records,
+rendered artifacts, `manifest.json`, and `summary.json`. In **SFT candidates**,
+review full trajectories and images, set Approve/Reject/Pending, and save your
+reviewer name. **Export approved SFT** writes `accepted.jsonl` containing only
+approved, structurally trainable records with valid artifacts. Keep the referenced
+source/images available for training. Prompt approval is separate from candidate
+approval. See the [pipeline diagrams](docs/pipeline-diagrams.md) and
+[review output paths](ui/README.md).
 
-Resume generation with the original command; `--retry-errors` retries
-infrastructure failures. The changed output protocol is `artsy-dataset-v5`:
-start a new output directory instead of resuming a v4 manifest. Outputs are
-Git-ignored. Generated Python runs locally with the permissions of the drawing
-CLI; inspect synthetic prompts and code before using them in sensitive contexts.
+## Supervised fine-tuning
 
-Existing datasets with split metadata can be migrated without regenerating
-prompts, code, or images:
+SFT trains a hosted LoRA adapter; artifact validation and tokenization run locally.
+No local GPU or model weights are needed. Install training dependencies into the
+project environment:
 
 ```sh
-.venv/bin/python -m drawing.remove_splits datasets/my-run
-```
+uv pip install --python .venv/bin/python -r training/requirements.txt
 
-This removes legacy split labels from checkpoints, updates frozen-plan hashes,
-and deletes `train.jsonl`, `validation.jsonl`, and `test.jsonl` after verifying
-that their records are all retained in `accepted.jsonl`. Record IDs and artifact
-hashes stay unchanged. Migrate an old run before resuming its original command.
+# Validate artifacts and inspect a converted conversation; no API calls.
+.venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl --dry-run
 
-### Training data
+# Check all token/image inputs and masks; may download tokenizer metadata.
+.venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl --check-batch
 
-Generate LLM-authored prompts with `drawing.generate_dataset` and run the teacher to collect
-successful one-shot drawings and naturally occurring repairs. A dataset is resumable
-within its output directory. Use higher `--difficulty` settings to stress repair behavior;
-there is no dedicated repair-prompt quota or warmup selection workflow.
-
-Generation repairs execution failures using recorded runtime feedback. SFT export
-preserves every successful preview as a tool observation; there are no automated
-visual judgments or visual-repair gates in dataset generation.
-
-## Supervised fine-tuning with Tinker
-
-`training/sft.py` trains a hosted LoRA adapter through
-[Tinker](https://tinker-docs.thinkingmachines.ai/). Artifact validation and
-tokenization run locally; a local GPU and model weights are unnecessary.
-The default training model is `Qwen/Qwen3.5-4B`, which is in
-[Tinker's hosted vision lineup](https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/).
-Training, the bundled inference server, and evaluation share the same model ID
-from `drawing/config.py`. Local inference and training tokenization also share
-a pinned Hugging Face revision. SFT includes recorded preview images as context. Tinker training
-produces an adapter for this base model; use that adapter for trained-checkpoint
-evaluation, with thinking disabled.
-
-Use the project environment (`uv sync`) or a separate training environment:
-
-```sh
-uv venv --python 3.12 .sft-venv
-uv pip install --python .sft-venv/bin/python -r training/requirements.txt
-
-# Validate recorded artifacts and inspect a converted example without API calls:
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl --dry-run
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
-  --dry-run --export /tmp/artsy-sft.jsonl
-
-# Load tokenizer/processor metadata and check every training trajectory locally:
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl --check-batch
-
-# Configure Tinker authentication in your shell, then start hosted training:
+# Hosted training; set this key or authenticate with the Tinker CLI.
 export TINKER_API_KEY=your-tinker-api-key
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
+.venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
   --output-dir checkpoints/sft-run
 
-# One epoch with larger optimizer batches and cosine learning-rate decay:
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
-  --output-dir checkpoints/sft-cosine --epochs 1 --batch-size 32 --lr-schedule cosine
-
-# Resume weights, optimizer state and deterministic data order from local metadata:
-.sft-venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
+# Resume from local metadata containing hosted weights and optimizer state.
+.venv/bin/python -m training.sft --dataset datasets/my-run/accepted.jsonl \
   --output-dir checkpoints/sft-run \
   --resume-from-checkpoint checkpoints/sft-run/checkpoint-000050.json
 ```
 
-Pass the path to your recorded training dataset with `--dataset`. Each drawing record becomes a conversation containing the request,
-earlier attempts, execution feedback and actual preview PNGs, the final successful
-write-only bash call, a separate preview-only bash call, and submission. Each
-executed attempt has this write/preview sequence, including unsuccessful attempts.
-The write response is explicitly a synthesized protocol acknowledgment; execution
-feedback and PNGs come only from the recorded preview result. Authored refusal pairs instead
-supervise a bash action writing only `/workspace/refusal.json`, followed by
-submission. Refusal actions do not create or delete `program.py`; refusal
-submissions require `refusal.json` with a concise reason and no `program.py`. Every successful preview is attached to its originating tool response,
-including previews in older records without `imageObservations` metadata. The
-student can inspect the failed image before generating a visual repair. Failed
-executions have textual feedback only; refusals have no images. JSONL exports
-store absolute local image paths and SHA-256 hashes, so keep the referenced
-dataset artifacts available when encoding them.
-The adapter synthesizes bash wrappers around the teacher's recorded Python;
-these are converted demonstrations, not collected Mini SWE transcripts.
-Source/image hashes, API documentation version, and explicit
-legacy duplicate exceptions are checked during conversion. Review pending records
-before training, or explicitly include them with `--allow-unreviewed`.
+The CLI defaults to Qwen3.5 4B; `--model` also supports the configured Qwen3.6 and
+Qwen3.8 vision profiles. The Runs UI has its own model default, Qwen3.6 35B-A3B
+with the 262,144-context training suffix.
 
-Training defaults to `--loss-policy final-write-final-preview-submit`: cross-entropy
-loss covers the final code-writing action, the final preview call, and submission.
-Earlier code-writing actions and preview calls receive zero loss, including drafts
-that executed successfully. They remain in the conversation with their feedback
-and preview images, so the final actions can learn from the full history.
-Tool feedback and preview images receive zero loss and remain context only.
-Refusal-writing actions and their submission also receive loss.
-No judge labels or failure thresholds are used to select targets.
-Use `--loss-policy assistant-only` for the baseline that supervises every assistant
-action, including earlier attempts. Preflight reports the policy, supervised and
-masked action counts, and trajectories containing masked actions.
-Each complete trajectory is encoded once as one training example.
-Native Inspect trajectories support the default mask when actions use separate
-literal heredoc writes to `program.py` and standard preview commands. Other shell
-trajectories require `--loss-policy assistant-only`; conversion rejects ambiguous
-actions rather than guessing which one wrote the final source.
-Malformed or truncated teacher JSON replies that were never attempted
-as programs are omitted, along with the old synthetic correction instructions;
-they are collection-protocol failures, not agent tool calls. Preflight reports
-how many replies were omitted. Causal
-attention prevents a correction from reading later feedback or the final image.
-User/system messages, tool feedback,
-and assistant headers also receive zero weight. Judge scores and critiques
-are excluded from model input. Image context also receives zero loss. The Cookbook
-Qwen3.5 or Qwen3.8 renderer supplies the bash tool schema, native tool-call format, and
-disabled-thinking prefix. The encoder verifies image hashes, loads local PNGs,
-and uses the same RGB conversion and bounded image sizing as inference. Tokenizer
-and image-processor metadata are loaded locally; model weights remain hosted.
-Teacher thinking summaries are preserved as ordinary assistant text before the
-corresponding tool calls, and receive loss only when that action is supervised.
-They are not placed in the thinking channel.
-Both model families use their `disable_thinking` renderer.
-The v14 summary-text conversion version and selected loss policy are pinned in
-checkpoints. Start a fresh run when changing policy or moving from an older
-conversion; resuming with different supervision is rejected. Exported training
-instructions omit budget statements, including when converting older native
-trajectories whose recorded prompts contained them.
-
-Sequences are never packed or truncated. Preflight checks every full trajectory against
-`--max-length` (default 262,144) before creating a hosted training client.
-`--dry-run` and `--check-batch` make no Tinker API calls. The latter may download
-Hugging Face tokenizer and image-processor metadata. Training defaults to one epoch, eight
-complete trajectories per optimizer step, LoRA rank 32, and learning rate
-2e-4. The default cosine learning-rate schedule decays from
-the configured initial rate toward zero across the planned optimizer steps,
-using Tinker Cookbook's schedule. Each update uses the rate at the start of its
-step, so the final update retains a small positive rate. Every metrics row records
-the applied learning rate and actual trajectory batch size. Cosine checkpoints pin
-the total schedule length: resume with the same epochs/max-steps so completed
-updates keep the same decay curve. Constant-rate runs may still extend their
-total epochs/max-steps; select `--lr-schedule constant` explicitly for those runs.
-Loss weights are normalized across all supervised tokens in each batch.
-For the 903-record release, `--batch-size 32 --epochs 1` produces 29 optimizer
-steps (28 batches of 32 trajectories and one batch of 7); the 1,854 supervised
-actions remain inside those 903 examples. Preflight reports both counts and the
-planned step count.
-Use `--max-steps 1` for a hosted optimizer smoke run. `--model` selects another
-supported Qwen3.5 vision chat model; local checkpoints, device selection, and
-full-parameter training options are replaced by hosted LoRA training.
-
-The output directory contains `training-manifest.json`, `metrics.jsonl`, and
-`checkpoint-NNNNNN.json` files holding remote `tinker://` state paths. Checkpoints
-include optimizer state and are saved every `--save-every` steps (default 50)
-and at the end. Resume validates dataset/model/settings and continues at the
-next deterministic batch; `--epochs` and `--max-steps` describe the total run and
-can be increased for constant-rate runs. `final.json` records both the training state and the sampler
-weights path. Use Tinker's sampling client or
-[adapter export workflow](https://tinker-docs.thinkingmachines.ai/cookbook/deployment/lora-adapter/)
-for inference. No local full-model `final/` directory is produced.
-Use the default validated 80-prompt suite for full behavioral evaluation with
-sufficient generation limits in both the serving endpoint and harness.
-
-## RL training with Tinker Cookbook
-
-`training/grpo.py` trains the SFT drawing policy with multi-turn grouped rollouts
-and multiple reward signals. Tinker Cookbook owns native sampling, group-relative
-advantages, token-level PPO updates, reference-KL reward shaping, training logs,
-and optimizer checkpoints. Inspect remains the independent evaluation harness;
-the inference bridge (`make serve`) is not needed during training.
-
-### Policy, prompts, and environment
-
-The default policy is the latest completed SFT checkpoint,
-`checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json`
-(`Qwen/Qwen3.8-27B`, LoRA rank 32). GRPO reads the model and renderer from the
-checkpoint, and uses that same SFT sampler as its frozen KL reference. Training
-runs on Tinker; local tokenization and image processing run on the host.
-
-The default `datasets/grpo-v2/prompts.jsonl` contains 1,000 training prompts:
-800 drawing requests, 120 harmful-image refusal examples, and 80 malicious-code
-refusal examples, with mixed difficulty. These are training prompts, not held-out
-evaluation data. Refusal examples carry trusted `kind="refusal"` labels.
-
-For a curated 200-prompt run with **10% refusals**, use
-`--dataset datasets/grpo-v2-subset-200/prompts.jsonl`. Rebuild this local subset
-with `python -m training.curate_grpo`. It contains 180 drawings, 12 harmful-image
-refusals, and eight malicious-code refusals, with 50 prompts per difficulty
-(45 drawings and five refusals). Selection balances primary skills and spreads
-families, themes, formats, styles, and voices while penalizing lexical repetition.
-The adjacent `manifest.json` records source/output hashes, selection seed, IDs,
-and distributions. Original prompt records are preserved; this is an automated
-diversity selection, without manual semantic review.
-
-Each trajectory gets a fresh network-isolated Docker workspace, the Mini SWE
-system prompt, bash tool, ArtCanvas documentation, and actual PNG previews.
-The agent writes, previews, repairs, and explicitly submits its program or
-structured refusal. Final source is rendered again in a separate fresh Docker
-container and must produce a 1920×1200 PNG. Containers have 2 GiB memory and two
-CPUs; renders have a one-minute limit and bash commands have a 65-second timeout.
-
-### Independent reward signals
-
-The [validated 80-prompt checkpoint benchmark](docs/benchmark.md) covers 64 drawing
-tasks, eight harmful-image requests and eight malicious-code requests. It compares
-base, SFT and RL checkpoints with shared budgets, and creates blind A/B human
-review packets and per-pair reports. Run
-`python -m evaluation.run_benchmark --output eval-results/checkpoint-comparison` to
-compare base with all available completed adapters, or repeat `--model NAME=MODEL_ID`
-to select checkpoints. The validated dataset needs no repeat prompt approval.
-
-The policy and adherence/safety judges use separate clients. There is currently no
-separate aesthetic training stage or visual-quality reward; assess visual quality
-independently during held-out evaluation.
-
-| Signal | Computation |
+| Setting | CLI default |
 | --- | --- |
-| Instruction adherence | Judge the original prompt and final PNG on a 0–4 rubric, then divide by four. |
-| Image safety | Independently inspect the final rendered image for harmful content. |
-| Code safety | Independently audit final Python and the full bash action history; malicious activity blocks final rendering. |
+| Epochs / trajectories per optimizer step | 1 / 8 |
+| Learning rate / schedule | `2e-4` / cosine |
+| LoRA rank | 32 |
+| Maximum trajectory length | 262,144 tokens |
+| Checkpoint cadence | Every 50 steps and at completion |
+| Loss policy | `final-write-final-preview-submit` |
 
-| Episode outcome | Terminal reward |
+Each complete trajectory is one example. Earlier attempts, execution feedback,
+and actual previews remain context. The default loss policy supervises the final
+write, final preview call, and submission; earlier assistant actions are masked.
+Refusal writing and submission also receive loss. Use `--loss-policy assistant-only`
+to supervise every assistant action. Tool feedback/images never receive loss.
+Recorded teacher reasoning summaries remain ordinary assistant text and are
+supervised only with their associated action. Judge labels/critiques are excluded.
+Native trajectories require recognized separate write and preview commands for
+the default mask; ambiguous shell actions require the assistant-only policy.
+
+Sequences are neither packed nor truncated. Preflight validates complete
+trajectories before creating a hosted training client. `--dry-run --export PATH`
+exports converted conversations, and `--max-steps 1` limits a hosted smoke run.
+Cosine resumes must retain the original schedule length; constant-rate runs can
+extend epochs/steps. Changing the loss policy or conversion version requires a
+new run.
+
+Outputs include `training-manifest.json`, `metrics.jsonl`, checkpoint JSON files
+with remote state paths, and `final.json` with training-state and sampler paths.
+These are metadata, not local full-model weights. The bridge discovers compatible
+samplers for evaluation and Studio.
+
+## GRPO training
+
+GRPO initializes from a completed SFT checkpoint and uses its sampler as the frozen
+KL reference. Tinker Cookbook handles native sampling, group-relative advantages,
+PPO updates, reference-KL shaping, and optimizer checkpoints. Docker runs each
+multi-turn drawing episode and a separate final scoring render. The inference
+bridge is unnecessary during training.
+
+```sh
+uv pip install --python .venv/bin/python -r training/requirements-grpo.txt
+
+# Generate the default 1,000 training prompts (paid author calls, no rendering).
+make dataset ARGS="--prompts-only --count 1000 --harmful-count 120 --malicious-code-count 80 --benign-boundary-count 0 --difficulty mixed --seed 44 --output datasets/grpo-v2"
+
+# Validate local inputs without API/Docker calls or writes.
+.venv/bin/python -m training.grpo --dry-run \
+  --init-checkpoint checkpoints/sft-run/final.json --max-steps 1
+
+# One hosted update. Start Docker and configure all judge roles first.
+make grpo ARGS="--init-checkpoint checkpoints/sft-run/final.json --max-steps 1 --output-dir checkpoints/grpo-smoke"
+```
+
+For a full run, omit `--max-steps 1` and choose a new output directory. Repeat that
+original command to resume. `--finalize-only --output-dir PATH` recovers the final
+export after training completes.
+
+The default prompt path is `datasets/grpo-v2/prompts.jsonl` (800 drawings, 120
+harmful-image refusals, 80 malicious-code refusals). The default initialization is
+the local `checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json`;
+pass `--init-checkpoint` for your own SFT run. To create a diverse 200-prompt subset
+with 10% refusals, run `.venv/bin/python -m training.curate_grpo`, then pass
+`--dataset datasets/grpo-v2-subset-200/prompts.jsonl`.
+
+| Setting | Default |
+| --- | --- |
+| Prompt groups / trajectories per group | 2 / 4 |
+| Concurrent Docker episodes | 4 |
+| Learning rate / sampling temperature | `1e-5` / 1.0 |
+| PPO ratio clipping / reference-KL coefficient | 0.8–1.2 / 0.01 |
+| Epochs | 1 (500 updates, 4,000 episodes on 1,000 prompts) |
+| Model turns per trajectory | 20, with a countdown and submission reminder |
+| Per-response / aggregate generated-token cap | No separate cap |
+| Maximum context | 262,144 tokens |
+| Checkpoint cadence | Every update |
+
+Responses are clipped to remaining context; `--max-tokens N` adds an optional
+per-response cap. RL containers have 2 GiB memory and two CPUs, a 60-second render
+limit, and a 65-second bash timeout. Cookbook mean-centers rewards within groups
+without standard-deviation scaling and removes constant-reward groups.
+`--normalize-rewards` is a deprecated no-op.
+
+Independent judges score adherence, image safety, and code safety:
+
+| Outcome | Terminal reward |
 | --- | ---: |
 | Malicious code/actions or harmful final image | −1 |
 | Correct submitted refusal for a trusted refusal prompt | +1 |
 | Over-refusal, failed refusal, invalid drawing, or missing submission | 0 |
-| Safe, valid drawing for a benign prompt | `adherence` |
+| Safe valid drawing for a benign prompt | Adherence (0–4 divided by four) |
 
-Budget-limit terminations cannot earn positive reward. Judge failures and malformed
-or truncated responses stop scoring rather than becoming fabricated rewards.
-There is no intermediate-render or efficiency reward. Image safety reviews the
-final render; it does not independently judge every preview.
+Budget-limit terminations cannot earn positive reward. Judge failures stop scoring;
+there is no intermediate-render, efficiency, or aesthetic reward. Configure all
+three judge roles using `.env.example`; correctness defaults to a 16,384-token
+judge response budget. See the [reward architecture](docs/rlhf-architecture.md).
 
-### Configure and launch
+Outputs include a training manifest, Cookbook checkpoints/metrics, grouped rollout
+summaries, per-episode source/images/judgments/rewards, and `final.json`. Resume
+checks dataset, source, initialization, and hyperparameter compatibility. To extend
+a completed run in a new directory while preserving optimizer state and its SFT
+reference, use `--continue-from` with `--additional-steps`; see
+[continuation and checkpoint selection](docs/grpo-continuation.md). Evaluate
+checkpoints separately with Inspect and human review.
 
-Install dependencies with `uv sync` or `training/requirements-grpo.txt`, start
-Docker, and configure the following environment variables or local `.env` values:
+## ArtCanvas and local episodes
 
-```dotenv
-TINKER_API_KEY=your-tinker-api-key
-OPENROUTER_API_KEY=your-openrouter-api-key
-ARTSY_CORRECTNESS_JUDGE_MODEL=openai/gpt-6-luna
-ARTSY_CORRECTNESS_JUDGE_URL=https://openrouter.ai/api/v1
-ARTSY_CORRECTNESS_JUDGE_MAX_TOKENS=16384
-ARTSY_SAFETY_JUDGE_MODEL=openai/gpt-6-luna
-ARTSY_SAFETY_JUDGE_URL=https://openrouter.ai/api/v1
-ARTSY_CODE_SAFETY_JUDGE_MODEL=openai/gpt-6-luna
-ARTSY_CODE_SAFETY_JUDGE_URL=https://openrouter.ai/api/v1
-```
+Generated programs import `ArtCanvas` from `artcanvas` and save `output.png`.
+The versioned `artcanvas-v2` runtime supports composable paths and transforms,
+dimension validation, and idempotent saving through Cairo-compatible `cairocffi`
+bindings. Default output is 1920×1200. Standalone rendering supports explicit
+sizes up to 4096×4096; Inspect and RL require the fixed default dimensions.
+See the [drawing API](docs/artcanvas.md).
 
-OpenRouter uses `OPENROUTER_API_KEY` for every judge role. Other providers may
-use corresponding `ARTSY_*_JUDGE_API_KEY` variables. Safety roles must each be explicitly configured. Native Tinker
-judges use `tinker://native` and a renderer appropriate to their model. HTTP
-OpenAI-compatible judges are also supported. See the [reward architecture](docs/rlhf-architecture.md).
+Render an existing program without a model server or Docker:
 
 ```sh
-# Generate or resume the default prompt file without rendering or training.
-# Calls the prompt-writing provider only for missing checkpointed prompts:
-.venv/bin/python -m drawing.generate_dataset --prompts-only \
-  --count 1000 --harmful-count 120 --malicious-code-count 80 \
-  --benign-boundary-count 0 --difficulty mixed --seed 44 \
-  --prompt-model openai/gpt-6-luna --prompt-url https://openrouter.ai/api/v1 \
-  --output datasets/grpo-v2
-
-# Validate the dataset and initial checkpoint; no API/Docker calls or writes:
-.venv/bin/python -m training.grpo --dry-run --max-steps 1
-
-# Smoke run: one update, two prompt groups, four trajectories per group:
-.venv/bin/python -m training.grpo --max-steps 1 \
-  --output-dir checkpoints/grpo-v4-smoke
-
-# Full run on the default 1,000 mixed prompts:
-make grpo ARGS="--output-dir checkpoints/grpo-v4"
-
-# Resume an interrupted run with its original arguments:
-.venv/bin/python -m training.grpo --output-dir checkpoints/grpo-v4
-
-# Recover final.json after Cookbook completed but final export failed:
-.venv/bin/python -m training.grpo --finalize-only \
-  --output-dir checkpoints/grpo-v4
+make render ARGS='examples/transforms.py --prompt "Draw twelve golden shapes" --seed 42'
 ```
 
-### Defaults and checkpointing
+[`DrawingEnvironment`](drawing/environment.py) exposes async `reset`, `write_code`,
+`run_code`, `submit`, and `refuse` operations for local episodes. Its defaults are
+20 operations, a ten-minute episode deadline, a 60-second render timeout,
+262,144 generated tokens, 64 KiB source, and an 8 MiB PNG. Adapters report token
+usage through `charge_tokens`; the environment does not tokenize responses.
+`ARTSY_PYTHON` overrides the local render interpreter.
 
-| Setting | Default |
-| --- | ---: |
-| Prompt groups per update | 2 |
-| Trajectories per prompt | 4 |
-| Concurrent Docker episodes | 4 |
-| Learning rate | `1e-5` |
-| Sampling temperature | 1.0 |
-| PPO ratio clipping | 0.8–1.2 |
-| Reference-KL coefficient | 0.01, against the initial SFT sampler |
-| Epochs | 1 (500 updates / 4,000 episodes on 1,000 prompts) |
-| Model turns per trajectory | 20, with a countdown and final-turn submission reminder |
-| Bash calls per trajectory | No separate cap |
-| Generated tokens per turn | Remaining context capacity; no separate cap |
-| Context per request, including history and preview images | 262,144 |
-| Separate aggregate generated-token budget | None |
-| Checkpoint cadence | Every update |
+Each reset creates a new episode directory with configuration, ordered trajectory,
+and state. Successful submissions add source/image files and hashes; previews are
+retained separately. Seeds reproduce Python random/hash ordering within a runtime,
+but Cairo and font differences can affect pixels across hosts.
 
-Responses are clipped to the remaining context. `--max-tokens N` optionally adds
-a per-response cap; `--max-tokens 0` uses the default remaining-context capacity.
-Cookbook mean-centers rewards
-within each prompt group without standard-deviation scaling and removes
-constant-reward groups. `--normalize-rewards` is a deprecated compatibility flag
-with no effect. Built-in training evaluation is disabled; evaluate checkpoints
-separately with Inspect.
-
-Outputs include `training-manifest.json`, Cookbook `checkpoints.jsonl`, metrics,
-grouped rollout summaries, and per-episode source, PNG, judgments, and reward
-components. On completion, Artsy writes `final.json` with remote state/sampler
-paths for the UI and model catalog. Resume validates dataset, source, initial
-state, and hyperparameter compatibility. Older RL runs initialized from a different policy stage are incompatible. Start
-fresh from SFT. To extend a completed compatible run while retaining optimizer
-state and the original SFT KL reference, use a new
-output directory and `--continue-from` with `--additional-steps`; see
-[continuation and checkpoint selection](docs/grpo-continuation.md).
-
-## Verification
+## Development checks
 
 ```sh
 make check
 make test
 make test-eval
-.sft-venv/bin/python -m unittest discover -s tests -p 'test_sft.py' -v
+.venv/bin/python -m unittest ui.test_server ui.test_launch ui.test_preferences ui.test_rl_monitor
+node --test ui/test_trace.cjs ui/test_rl_monitor.cjs
 ```
 
-Tests cover the dataset and episode cores, fresh final rendering, timeouts,
-symlink rejection, dataset validation, judge parsing, and actual Inspect score
-aggregation using known test programs. They require the Python dependencies above
-and local Cairo; they do not require a running model or Docker daemon.
+`make` uses `.venv/bin/python` by default. Evaluation targets prefer `.eval-venv`
+when present; override with `PYTHON` or `EVAL_PYTHON`. Pass CLI options through
+`ARGS`. Tests exercise rendering, datasets, trajectory conversion, training plans,
+judge parsing, Inspect scoring, and UI behavior using fixtures/mocks; no paid
+model calls or running Docker daemon are required. Rendering tests need Cairo and
+Python dependencies for the modules under test.
 
-The historical Liquid 230M baseline connected and issued tool calls, but generated
-invalid drawing code and exhausted its episode budget. No valid submission was
-reported. Repair tests use scripted responses; Qwen drawing
-quality must be evaluated separately before training.
-
-A historical Qwen3.5-0.8B vision smoke test identified a blue circle and returned a parsed
-`report(color="blue", shape="circle")` tool call from the image. The CPU path took
-about 107 seconds for that image-plus-tool request; full drawing performance and
-quality still need benchmarking.
-
-References: [Qwen model card](https://huggingface.co/Qwen/Qwen3.5-4B),
-[Inspect SWE](https://meridianlabs-ai.github.io/inspect_swe/),
-[Mini SWE Agent](https://mini-swe-agent.com/),
-[original Artsy post](https://blog.rashik.sh/tech/can-ai-learn-to-draw/).
+Further reading: [pipeline diagrams](docs/pipeline-diagrams.md),
+[benchmark and review](docs/benchmark.md), [RL continuation](docs/grpo-continuation.md),
+and the [original Artsy post](https://blog.rashik.sh/tech/can-ai-learn-to-draw/).
