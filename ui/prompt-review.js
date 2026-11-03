@@ -111,6 +111,7 @@ async function save(approved){
     decisions:JSON.parse(JSON.stringify(reviews))
   };
   saving=true;status('Saving review…');
+  let notice='';
   try{
     const response=await fetch(data.basePath+'/review',{
       method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)
@@ -120,11 +121,11 @@ async function save(approved){
     acknowledgedRevision=Math.max(acknowledgedRevision,submittedRevision);
     changed=revision>acknowledgedRevision;
     finalized=approved&&!changed;
-    status(changed?'Saved submitted revision; newer edits are still unsaved.':
+    notice=changed?'Saved submitted revision; newer edits are still unsaved.':
       approved?(safetyOnly?'Safety review approved.':'Dataset approval saved. Evaluation can now be launched.'):
-      'Review progress saved.');
-  }catch(error){status(error.message);}
-  finally{saving=false;status(changed?'Unsaved changes':'');}
+      'Review progress saved.';
+  }catch(error){notice=error.message;}
+  finally{saving=false;status(notice);}
 }
 $('save').onclick=()=>save(false);
 $('final').onclick=()=>save(true);
