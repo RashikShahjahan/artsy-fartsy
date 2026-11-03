@@ -36,7 +36,7 @@ async function saveRanking() {
       if(rankDrafts.size)status('Saved submitted ranking; newer edits are still unsaved.');
     }
   } catch(error) {status(error.message);}
-  finally {rankSaving=false;el('save').disabled=Boolean(packet?.sealed);progress();}
+  finally {rankSaving=false;el('save').disabled=Boolean(packet?.sealed);if(packet){const done=packet.cases.filter(c=>c.ranks).length;el('reveal').disabled=done!==packet.cases.length||!done||rankDrafts.size>0;}}
 }
 el('save').onclick=saveRanking;
 el('reveal').onclick=async()=>{try{const result=await api('/api/preferences/reveal',{reviewer:name});packet.sealed=true;show();el('results').hidden=false;el('score-table').replaceChildren();const table=document.createElement('table');const header=table.createTHead().insertRow();for(const text of ['Model','Preference score / 100']){const th=document.createElement('th');th.textContent=text;header.append(th);}const body=table.createTBody();for(const model of result.models.sort((a,b)=>b.preference_score-a.preference_score)){const row=body.insertRow();row.insertCell().textContent=model.model;row.insertCell().textContent=model.preference_score.toFixed(1);}el('score-table').append(table);status(`Review complete · ${result.comparisons} comparisons across ${result.prompts} prompts. Scores saved.`);}catch(e){status(e.message);}};
