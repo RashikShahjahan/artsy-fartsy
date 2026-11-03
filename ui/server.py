@@ -621,7 +621,7 @@ class Handler(SimpleHTTPRequestHandler):
         if target in ('/studio', '/studio/', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
             return self.send_page(page)
-        if target not in ('/speech.js', '/artsy.js', '/activity.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css'):
+        if target not in ('/speech.js', '/artsy.js', '/activity.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css', '/run-client.js'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 
