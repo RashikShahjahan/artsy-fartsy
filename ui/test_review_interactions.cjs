@@ -104,6 +104,7 @@ test('prompt review acknowledges only the submitted notes revision',async()=>{
     review:{decisions:{}},sha256:'test',scope:'all',basePath:'/review'
   };
   const h=harness('prompt-review.js',payload);
+  h.ids.get('reviewer').value='Reviewer';
   const notes=h.ids.get('cards').children[0].children.find(child=>child.tagName==='TEXTAREA');
   notes.value='original';notes.oninput();
   const saving=h.ids.get('save').onclick();
