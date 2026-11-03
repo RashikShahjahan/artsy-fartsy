@@ -55,6 +55,7 @@ let bridgeOnline = false;
 let selectedId = new URLSearchParams(location.hash.slice(1)).get("run");
 let activeKind = "eval";
 let refreshing = false;
+let refreshQueued = false;
 let submitting = false;
 
 function fieldValue(input) {
@@ -278,21 +279,28 @@ function renderDetail(data) {
   $("monitor-link").hidden = data.kind !== "rl";
 }
 async function refresh() {
-  if (refreshing) return;
+  if (refreshing) {refreshQueued = true; return;}
   refreshing = true;
   try {
     const rows = (await request("/api/launches")).runs;
     if (!selectedId && rows.length) selectedId = rows[0].id;
     renderHistory(rows);
     if (selectedId) {
+      const requestedId = selectedId;
       try {
-        renderDetail(await request("/api/launches/" + encodeURIComponent(selectedId)));
+        const details = await request("/api/launches/" + encodeURIComponent(requestedId));
+        if (requestedId === selectedId) renderDetail(details);
+        else refreshQueued = true;
       } catch (error) {
-        $("detail-state").textContent = error.message;
+        if (requestedId === selectedId) $("detail-state").textContent = error.message;
       }
     }
   } finally {
     refreshing = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      Promise.resolve().then(() => refresh().catch(error => message(error.message, true)));
+    }
   }
 }
 $("run-kind").addEventListener("change", event => {
