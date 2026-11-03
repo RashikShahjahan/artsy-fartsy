@@ -25,5 +25,5 @@ def review_page(content, current):
 
 def empty_page(current, title, message):
     return review_page(f'<header class="workspace-header"><h1>{html.escape(title)}</h1></header>'
-                       f'<main class="review-workspace"><div class="panel empty-state"><p>{html.escape(message)}</p>'
+                       f'<main class="review-workspace"><div class="panel ui-panel empty-state"><p>{html.escape(message)}</p>'
                        '<a href="/studio">Return to Studio</a></div></main>', current)
