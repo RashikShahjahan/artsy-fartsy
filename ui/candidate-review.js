@@ -2,6 +2,7 @@
 const data = JSON.parse(document.getElementById('review-data').textContent), reviews = JSON.parse(JSON.stringify(data.review.decisions || {}));
 const $ = id => document.getElementById(id);
 let current = null, changed = false, saving = false, revision = 0, acknowledgedRevision = 0;
+let detailRequest = 0, loadedDetailId = null;
 const cardNodes = new Map();
 function markDirty(){revision++;changed=true;status();}
 window.addEventListener('beforeunload', event => {if(changed){event.preventDefault();event.returnValue='';}});
@@ -172,13 +173,15 @@ function attemptTimeline(record, images) {
  wrap.append(list);return wrap;
 }
 async function openRecord(id) {
- if(current===id && $('detail').dataset.requestedId===id)return;
- current=id;render();$('detail').dataset.requestedId=id;
+ if(current===id && loadedDetailId===id)return;
+ const request=++detailRequest;
+ current=id;loadedDetailId=null;render();
  $('detail').replaceChildren(node('p','Loading complete record...'));
  try {
   const response=await fetch(data.basePath+'/api/record?id='+encodeURIComponent(id));const x=await response.json();
   if(!response.ok)throw Error(x.error);
-  if(current!==id)return;
+  if(current!==id || request!==detailRequest)return;
+  loadedDetailId=id;
   const d=reviews[id] || {decision:'pending',notes:''}, box=$('detail');box.replaceChildren();
   box.append(node('h2',x.record.spec.prompt));
   box.append(node('p','Candidate '+id+' · '+x.record.status+' · '+(x.record.reason || ''),'meta'));
@@ -202,7 +205,7 @@ async function openRecord(id) {
   if(x.record.refusal)overview.append(node('h3','Refusal'),node('p',x.record.refusal));
   const fields=node('div'), raw=node('details');raw.append(node('summary','Raw JSON'),codeView(x.record));fields.append(valueView(x.record),raw);
   box.append(tabs([['Overview',overview],['Attempts',attemptTimeline(x.record,x.images)],['Conversation',conversationView(x.example)],['Record fields',fields]]));
- } catch(e) {if(current===id)$('detail').replaceChildren(node('p',e.message,'bad'));}
+ } catch(e) {if(current===id && request===detailRequest)$('detail').replaceChildren(node('p',e.message,'bad'));}
 }
 async function post(path, body) {
  const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
