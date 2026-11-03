@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Artsy · SFT candidates</title>
+<link rel="stylesheet" href="__BASE_PATH__/assets/style.css">
+<link rel="stylesheet" href="__BASE_PATH__/assets/review.css">
+<script src="__BASE_PATH__/assets/dom.js" defer></script>
+<script src="__BASE_PATH__/assets/candidate-review.js" defer></script>
+</head><body class="candidates-page">
+__NAVIGATION__
+<header class="workspace-header">
+<h1>SFT candidates</h1>
+<div id="overview"></div>
+<div class="controls">
+<input id="search" aria-label="Search prompts or candidates" placeholder="Search prompt, ID, source">
+<select id="automatic" aria-label="Generation outcome"><option value="">All generation outcomes</option><option>accepted</option><option>review</option><option>rejected</option><option>infrastructure_error</option></select>
+<select id="decision" aria-label="Manual decision"><option value="">All manual decisions</option><option>pending</option><option>approved</option><option>rejected</option></select>
+<input id="reviewer" aria-label="Reviewer name" placeholder="Reviewer name">
+<button id="save" type="button">Save decisions</button>
+<button class="primary" id="export" type="button">Export approved SFT</button>
+</div><div id="status" role="status" aria-live="polite"></div>
+</header>
+<main class="review-workspace"><section id="items" aria-label="Candidates"></section><section id="detail" class="panel">Select a candidate to inspect its full trajectory.</section></main>
+<script type="application/json" id="review-data">__DATA__</script>
+</body></html>
