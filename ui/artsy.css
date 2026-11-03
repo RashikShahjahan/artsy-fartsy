@@ -1,10 +1,10 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Serif+Display:ital@0;1&display=swap');
 
 :root {
-  --paper: #f0d7fa;
-  --ink: #32134f;
-  --muted: #624376;
-  --coral: #e52fb7;
+  --paper: #f3ecdf;
+  --ink: #41303f;
+  --muted: #79685f;
+  --coral: #aa604b;
   --sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --serif: 'DM Serif Display', Georgia, serif;
 }
@@ -31,7 +31,7 @@ button:focus-visible, a:focus-visible, textarea:focus-visible, select:focus-visi
 main { min-height: 100svh; padding: 118px 28px 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .welcome { text-align: center; margin-top: -40px; }
 h1 { font-family: var(--serif); font-size: clamp(36px, 4.8vw, 55px); letter-spacing: -1.8px; font-weight: 400; line-height: 1.2; margin: 0; }
-.welcome p { color: #5e3575; font-size: 16px; margin: 14px 0 0; }
+.welcome p { color: #79685f; font-size: 16px; margin: 14px 0 0; }
 
 .voice-dock { width: 100%; max-width: 440px; text-align: center; margin-top: 43px; display: flex; flex-direction: column; align-items: center; }
 .voice-title { color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.7; margin: 0 0 19px; max-width: 100%; overflow-wrap: anywhere; }
@@ -40,15 +40,15 @@ h1 { font-family: var(--serif); font-size: clamp(36px, 4.8vw, 55px); letter-spac
 .mic-button svg { width: 24px; height: 24px; }
 .mic-button.listening { background: var(--coral); animation: pulse 1.6s infinite; }
 .mic-stop { width: 15px; height: 15px; border-radius: 3px; background: currentColor; }
-.type-toggle { color: #67417e; display: grid; place-items: center; width: 44px; height: 44px; margin-top: 13px; border-radius: 50%; }
+.type-toggle { color: #79685f; display: grid; place-items: center; width: 44px; height: 44px; margin-top: 13px; border-radius: 50%; }
 .type-toggle:hover, .type-toggle[aria-expanded=true] { color: var(--ink); }
 .type-toggle svg { width: 19px; height: 19px; }
-.prompt-form { display: flex; gap: 12px; align-items: flex-end; width: 100%; margin-bottom: 23px; padding: 10px 10px 10px 15px; background: #fff8ffb8; border: 1px solid #ffffff80; backdrop-filter: blur(16px); border-radius: 14px; }
+.prompt-form { display: flex; gap: 12px; align-items: flex-end; width: 100%; margin-bottom: 23px; padding: 10px 10px 10px 15px; background: #fffaf0dc; border: 1px solid #ffffff80; backdrop-filter: blur(16px); border-radius: 14px; }
 .prompt-form textarea { flex: 1; width: 0; resize: vertical; min-height: 38px; max-height: 150px; padding: 8px 0; border: 0; background: transparent; font-size: 13px; line-height: 1.6; }
-.prompt-form textarea::placeholder { color: #67417e; }
+.prompt-form textarea::placeholder { color: #79685f; }
 .send-button { display: grid; place-items: center; width: 36px; height: 36px; margin-bottom: 1px; border-radius: 50%; background: var(--ink); color: var(--paper); }
 .send-button svg { width: 18px; height: 18px; }
-.input-error { width: 100%; font-size: 12px; color: #8d145e; line-height: 1.7; margin-bottom: 18px; }
+.input-error { width: 100%; font-size: 12px; color: #954d3c; line-height: 1.7; margin-bottom: 18px; }
 
 .drawing-space { width: 100%; max-width: 850px; display: flex; flex-direction: column; align-items: center; }
 .canvas { width: 100%; display: flex; align-items: center; justify-content: center; min-height: 240px; }
@@ -59,45 +59,49 @@ h1 { font-family: var(--serif); font-size: clamp(36px, 4.8vw, 55px); letter-spac
 main.has-drawing .voice-dock { margin-top: 26px; }
 main.is-busy .mic-button { animation: breathe 2.5s infinite; }
 
-.sidebar-scrim { position: fixed; inset: 0; background: #32134f33; z-index: 3; }
-.sidebar { position: fixed; inset: 0 0 0 auto; width: min(330px, 88vw); padding: 30px 22px; background: var(--paper); box-shadow: -5px 0 50px #32134f18; z-index: 4; overflow-y: auto; }
+.sidebar-scrim { position: fixed; inset: 0; background: #41303f33; z-index: 3; }
+.sidebar { position: fixed; inset: 0 0 0 auto; width: min(330px, 88vw); padding: 30px 22px; background: var(--paper); box-shadow: -5px 0 50px #41303f18; z-index: 4; overflow-y: auto; }
 .sidebar-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 27px; }
 .sidebar-heading h2 { font-family: var(--serif); font-weight: 400; font-size: 25px; margin: 0; }
 .history-item { display: block; text-align: left; width: 100%; border-radius: 8px; padding: 13px 10px; margin-bottom: 5px; }
-.history-item:hover, .history-item.selected { background: #b266f51c; }
+.history-item:hover, .history-item.selected { background: #b69c7620; }
 .history-item strong { display: block; font-weight: 400; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .history-item small { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; }
 
-@keyframes pulse { 50% { box-shadow: 0 0 0 12px #e52fb72b; } }
+@keyframes pulse { 50% { box-shadow: 0 0 0 12px #aa604b2b; } }
 @keyframes breathe { 50% { opacity: .45; } }
 
-/* Broad pools of color keep the voice-first surface uncluttered. */
+/* Fine, repeating wave contours sit around a quiet paper center. */
 body::before {
   content: '';
   position: fixed;
-  inset: -12%;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
-  background:
-    radial-gradient(ellipse at 4% 8%, #dfff54 0%, #dfff5400 40%),
-    radial-gradient(ellipse at 100% 5%, #ac66ff 0%, #ac66ff00 46%),
-    radial-gradient(ellipse at 85% 100%, #ff72d6 0%, #ff72d600 48%),
-    radial-gradient(ellipse at 0% 100%, #ff9b52 0%, #ff9b5200 46%),
-    radial-gradient(ellipse at 55% 40%, #f9d9ef 12%, #d6b8ff 85%);
-  animation: color-drift 24s ease-in-out infinite alternate;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22240%22%20height%3D%22320%22%20viewBox%3D%220%200%20240%20320%22%3E%3Cg%20fill%3D%22none%22%20stroke-width%3D%221.4%22%3E%3Cpath%20d%3D%22M-120%20-160%20C-70%20-80%20-170%20-80%20-120%200%20S-170%2080%20-120%20160%20S-170%20240%20-120%20320%20S-170%20400%20-120%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M-104%20-160%20C-54%20-80%20-154%20-80%20-104%200%20S-154%2080%20-104%20160%20S-154%20240%20-104%20320%20S-154%20400%20-104%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M-88%20-160%20C-38%20-80%20-138%20-80%20-88%200%20S-138%2080%20-88%20160%20S-138%20240%20-88%20320%20S-138%20400%20-88%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M-72%20-160%20C-22%20-80%20-122%20-80%20-72%200%20S-122%2080%20-72%20160%20S-122%20240%20-72%20320%20S-122%20400%20-72%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M-56%20-160%20C-6%20-80%20-106%20-80%20-56%200%20S-106%2080%20-56%20160%20S-106%20240%20-56%20320%20S-106%20400%20-56%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M-40%20-160%20C10%20-80%20-90%20-80%20-40%200%20S-90%2080%20-40%20160%20S-90%20240%20-40%20320%20S-90%20400%20-40%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M-24%20-160%20C26%20-80%20-74%20-80%20-24%200%20S-74%2080%20-24%20160%20S-74%20240%20-24%20320%20S-74%20400%20-24%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M-8%20-160%20C42%20-80%20-58%20-80%20-8%200%20S-58%2080%20-8%20160%20S-58%20240%20-8%20320%20S-58%20400%20-8%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M8%20-160%20C58%20-80%20-42%20-80%208%200%20S-42%2080%208%20160%20S-42%20240%208%20320%20S-42%20400%208%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M24%20-160%20C74%20-80%20-26%20-80%2024%200%20S-26%2080%2024%20160%20S-26%20240%2024%20320%20S-26%20400%2024%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M40%20-160%20C90%20-80%20-10%20-80%2040%200%20S-10%2080%2040%20160%20S-10%20240%2040%20320%20S-10%20400%2040%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M56%20-160%20C106%20-80%206%20-80%2056%200%20S6%2080%2056%20160%20S6%20240%2056%20320%20S6%20400%2056%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M72%20-160%20C122%20-80%2022%20-80%2072%200%20S22%2080%2072%20160%20S22%20240%2072%20320%20S22%20400%2072%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M88%20-160%20C138%20-80%2038%20-80%2088%200%20S38%2080%2088%20160%20S38%20240%2088%20320%20S38%20400%2088%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M104%20-160%20C154%20-80%2054%20-80%20104%200%20S54%2080%20104%20160%20S54%20240%20104%20320%20S54%20400%20104%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M120%20-160%20C170%20-80%2070%20-80%20120%200%20S70%2080%20120%20160%20S70%20240%20120%20320%20S70%20400%20120%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M136%20-160%20C186%20-80%2086%20-80%20136%200%20S86%2080%20136%20160%20S86%20240%20136%20320%20S86%20400%20136%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M152%20-160%20C202%20-80%20102%20-80%20152%200%20S102%2080%20152%20160%20S102%20240%20152%20320%20S102%20400%20152%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M168%20-160%20C218%20-80%20118%20-80%20168%200%20S118%2080%20168%20160%20S118%20240%20168%20320%20S118%20400%20168%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M184%20-160%20C234%20-80%20134%20-80%20184%200%20S134%2080%20184%20160%20S134%20240%20184%20320%20S134%20400%20184%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M200%20-160%20C250%20-80%20150%20-80%20200%200%20S150%2080%20200%20160%20S150%20240%20200%20320%20S150%20400%20200%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M216%20-160%20C266%20-80%20166%20-80%20216%200%20S166%2080%20216%20160%20S166%20240%20216%20320%20S166%20400%20216%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M232%20-160%20C282%20-80%20182%20-80%20232%200%20S182%2080%20232%20160%20S182%20240%20232%20320%20S182%20400%20232%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M248%20-160%20C298%20-80%20198%20-80%20248%200%20S198%2080%20248%20160%20S198%20240%20248%20320%20S198%20400%20248%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M264%20-160%20C314%20-80%20214%20-80%20264%200%20S214%2080%20264%20160%20S214%20240%20264%20320%20S214%20400%20264%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M280%20-160%20C330%20-80%20230%20-80%20280%200%20S230%2080%20280%20160%20S230%20240%20280%20320%20S230%20400%20280%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M296%20-160%20C346%20-80%20246%20-80%20296%200%20S246%2080%20296%20160%20S246%20240%20296%20320%20S246%20400%20296%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M312%20-160%20C362%20-80%20262%20-80%20312%200%20S262%2080%20312%20160%20S262%20240%20312%20320%20S262%20400%20312%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M328%20-160%20C378%20-80%20278%20-80%20328%200%20S278%2080%20328%20160%20S278%20240%20328%20320%20S278%20400%20328%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M344%20-160%20C394%20-80%20294%20-80%20344%200%20S294%2080%20344%20160%20S294%20240%20344%20320%20S294%20400%20344%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3Cpath%20d%3D%22M360%20-160%20C410%20-80%20310%20-80%20360%200%20S310%2080%20360%20160%20S310%20240%20360%20320%20S310%20400%20360%20480%22%20stroke%3D%22%23806478%22%2F%3E%3Cpath%20d%3D%22M376%20-160%20C426%20-80%20326%20-80%20376%200%20S326%2080%20376%20160%20S326%20240%20376%20320%20S326%20400%20376%20480%22%20stroke%3D%22%23bc8063%22%2F%3E%3Cpath%20d%3D%22M392%20-160%20C442%20-80%20342%20-80%20392%200%20S342%2080%20392%20160%20S342%20240%20392%20320%20S342%20400%20392%20480%22%20stroke%3D%22%23b5a06b%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+  background-size: 300px 400px;
+  opacity: .44;
+  mask-image: radial-gradient(ellipse at 50% 47%, transparent 22%, #0005 48%, #000 90%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 47%, transparent 22%, #0005 48%, #000 90%);
+}
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: .18;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%238b7357' opacity='.3' filter='url(%23grain)' d='M0 0h180v180H0z'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
 }
 .mic-button {
-  color: #32134f;
-  background: #dfff54;
-  box-shadow: 0 0 0 1px #ffffff66, 0 8px 35px #8730be25;
+  color: #f8f0e2;
+  background: #594254;
+  box-shadow: 0 0 0 1px #59425418, 0 5px 20px #59425415;
 }
-.mic-button:hover { box-shadow: 0 0 0 8px #dfff5433, 0 8px 35px #8730be30; }
-.mic-button.listening { color: #fff; background: #bc167f; }
-.versions option { background: #f0d7fa; color: #32134f; }
-@keyframes color-drift {
-  from { transform: translate(-1%, -1%) scale(1); }
-  to { transform: translate(2%, 1%) scale(1.08) rotate(5deg); }
-}
+.mic-button:hover { box-shadow: 0 0 0 7px #b5a06b20; }
+.mic-button.listening { color: #fff9ed; background: #aa604b; }
+.versions option { background: var(--paper); color: var(--ink); }
 
 @media (max-width: 600px) {
   .topbar { padding: 23px 20px; }
