@@ -70,8 +70,9 @@ class JobTests(unittest.TestCase):
                 handler.do_GET()
                 page = handler.wfile.getvalue().decode()
                 self.assertIn('aria-current="page">Prompt review', page)
-                self.assertIn("fetch('/review/review'", page)
-                self.assertIn('href="/style.css"', page)
+                self.assertIn('src="/review/assets/prompt-review.js"', page)
+                self.assertIn('"basePath": "/review"', page)
+                self.assertIn('href="/review/assets/style.css"', page)
                 self.assertNotIn('<style>', page)
                 manifest, _ = __import__('evaluation.benchmark', fromlist=['suite']).suite()
                 body = json.dumps({'dataset_sha256': manifest['sha256'], 'reviewer': 'Test',
@@ -124,8 +125,8 @@ class JobTests(unittest.TestCase):
             with patch.object(server, 'CANDIDATE_DATASET', str(path)):
                 handler.do_GET()
                 page = handler.wfile.getvalue().decode()
-                self.assertIn("fetch('/candidates/api/record?id='", page)
-                self.assertIn("post('/candidates/api/export'", page)
+                self.assertIn('src="/candidates/assets/candidate-review.js"', page)
+                self.assertIn('"basePath": "/candidates"', page)
                 self.assertIn('aria-current="page">SFT candidates', page)
                 handler.path = '/candidates/api/record?id=one'
                 handler.wfile = BytesIO()
