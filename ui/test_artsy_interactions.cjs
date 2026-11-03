@@ -3,14 +3,16 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function setup(saved = []) {
+function setup(saved = [], runResponse) {
   const elements = {};
   function node(id = '') {
     return {id, hidden: false, value: '', checked: false, children: [], options: [],
+      scrollTop: 0, scrollHeight: 0, clientHeight: 300,
       classList: {toggle() {}, add() {}, remove() {}},
       setAttribute() {}, removeAttribute() {}, toggleAttribute() {}, focus() {},
-      querySelector() { return node(); }, append(...items) { this.children.push(...items); },
-      replaceChildren() { this.children = []; }};
+      querySelector() { return node(); }, append(...items) { this.children.push(...items); items.forEach(item => item.parent = this); },
+      remove() { if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this); },
+      replaceChildren(...items) { this.children = items; }};
   }
   for (const [, id] of fs.readFileSync(`${__dirname}/artsy.html`, 'utf8').matchAll(/id="([^"]+)"/g)) elements[id] = node(id);
   const sessions = [], requests = [];
@@ -23,16 +25,25 @@ function setup(saved = []) {
   const storage = new Map([['artsy.sketchbook.v1', JSON.stringify(saved)]]);
   const document = {querySelectorAll: () => Object.values(elements), querySelector: () => node(),
     createElement: () => node(), addEventListener() {}, hidden: false};
-  vm.runInNewContext(fs.readFileSync(`${__dirname}/artsy.js`, 'utf8'), {
+  const timers = [];
+  const context = vm.createContext({
     document, navigator: {language: 'en'},
     window: {SpeechRecognition: Recognition, AudioContext: function() {},
       ArtsySpeech: class { speak() {} cancel() {} unlock() {} setEnabled() {} },
-      ArtsyActivity: class { reset() {} render() {} fail() {} }},
+    },
     localStorage: {getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key)},
-    fetch: (url, options) => { requests.push({url, options}); return new Promise(() => {}); },
-    Option: function(text, value) { return {text, value}; }, setTimeout, clearTimeout,
+    fetch: (url, options) => {
+      requests.push({url, options});
+      if (!runResponse) return new Promise(() => {});
+      return Promise.resolve({ok: true, json: async () => runResponse(url, options)});
+    },
+    Option: function(text, value) { return {text, value}; },
+    setTimeout: callback => timers.push(callback), clearTimeout() {},
   });
-  return {elements, sessions, requests};
+  vm.runInContext(fs.readFileSync(`${__dirname}/activity.js`, 'utf8'), context);
+  context.window.ArtsyActivity = context.ArtsyActivity;
+  vm.runInContext(fs.readFileSync(`${__dirname}/artsy.js`, 'utf8'), context);
+  return {elements, sessions, requests, timers};
 }
 
 test('discarded recognition callbacks cannot submit or interrupt a new voice session', () => {
@@ -59,4 +70,36 @@ test('opening history uses the displayed fallback version for the next revision'
   ui['prompt-form'].onsubmit({preventDefault() {}});
   assert.equal(JSON.parse(requests.at(-1).options.body).parent_id, version);
   assert.equal(ui.prompt.placeholder, 'What would you like to change?');
+});
+
+test('live drawing advances from recorded steps to a downloadable validated render', async () => {
+  const id = 'b'.repeat(32);
+  const step = {id: 'action-1', kind: 'tool', status: 'completed', title: 'Render preview', previews: ['preview-1-0.png']};
+  let run = {state: 'running', execution_mode: 'auto', prompt: 'A cat', progress: {phase: 'previewing', steps: [step]}};
+  const {elements: ui, timers, requests} = setup([], url => url === '/api/artsy/runs' ? {id} : run);
+  ui.prompt.value = run.prompt;
+  ui['prompt-form'].onsubmit({preventDefault() {}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui['drawing-space'].hidden, false);
+  assert.equal(ui['agent-activity'].hidden, false);
+  assert.equal(ui['drawing-process'].hidden, false);
+  assert.equal(ui['drawing-process'].open, true);
+  assert.equal(ui['activity-steps'].children[0].children[1].src, `/api/runs/${id}/preview-1-0.png`);
+  assert.equal(ui.download.hidden, true);
+  run = {...run, progress: {phase: 'thinking', steps: [step,
+    {id: 'turn-2', kind: 'model', title: 'Agent turn 2', status: 'running'}]}};
+  await timers.shift()();
+  assert.equal(ui['activity-steps'].children[0].hidden, false);
+  assert.equal(ui['activity-steps'].children[0].children[1].src, `/api/runs/${id}/preview-1-0.png`);
+  assert.equal(ui['activity-steps'].children[1].hidden, true);
+  assert.ok(timers.length, 'Auto mode keeps polling while the next step runs');
+  assert.equal(requests.some(request => request.url.endsWith('/approve')), false);
+  run = {...run, state: 'completed', result: {outcome: 'submitted'}, artifacts: ['image.png']};
+  await timers.shift()();
+  assert.equal(ui['drawing-image'].src, `/api/runs/${id}/image.png`);
+  assert.equal(ui['drawing-image'].hidden, false);
+  assert.equal(ui.download.href, ui['drawing-image'].src);
+  assert.equal(ui.download.hidden, false);
+  assert.equal(ui['drawing-process'].open, false);
+  assert.equal(ui['drawing-process'].hidden, false);
 });

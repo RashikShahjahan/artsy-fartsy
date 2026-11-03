@@ -38,7 +38,9 @@
       const response = await fetch(`/api/runs/${id}`, {cache: 'no-store'});
       if (!response.ok) throw new Error('Activity unavailable');
       const run = await response.json();
-      if (request === activityRequest && !busy) activity.render({...run, id});
+      if (request === activityRequest && !busy) {
+        activity.render({...run, id}); ui.drawingProcess.hidden = false;
+      }
     } catch {
       if (request === activityRequest && !busy) ui.activityStatus.textContent = 'Step history is unavailable for this drawing.';
     }
@@ -79,6 +81,7 @@
   }
   function setBusy(value) {
     busy = value; ui.main.classList.toggle('is-busy', value);
+    ui.drawingProcess.open = value;
     ui.micButton.disabled = value || !Recognition; ui.send.disabled = value;
     ui.newDrawing.disabled = value; ui.newDrawing.hidden = !current;
     ui.versions.disabled = value;
@@ -104,9 +107,10 @@
     ui.drawingImage.src = `/api/runs/${version.id}/image.png`;
     ui.drawingImage.alt = version.prompt;
     ui.drawingImage.hidden = false; ui.workingPlaceholder.hidden = true;
+    ui.drawingProcess.hidden = false;
     ui.download.href = ui.drawingImage.src; ui.download.hidden = false;
     renderVersions(version.id); updateVoiceLabel();
-    if (loadSteps) loadActivity(version.id);
+    if (loadSteps) { ui.drawingProcess.open = false; loadActivity(version.id); }
   }
   function openDrawing(drawing) {
     if (busy) return;
@@ -120,7 +124,7 @@
     if (busy) return;
     stopListening(true); speech.cancel();
     current = null; activeRun = null; rememberActive(null); showError(''); closeSidebar();
-    activityRequest++; activity.reset();
+    activityRequest++; activity.reset(); ui.drawingProcess.hidden = true; ui.drawingProcess.open = false;
     ui.welcome.hidden = false; ui.drawingSpace.hidden = true;
     ui.main.classList.remove('has-drawing'); ui.newDrawing.hidden = true;
     ui.prompt.value = ''; ui.prompt.placeholder = 'What should we draw?';
@@ -204,7 +208,7 @@
       accepted = true; activeRun = data.id; rememberActive(data.id); lastPrompt = prompt;
       activityRequest++; activity.reset(data.id); activity.render({id: data.id, state: 'queued'});
       if (!current?.versions.length) current = {id: data.id, title: prompt, versions: []};
-      showWorkspace(); setBusy(true);
+      showWorkspace(); ui.drawingProcess.hidden = false; setBusy(true);
       ui.prompt.value = ''; ui.prompt.placeholder = 'What would you like to change?';
       setTypedInput(false, false); lastPhase = ''; previewSpoken = false;
       if (!parentId) { ui.drawingImage.hidden = true; ui.workingPlaceholder.hidden = false; ui.download.hidden = true; ui.versions.hidden = true; }
@@ -242,6 +246,7 @@
       applyProgress(run.progress);
       ui.modeApproval.checked = run.execution_mode === 'approval'; ui.modeAuto.checked = !ui.modeApproval.checked;
       activity.render({...run, id});
+      ui.drawingProcess.hidden = false;
       if (run.state === 'queued') ui.voiceTitle.textContent = 'Getting ready…';
       if (run.state === 'running' || run.state === 'queued') { pollTimer = setTimeout(poll, 1500); return; }
       if (run.state === 'completed' && run.result?.outcome === 'submitted' && run.artifacts?.includes('image.png')) {
@@ -265,7 +270,14 @@
   function finishFailed(message) {
     activity.fail(message);
     activeRun = null; rememberActive(null); setBusy(false);
-    if (!current?.versions.length) { ui.drawingSpace.hidden = true; ui.welcome.hidden = ui.agentActivity.hidden === false; ui.main.classList.remove('has-drawing'); }
+    ui.drawingProcess.hidden = ui.agentActivity.hidden; ui.drawingProcess.open = true;
+    ui.workingPlaceholder.hidden = true;
+    if (current?.versions.length) {
+      const version = current.versions.find(v => v.id === current.selectedId) || current.versions.at(-1);
+      showVersion(version, false);
+    } else {
+      ui.drawingImage.hidden = true; ui.download.hidden = true; showWorkspace();
+    }
     showError(message); ui.prompt.value = lastPrompt; setTypedInput(true, false); speak(message);
   }
 

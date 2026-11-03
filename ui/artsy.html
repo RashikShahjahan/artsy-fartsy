@@ -47,6 +47,13 @@
       <div class="canvas" id="canvas">
         <div class="working-placeholder" id="working-placeholder" aria-hidden="true"><svg><use href="#i-spark"/></svg></div>
         <img id="drawing-image" alt="" hidden>
+        <details class="drawing-process" id="drawing-process" hidden>
+          <summary>Drawing steps</summary>
+          <section class="agent-activity" id="agent-activity" aria-label="Drawing steps" hidden>
+            <p class="sr-only" id="activity-status" role="status" aria-live="polite"></p>
+            <ol class="activity-steps" id="activity-steps" aria-label="Agent steps" tabindex="0"></ol>
+          </section>
+        </details>
       </div>
       <select class="versions" id="versions" aria-label="Drawing version" hidden></select>
     </section>
@@ -74,13 +81,6 @@
           </fieldset>
         </div>
       </details>
-    </section>
-    <section class="agent-activity" id="agent-activity" aria-labelledby="activity-title" hidden>
-      <div class="activity-heading">
-        <h2 id="activity-title">Artsy at work</h2>
-        <p id="activity-status" role="status" aria-live="polite"></p>
-      </div>
-      <ol class="activity-steps" id="activity-steps" aria-label="Agent steps" tabindex="0"></ol>
     </section>
   </main>
 </body>

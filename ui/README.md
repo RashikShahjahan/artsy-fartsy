@@ -33,10 +33,15 @@ action, review its details, and click **Approve action** to continue. Each appro
 releases only that action, including when one model turn proposes several actions.
 The mode is fixed for the current drawing and can be changed before the next request.
 
-The **Artsy at work** timeline shows every recorded model turn and drawing action
-as it happens, with running, waiting, completed, and failed states. Expand an action
-to see its command and output; failed actions expand automatically. Previews appear
-inline, and final output is marked ready only after validation. Activity survives
+The drawing canvas keeps recorded model updates, action descriptions, and intermediate
+renders visible as centered entries in a scrollable view, without timeline markers.
+Both modes show the same steps and previews; Auto continues without pausing, while
+Approve steps adds an approval button for the pending action. Actions use plain-language
+descriptions rather than shell commands or tool logs. New steps and loaded previews
+stay in view unless you scroll back to inspect an earlier step. Empty thinking states
+use the progress message. Once the final image passes validation, it takes the place
+of the live steps. The **Drawing steps** disclosure keeps recorded steps and previews
+available after completion. Activity survives
 reloads and can be reopened with a saved drawing or version; older drawings use
 their exported trace when available. Progress comes from recorded execution events.
 The browser stores sketchbook metadata and the selected mode; run artifacts and

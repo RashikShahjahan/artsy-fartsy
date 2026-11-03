@@ -59,14 +59,29 @@ h1 { font-family: var(--serif); font-size: clamp(36px, 4.8vw, 55px); letter-spac
 .input-error { width: 100%; font-size: 12px; color: #954d3c; line-height: 1.7; margin-bottom: 18px; }
 
 .drawing-space { width: 100%; max-width: 850px; display: flex; flex-direction: column; align-items: center; }
-.canvas { width: 100%; display: flex; align-items: center; justify-content: center; min-height: 240px; }
+.canvas { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 240px; }
 .canvas img { display: block; max-width: 100%; max-height: 58svh; object-fit: contain; border-radius: 3px; }
 .working-placeholder { min-height: 250px; display: grid; place-items: center; }
 .working-placeholder svg { width: 44px; height: 44px; color: var(--coral); stroke-width: 1; animation: breathe 2.5s infinite; }
 .versions { margin-top: 16px; font-size: 11px; color: var(--muted); border: 0; background: transparent; padding: 4px; cursor: pointer; max-width: 100%; }
 main.has-drawing .voice-dock { margin-top: 26px; }
+main.is-busy { padding: 64px 28px; }
+main.is-busy .welcome, main.is-busy .drawing-space { display: none; }
+main.is-busy .voice-dock { margin-top: 0; }
+main.is-busy .voice-title { margin-bottom: 0; }
+main.is-busy .prompt-form { display: none; }
 main.is-busy .drawing-options { display: none; }
-main.is-busy .canvas:has(img[hidden]), main.is-busy .working-placeholder { min-height: 80px; }
+/* Recorded steps stay available without timeline markers or connecting lines. */
+main.is-busy .drawing-space:has(.activity-step:not([hidden])) { display: flex; }
+main.is-busy .drawing-space:has(.activity-step:not([hidden])) + .voice-dock { margin-top: 26px; }
+main.is-busy .canvas { min-height: 0; }
+main.is-busy .canvas > img, main.is-busy .working-placeholder { display: none; }
+main.is-busy .versions, main.is-busy .activity-step-status { display: none; }
+.drawing-process { width: 100%; max-width: 600px; margin-top: 20px; }
+.drawing-process > summary { width: fit-content; margin: 0 auto; padding: 10px; color: var(--muted); font-size: 12px; cursor: pointer; }
+.drawing-process > summary:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; }
+main.is-busy .drawing-process { margin-top: 0; }
+main.is-busy .drawing-process > summary { display: none; }
 main.is-busy .mic-button, main.is-busy .type-toggle { display: none; }
 
 .execution-modes { display: flex; gap: 4px; border: 1px solid #79685f33; border-radius: 24px; padding: 4px; margin: 0; }
@@ -76,31 +91,25 @@ main.is-busy .mic-button, main.is-busy .type-toggle { display: none; }
 .execution-modes input:checked + span { background: var(--ink); color: var(--paper); }
 .execution-modes input:focus-visible + span { outline: 2px solid var(--coral); outline-offset: 3px; }
 .execution-modes:disabled label { cursor: default; }
-/* Activity shares the voice dock's measure and sits directly on the paper. */
-.agent-activity { width: 100%; max-width: 440px; margin-top: 28px; padding: 0; }
-.activity-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 16px; padding-bottom: 12px; border-bottom: 1px solid #79685f30; margin-bottom: 6px; }
-.activity-heading h2 { margin: 0; font-family: var(--serif); font-size: 22px; font-weight: 400; }
-.activity-heading p { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted); overflow-wrap: anywhere; }
-.activity-steps { list-style: none; margin: 0; padding: 0 8px 0 0; max-height: 340px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #79685f55 transparent; }
+/* Generation and recorded steps share the finished drawing's canvas. */
+.agent-activity { width: 100%; padding: 0; text-align: center; }
+.activity-steps { list-style: none; margin: 0; padding: 0; }
 .activity-steps:focus-visible { outline: 2px solid var(--coral); outline-offset: 4px; }
-.activity-step { position: relative; padding: 13px 0 15px 25px; }
-.activity-step::after { content: ''; position: absolute; top: 23px; bottom: -23px; left: 5px; width: 1px; background: #79685f35; }
-.activity-step:last-child::after { display: none; }
-.activity-step::before { content: ''; position: absolute; z-index: 1; top: 20px; left: 2px; width: 7px; height: 7px; border: 1px solid var(--muted); border-radius: 50%; background: var(--paper); }
-.activity-step.completed::before { background: #a79a8d; border-color: #a79a8d; }
-.activity-step.running::before { background: var(--ink); border-color: var(--ink); animation: breathe 2s infinite; }
-.activity-step.failed::before, .activity-step.pending::before { background: var(--coral); border-color: var(--coral); }
-.activity-step-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 2px 12px; font-size: 13px; line-height: 1.7; }
-.activity-step-heading strong { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.activity-step { padding: 28px 0; }
+main.is-busy .activity-step { padding: 0; }
+main.is-busy .activity-steps { max-height: 64svh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #79685f55 transparent; }
+main.is-busy .activity-step:not([hidden]) ~ .activity-step { padding-top: 28px; }
+main.is-busy .activity-preview { max-height: 42svh; }
+.activity-step-heading { display: flex; flex-direction: column; align-items: center; gap: 8px; line-height: 1.3; }
+.activity-step-heading strong { min-width: 0; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 .activity-step-status { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .activity-step.pending .activity-step-status, .activity-step.failed .activity-step-status { color: #954d3c; }
-.activity-message { font-size: 13px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; }
-.activity-preview { display: block; max-width: 100%; max-height: 200px; margin-top: 12px; object-fit: contain; border-radius: 4px; }
-.activity-step details { min-width: 0; margin-top: 7px; font-size: 12px; line-height: 1.7; color: var(--muted); }
-.activity-step summary { cursor: pointer; padding: 5px 0; overflow-wrap: anywhere; }
-.activity-step summary:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; border-radius: 2px; }
-.activity-step details p { margin: 12px 0 5px; overflow-wrap: anywhere; }
-.activity-step pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; padding: 10px; border-radius: 4px; background: #41303f08; color: var(--ink); font: 12px/1.7 ui-monospace, monospace; margin: 0; }
+.activity-message { font-size: 16px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; margin: 14px 0 0; }
+.activity-preview { display: block; max-width: 100%; max-height: 58svh; margin: 20px auto 0; object-fit: contain; border-radius: 3px; }
+.activity-details { min-width: 0; text-align: center; font-size: 14px; line-height: 1.7; color: var(--ink); }
+.activity-details p { margin: 12px 0 5px; overflow-wrap: anywhere; }
+.activity-details p:first-child { margin-top: 0; }
+.activity-action-result { color: #954d3c; }
 .approve-action { margin-top: 12px; padding: 9px 16px; border-radius: 20px; background: var(--ink); color: var(--paper); font-size: 12px; }
 
 .sidebar-scrim { position: fixed; inset: 0; background: #41303f33; z-index: 3; }

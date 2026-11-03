@@ -4,6 +4,28 @@
   const labels = {running: 'Working', pending: 'Waiting', completed: 'Done', failed: 'Failed',
     interrupted: 'Stopped', refused: 'Declined', recorded: 'Recorded', requested: 'Requested', unknown: 'No result'};
 
+  function actionDescription(step) {
+    const command = step.command || '';
+    const actions = [];
+    if (step.kind === 'write' || /(?:cat\s*>|write_text\(|write_bytes\(|open\([^\n]+['"]w)/.test(command))
+      actions.push('Create or update the instructions that make your drawing.');
+    else if (/\b(?:sed|perl|patch|apply_patch)\b|replace\(/.test(command))
+      actions.push('Adjust the instructions for your drawing.');
+    if (step.kind === 'render' || /(?:\/opt\/artsy\/render\.py|\brender\.py\b)/.test(command))
+      actions.push('Render a preview to check how your drawing looks.');
+    if (step.kind === 'submit' || /COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT/.test(command))
+      actions.push('Submit your drawing for final checks.');
+    if (actions.length) return actions.join(' ');
+    if (/\b(?:cat|head|tail|ls|find|grep|rg|wc)\b/.test(command)) return 'Inspect the drawing files before continuing.';
+    if (/\b(?:python\S*|compileall|py_compile)\b/.test(command)) return 'Run the drawing instructions and check the result.';
+    const descriptions = {
+      'Write drawing code': 'Create or update the instructions that make your drawing.',
+      'Render preview': 'Render a preview to check how your drawing looks.',
+      'Submit drawing': 'Submit your drawing for final checks.',
+    };
+    return descriptions[step.title] || 'Carry out the next action for your drawing.';
+  }
+
   function responseSummary(step) {
     if (step.kind !== 'model' && !(step.kind === 'message' && step.title === 'Agent message')) return step;
     const output = step.output || '';
@@ -47,9 +69,14 @@
       this.panel = panel; this.list = list; this.status = status;
       this.id = null; this.rows = new Map();
       this.onApprove = onApprove;
+      this.follow = true;
+      this.list.onscroll = () => {
+        this.follow = this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight < 48;
+      };
     }
     reset(id = null) {
       this.id = id; this.rows.clear(); this.list.replaceChildren();
+      this.follow = true;
       this.run = null;
       this.panel.hidden = !id; this.status.textContent = id ? 'Getting ready…' : '';
     }
@@ -61,7 +88,7 @@
       if (this.id !== run.id) this.reset(run.id);
       this.run = run;
       const steps = stepsFor(run, root.ArtsyTrace);
-      const follow = this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight < 48;
+      const follow = this.follow;
       this.panel.hidden = false;
       const active = ['queued', 'running'].includes(run.state);
       const turn = run.progress?.turn;
@@ -76,10 +103,12 @@
           const node = document.createElement('li');
           row = {node}; this.rows.set(step.id, row); this.list.append(node);
         }
-        if (row.signature === signature) continue;
-        row.signature = signature;
-        const newlyFailed = step.status === 'failed' && row.status !== 'failed';
-        row.status = step.status;
+        // Keep earlier actions and previews available as generation continues in either mode.
+        row.node.hidden = step.id === 'starting' ||
+          (step.kind === 'model' && !step.output && !step.previews?.length);
+        const renderSignature = JSON.stringify([signature, active, run.execution_mode]);
+        if (row.signature === renderSignature) continue;
+        row.signature = renderSignature;
         const node = row.node;
         node.className = `activity-step ${step.status}`;
         const heading = document.createElement('div'); heading.className = 'activity-step-heading';
@@ -87,29 +116,32 @@
         const badge = document.createElement('span'); badge.className = 'activity-step-status';
         badge.textContent = labels[step.status] || 'Recorded';
         heading.append(title, badge);
-        const children = [heading];
-        if (step.output && step.kind === 'model') {
+        const hasDetails = step.command || ['tool', 'write', 'render', 'submit'].includes(step.kind);
+        const children = hasDetails ? [] : [heading];
+        if (step.output && (step.kind === 'model' || step.kind === 'result' || step.kind === 'message')) {
           const message = document.createElement('p'); message.className = 'activity-message'; message.textContent = step.output;
           children.push(message);
+        }
+        if (hasDetails) {
+          const details = document.createElement('div'); details.className = 'activity-details';
+          const description = document.createElement('p'); description.textContent = actionDescription(step);
+          details.append(description);
+          if (step.status === 'failed' || step.status === 'interrupted') {
+            const result = document.createElement('p'); result.className = 'activity-action-result';
+            result.textContent = step.status === 'failed'
+              ? 'This action couldn’t finish. Artsy may need to adjust the drawing and try again.'
+              : 'This action stopped before it finished.';
+            details.append(result);
+          }
+          children.push(details);
         }
         const images = (step.previews || []).filter(url => /^preview-\d+-\d+\.png$/.test(url) || /^data:image\/png;base64,/.test(url));
         for (const [index, url] of images.entries()) {
           const image = document.createElement('img'); image.className = 'activity-preview';
           image.alt = `Preview ${index + 1} from ${step.title.toLowerCase()}`;
-          image.loading = 'lazy'; image.src = url.startsWith('data:') ? url : `/api/runs/${run.id}/${url}`;
+          image.loading = 'lazy'; image.onload = () => { if (this.follow) this.list.scrollTop = this.list.scrollHeight; };
+          image.src = url.startsWith('data:') ? url : `/api/runs/${run.id}/${url}`;
           children.push(image);
-        }
-        if (step.command || (step.output && step.kind !== 'model')) {
-          const details = document.createElement('details');
-          details.open = newlyFailed || (row.details ? row.details.open : false);
-          const summary = document.createElement('summary'); summary.textContent = step.command ? 'View action details' : 'View result';
-          details.append(summary);
-          for (const [label, value] of [['Action', step.command], ['Result', step.output]]) if (value) {
-            const caption = document.createElement('p'); caption.textContent = label;
-            const pre = document.createElement('pre'); pre.textContent = value;
-            details.append(caption, pre);
-          }
-          row.details = details; children.push(details);
         }
         if (active && run.execution_mode === 'approval' && step.status === 'pending' && this.onApprove) {
           const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'approve-action';
@@ -126,6 +158,6 @@
       if (follow) this.list.scrollTop = this.list.scrollHeight;
     }
   }
-  if (typeof module !== 'undefined' && module.exports) module.exports = {Activity, stepsFor, traceSteps};
+  if (typeof module !== 'undefined' && module.exports) module.exports = {Activity, stepsFor, traceSteps, actionDescription};
   else root.ArtsyActivity = Activity;
 })(globalThis);
