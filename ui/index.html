@@ -11,7 +11,7 @@ __NAVIGATION__
 <label for="prompt">Prompt</label><textarea id="prompt" maxlength="4000" placeholder="Describe what to draw…" required></textarea>
 <label for="model">Model</label><select id="model" required><option value="Qwen/Qwen3.5-4B">Qwen3.5 · 4B</option></select><p class="note" id="model-note">Choose Qwen3.5 4B or GPT-6 Luna.</p>
 <div class="settings"><div><span class="field-label">Canvas</span><div class="fixed-field">1920 × 1200</div></div></div>
-<button class="primary" id="generate" type="submit">Generate</button><button id="cancel-generation" type="button" hidden>Cancel generation</button><p class="note">Runs the drawing agent. Uses model credits.</p><p id="form-status" role="status"></p>
+<button class="primary" id="generate" type="submit">Generate</button><button id="cancel-generation" type="button" hidden>Cancel generation</button><p class="note">Runs the drawing agent. Uses model credits.</p><p id="form-status" class="ui-status" role="status"></p>
 </form><section id="drawing-history" class="drawing-history" hidden><h2>Runs for this prompt</h2><div id="drawing-runs"></div></section></section>
 <section class="results" aria-label="Generation run"><div class="results-heading"><h2>Output</h2><span id="run-status" role="status">Not started</span></div>
 <div class="output" id="output"><p>Your image will appear here.</p></div><div id="downloads"></div>
