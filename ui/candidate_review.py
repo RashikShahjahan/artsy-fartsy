@@ -131,7 +131,7 @@ def image_paths(record: dict, root: Path) -> list[tuple[str, Path]]:
 
 
 def make_handler(path: Path, port: int = 4173, review_path: Path | None = None,
-                 accepted_output: Path | None = None, *, base_path="", page_transform=None, navigation_html=None):
+                 accepted_output: Path | None = None, *, base_path="", navigation_html=None):
     path = path.resolve()
     root = path.parent
     records, sha = load_candidates(path)
@@ -193,8 +193,6 @@ def make_handler(path: Path, port: int = 4173, review_path: Path | None = None,
                 page = (PAGE.replace("__DATA__", json.dumps(payload, ensure_ascii=False).replace("<", "\\u003c"))
                         .replace("__BASE_PATH__", base_path)
                         .replace("__NAVIGATION__", navigation_html or navigation("candidates")))
-                if page_transform:
-                    page = page_transform(page)
                 return self.respond(200, page.encode("utf-8"), "text/html; charset=utf-8")
             if target.path == "/api/record":
                 rid = parse_qs(target.query).get("id", [""])[0]
