@@ -33,14 +33,19 @@ action, review its details, and click **Approve action** to continue. Each appro
 releases only that action, including when one model turn proposes several actions.
 The mode is fixed for the current drawing and can be changed before the next request.
 
-The drawing canvas shows only the current stage during generation. Each new model
+The drawing canvas shows only the current stage during generation. Each new visible model
 update, action, or preview replaces the previous stage instead of building a timeline.
 Both modes show the same current stage; Auto continues without pausing, while
-Approve steps adds an approval button for the pending action. Named harness tools
-provide short drawing labels such as “Refining your drawing” and “Checking the preview.” Empty thinking states
-use the progress message. Once the final image passes validation, it takes the place
-of the live steps. The **Drawing steps** disclosure keeps recorded steps and previews
-available after completion. Activity survives
+Approve steps adds an approval button for the pending action. Each action uses one plain-language message, changing from an action label to its result when it finishes.
+Raw output, source code, and arguments are not displayed in the consumer UI.
+Assistant messages and tool actions appear one at a time. Saved history uses
+Previous and Next controls to inspect one recorded step at a time.
+New runs record tool arguments live, including the drawing source.
+Named harness tools
+provide short drawing labels such as “Refining your drawing” and “Checking the preview.” While a model turn has no text,
+the latest action or preview stays visible; before the first action, the canvas shows “Thinking…”. Once the final image passes validation, it takes the place
+of the live steps. Recorded steps and previews remain visible after completion, with Previous and Next
+buttons shown by default. Activity survives
 reloads and can be reopened with a saved drawing or version; older drawings use
 their exported trace when available. Progress comes from recorded execution events.
 The browser stores sketchbook metadata and the selected mode; run artifacts and

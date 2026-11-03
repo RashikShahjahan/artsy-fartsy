@@ -235,6 +235,9 @@ class HostAgentTests(unittest.TestCase):
             ToolCall(id='c', function='submit_drawing', arguments={})])], None,
             max_calls=None, turn_limit=None, max_turns=10, progress=updates.append, approval=approve)
         self.assertEqual(decisions, ['action-1', 'action-2', 'action-3'])
+        pending = [item['step'] for item in updates if item.get('step', {}).get('status') == 'pending']
+        self.assertEqual(pending[0]['arguments'], {'source': 'drawing source'})
+        self.assertEqual(pending[1]['arguments'], {})
         self.assertEqual(sbox.files['/workspace/program.py'], 'drawing source')
         self.assertTrue(samples[0].metadata['submitted'])
         self.assertTrue(any(m.role == 'tool' and 'drawing source' in m.text for m in samples[0].messages))

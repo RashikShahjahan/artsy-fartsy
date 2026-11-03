@@ -97,10 +97,31 @@ test('failed action output stays visible and previews use only approved image pa
   current.progress.steps[1] = {id: 'action-1', kind: 'tool', title: 'Render preview',
     status: 'failed', output: 'SyntaxError', previews: ['preview-1-0.png', 'https://untrusted.example/image.png', '../secret']};
   activity.render(current);
-  assert.match(find(list, 'p')[0].textContent, /couldn’t finish/);
+  assert.match(title(list), /syntax error/);
   assert.equal(find(list, 'pre').length, 0);
   assert.equal(find(list, 'img').length, 1);
   assert.equal(find(list, 'img')[0].src, `/api/runs/${current.id}/preview-1-0.png`);
+});
+
+test('assistant and action appear separately with friendly results always visible', () => {
+  global.document = {createElement: node};
+  const list = node('ol'), activity = new Activity(node(), list, node());
+  const current = run();
+  current.progress.steps[0].turn = 1;
+  current.progress.steps[0].output = 'I’ll add the leaves next.';
+  Object.assign(current.progress.steps[1], {turn: 1, tool: 'update_drawing',
+    arguments: {source: '<drawing source>'}, output: 'Return code: 0', seconds: 1.25});
+  activity.render(current);
+  assert.equal(title(list), 'Refine your drawing');
+  assert.equal(list.children.length, 1);
+  assert.equal(find(list, 'details').length, 0);
+  assert.equal(find(list, 'summary').length, 0);
+  assert.equal(find(list, 'pre').length, 0);
+  assert.equal(find(list, 'p').some(item => item.textContent.includes('<drawing source>')), false);
+  current.progress.steps[1].status = 'completed';
+  activity.render(current);
+  assert.equal(title(list), 'The drawing code was saved and is ready to preview.');
+  assert.equal(find(list, 'p').length, 0);
 });
 
 test('each new stage replaces the previous action and preview in both modes', () => {
@@ -118,8 +139,9 @@ test('each new stage replaces the previous action and preview in both modes', ()
     current.progress.steps.push({id: 'turn-2', kind: 'model', title: 'Agent turn 2', status: 'running'});
     activity.render(current);
     assert.equal(list.children.length, 1);
-    assert.equal(list.children[0].hidden, true);
-    assert.equal(find(list, 'img').length, 0);
+    assert.equal(list.children[0].hidden, false);
+    assert.equal(title(list), 'Drawing created');
+    assert.equal(find(list, 'img').length, 1);
     current.progress.steps[2].output = 'Adding the finishing touches.';
     activity.render(current);
     assert.deepEqual(list.children.map(row => row.hidden), [false]);
@@ -134,12 +156,39 @@ test('each new stage replaces the previous action and preview in both modes', ()
     assert.equal(find(list, 'button').length, 0);
     current.state = 'completed'; current.result = {outcome: 'submitted'}; current.artifacts = ['image.png'];
     activity.render(current);
-    assert.equal(list.children.length, 5);
-    assert.equal(find(list, 'img').length, 2);
+    assert.equal(list.children.length, 2);
+    assert.equal(find(list, 'img').length, 0);
     assert.equal(list.children.every(row => !row.hidden), true);
     assert.equal(title(list.children[0]), 'Drawing update');
-    assert.equal(title(list.children.at(-1)), 'Drawing ready');
+    for (let index = 0; index < 4; index++) find(list, 'button').at(-1).onclick();
+    assert.equal(title(list.children[0]), 'Drawing ready');
+    assert.equal(list.children.length, 2);
   }
+});
+
+test('initial thinking stays visible and empty model responses preserve actions between polls', () => {
+  global.document = {createElement: node};
+  const list = node('ol');
+  const activity = new Activity(node(), list, node());
+  const current = run({execution_mode: 'auto', progress: {phase: 'thinking', steps: []}});
+  activity.render(current);
+  assert.equal(list.children[0].hidden, false);
+  assert.equal(title(list), 'Getting ready to draw');
+  current.progress.steps.push({id: 'turn-1', kind: 'model', title: 'Agent turn 1', status: 'running'});
+  activity.render(current);
+  assert.equal(list.children[0].hidden, false);
+  assert.equal(title(list), 'Thinking…');
+  current.progress.steps[0].status = 'completed';
+  current.progress.steps.push(
+    {id: 'action-1', tool: 'update_drawing', status: 'completed'},
+    {id: 'turn-2', kind: 'model', title: 'Agent turn 2', status: 'running'});
+  activity.render(current);
+  assert.equal(list.children.length, 1);
+  assert.equal(list.children[0].hidden, false);
+  assert.equal(title(list), 'The drawing code was saved and is ready to preview.');
+  current.progress.steps[2].status = 'completed';
+  activity.render(current);
+  assert.equal(title(list), 'The drawing code was saved and is ready to preview.');
 });
 
 test('shell actions use short, status-aware drawing labels', () => {
@@ -179,7 +228,7 @@ test('final checks replace earlier steps without changing the recorded history',
   current.state = 'completed';
   activity.render(current);
   activity.render(current);
-  assert.equal(list.children.length, 3);
+  assert.equal(list.children.length, 2);
   assert.equal(current.progress.steps.length, 2);
 });
 

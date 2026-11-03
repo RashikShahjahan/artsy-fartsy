@@ -61,6 +61,7 @@ h1 { font-family: var(--serif); font-size: clamp(36px, 4.8vw, 55px); letter-spac
 .drawing-space { width: 100%; max-width: 850px; display: flex; flex-direction: column; align-items: center; }
 .canvas { width: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 240px; }
 .canvas img { display: block; max-width: 100%; max-height: 58svh; object-fit: contain; border-radius: 3px; }
+.canvas:has(.activity-preview) > #drawing-image { display: none; }
 .working-placeholder { min-height: 250px; display: grid; place-items: center; }
 .working-placeholder svg { width: 44px; height: 44px; color: var(--coral); stroke-width: 1; animation: breathe 2.5s infinite; }
 .versions { margin-top: 16px; font-size: 11px; color: var(--muted); border: 0; background: transparent; padding: 4px; cursor: pointer; max-width: 100%; }
@@ -73,15 +74,12 @@ main.is-busy .prompt-form { display: none; }
 main.is-busy .drawing-options { display: none; }
 /* Only the current stage occupies the canvas during generation. */
 main.is-busy .drawing-space:has(.activity-step:not([hidden])) { display: flex; }
-main.is-busy .drawing-space:has(.activity-step:not([hidden])) + .voice-dock { margin-top: 26px; }
+main.is-busy .drawing-space:has(.activity-step:not([hidden])) + .voice-dock .voice-title { display: none; }
 main.is-busy .canvas { min-height: 0; }
 main.is-busy .canvas > img, main.is-busy .working-placeholder { display: none; }
 main.is-busy .versions, main.is-busy .activity-step-status { display: none; }
 .drawing-process { width: 100%; max-width: 600px; margin-top: 20px; }
-.drawing-process > summary { width: fit-content; margin: 0 auto; padding: 10px; color: var(--muted); font-size: 12px; cursor: pointer; }
-.drawing-process > summary:focus-visible { outline: 2px solid var(--coral); outline-offset: 3px; }
 main.is-busy .drawing-process { margin-top: 0; }
-main.is-busy .drawing-process > summary { display: none; }
 main.is-busy .mic-button, main.is-busy .type-toggle { display: none; }
 
 .execution-modes { display: flex; gap: 4px; border: 1px solid #79685f33; border-radius: 24px; padding: 4px; margin: 0; }
@@ -106,6 +104,9 @@ main.is-busy .activity-preview { max-height: 42svh; }
 .activity-message { font-size: 16px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; margin: 14px 0 0; }
 .activity-preview { display: block; max-width: 100%; max-height: 58svh; margin: 20px auto 0; object-fit: contain; border-radius: 3px; }
 .activity-action-result { color: #954d3c; font-size: 14px; line-height: 1.7; }
+.activity-navigation { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 24px; font-size: 12px; color: var(--muted); }
+.activity-navigation button { padding: 8px 12px; border: 1px solid #79685f26; border-radius: 20px; }
+.activity-navigation button:disabled { opacity: .35; cursor: default; }
 .approve-action { margin-top: 12px; padding: 9px 16px; border-radius: 20px; background: var(--ink); color: var(--paper); font-size: 12px; }
 
 .sidebar-scrim { position: fixed; inset: 0; background: #41303f33; z-index: 3; }

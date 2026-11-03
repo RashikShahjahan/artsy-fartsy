@@ -104,11 +104,11 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                 progress({'phase': phase, 'turn': timing['model_calls'] if turn is None else turn,
                           'max_turns': max_turns, **({'step': step} if step else {})})
 
-        async def perform(name, kind, title, operation, *, terminal=False):
+        async def perform(name, kind, title, operation, *, terminal=False, arguments=None):
             nonlocal submitted, operations, actions
             actions += 1
             step = {'id': f'action-{actions}', 'kind': kind, 'tool': name, 'title': title,
-                    'turn': timing['model_calls'], 'status': 'running'}
+                    'turn': timing['model_calls'], 'status': 'running', 'arguments': arguments or {}}
             report('drawing', step)
             started = monotonic()
 
@@ -167,7 +167,7 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                         return 'Return code: 1\nExpected 1–65536 bytes of Python source.'
                     await sandbox().write_file('/workspace/program.py', source)
                     return 'Return code: 0\nDrawing updated. Call preview_drawing to check it.'
-                return await perform('update_drawing', 'write', 'Refining your drawing', update)
+                return await perform('update_drawing', 'write', 'Refining your drawing', update, arguments={'source': source})
             return execute
 
         @tool(name='read_drawing', parallel=False)
@@ -223,7 +223,7 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                         return observation(removed, image_pattern)
                     await sandbox().write_file('/workspace/refusal.json', json.dumps({'reason': reason}))
                     return 'Return code: 0\nRequest declined.'
-                return await perform('refuse_drawing', 'refuse', 'Declining the request', refuse, terminal=True)
+                return await perform('refuse_drawing', 'refuse', 'Declining the request', refuse, terminal=True, arguments={'reason': reason})
             return execute
 
         tools = [update_drawing(), read_drawing(), preview_drawing(), submit_drawing(), refuse_drawing()]

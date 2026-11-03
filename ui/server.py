@@ -614,7 +614,15 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_page(page)
         if target not in ('/speech.js', '/artsy.js', '/activity.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css', '/run-client.js', '/dom.js'):
             return self.send_json({'error': 'Not found.'}, 404)
-        super().do_GET()
+        # Local UI assets must follow the running checkout rather than a browser
+        # cache that can keep an older client alive after a server restart.
+        content = (ROOT / 'ui' / target.lstrip('/')).read_bytes()
+        self.send_response(200)
+        self.send_header('Content-Type', self.guess_type(target))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Length', str(len(content)))
+        self.end_headers()
+        self.wfile.write(content)
 
 
 if __name__ == '__main__':

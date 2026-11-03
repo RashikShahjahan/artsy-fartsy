@@ -42,13 +42,36 @@
       output: heading ? output.slice(heading[0].length).trimStart() : output};
   }
 
+  function resultSummary(step) {
+    if (step.status === 'pending') return 'Ready when you approve this step.';
+    if (step.status === 'running') return 'This step is in progress.';
+    if (step.status === 'interrupted') return 'This step stopped before it finished.';
+    if (step.status === 'requested') return 'The request was sent; completion has not been confirmed.';
+    if (step.status === 'unknown') return 'No result was recorded for this step.';
+    if (step.status === 'recorded') return 'This action was recorded; success has not been confirmed.';
+    if (step.status === 'failed') {
+      const output = step.output || '';
+      if (/SyntaxError|IndentationError/.test(output)) return 'The drawing code has a syntax error. Artsy may try again.';
+      if (/timed out|timeout/i.test(output)) return 'This step took too long to finish. Artsy may try again.';
+      if (/Python execution failed|Traceback/.test(output)) return 'The preview couldn’t render because of an error in the drawing code. Artsy may try again.';
+      return 'This step couldn’t finish. Artsy may try again.';
+    }
+    return {
+      update_drawing: 'The drawing code was saved and is ready to preview.',
+      read_drawing: 'Artsy checked the current drawing code.',
+      preview_drawing: 'The preview rendered successfully.',
+      submit_drawing: 'The drawing was sent for final checks.',
+      refuse_drawing: 'Artsy declined this request.',
+    }[step.tool] || 'This step finished successfully.';
+  }
+
   function traceSteps(trace, api) {
     const records = Array.isArray(trace) ? trace : [trace];
     return records.flatMap((record, recordIndex) => (record?.samples || []).flatMap((sample, sampleIndex) =>
       api.normalizeSample(sample).steps.filter(step => step.title !== 'Request / context').map((step, index) => ({
         id: `trace-${recordIndex}-${sampleIndex}-${index}`, title: step.title, kind: step.kind, tool: step.tool,
         status: step.status === 'success' ? 'completed' : step.status,
-        command: step.command, output: [api.text(step.content), ...(step.results || []).map(result => api.text(result.content))].filter(Boolean).join('\n'),
+        command: step.tool ? undefined : step.command, arguments: step.call?.arguments, output: [api.text(step.content), ...(step.results || []).map(result => api.text(result.content))].filter(Boolean).join('\n'),
         previews: [...(step.results || []), ...(step.observations || [])].flatMap(message =>
           Array.isArray(message.content) ? message.content.filter(part => part.type === 'image').map(part => part.image) : []),
       }))));
@@ -82,6 +105,7 @@
       this.list.scrollTop = 0;
       this.run = null;
       this.active = null;
+      this.selected = 0;
       this.panel.hidden = !id; this.status.textContent = id ? 'Getting ready…' : '';
     }
     fail(message) {
@@ -98,12 +122,18 @@
         this.rows.clear(); this.list.replaceChildren(); this.list.scrollTop = 0;
         this.active = active;
       }
-      // Live progress replaces the previous stage. Full history belongs to the saved drawing.
-      const current = [...steps].reverse().find(step => ['running', 'pending'].includes(step.status)) || steps.at(-1);
-      const displayed = active ? current ? [current] : [] : steps;
+      // A tool-only model response has no displayable text. Keep the last actual
+      // action on screen while the next model call runs, including when several
+      // updates arrive between polls. Full history belongs to the saved drawing.
+      const visibleSteps = steps.filter(step => step.kind !== 'model' || step.output || step.previews?.length);
+      const current = [...visibleSteps].reverse().find(step => ['running', 'pending'].includes(step.status))
+        || visibleSteps.at(-1) || steps.at(-1);
+      const history = steps.filter(step => step.kind !== 'model' || step.output || step.previews?.length);
+      this.selected = Math.max(0, Math.min(this.selected, history.length - 1));
+      const displayed = active ? current ? [current] : [] : history.length ? [history[this.selected]] : [];
       const turn = run.progress?.turn;
       this.status.textContent = active ? run.progress?.phase === 'awaiting_approval' ? 'Your approval is needed' : turn ? `Turn ${turn}${run.progress.max_turns ? ` of ${run.progress.max_turns}` : ''}` : 'Getting ready…'
-        : `${steps.length} ${steps.length === 1 ? 'step' : 'steps'} recorded`;
+        : `${history.length} ${history.length === 1 ? 'step' : 'steps'} recorded`;
       const visible = new Set(displayed.map(step => step.id));
       for (const [id, row] of this.rows) if (!visible.has(id)) { row.node.remove(); this.rows.delete(id); }
       for (const step of displayed) {
@@ -114,31 +144,30 @@
           row = {node}; this.rows.set(step.id, row); this.list.append(node);
           if (active) this.list.scrollTop = 0;
         }
-        row.node.hidden = step.id === 'starting' ||
-          (step.kind === 'model' && !step.output && !step.previews?.length);
+        row.node.hidden = !active && step.kind === 'model' && !step.output && !step.previews?.length;
         const renderSignature = JSON.stringify([signature, active, run.execution_mode]);
         if (row.signature === renderSignature) continue;
         row.signature = renderSignature;
         const node = row.node;
         node.className = `activity-step ${step.status}`;
         const heading = document.createElement('div'); heading.className = 'activity-step-heading';
+        const previewReady = (step.tool === 'preview_drawing' || step.kind === 'render')
+          && ['completed', 'success'].includes(step.status) && step.previews?.length;
         const hasDetails = step.tool || step.command || ['tool', 'write', 'read', 'render', 'submit', 'refuse'].includes(step.kind);
-        const title = document.createElement('strong'); title.textContent = hasDetails ? actionDescription(step) : step.title;
+        const title = document.createElement('strong');
+        title.textContent = previewReady ? 'Drawing preview' : hasDetails
+          ? ['pending', 'running'].includes(step.status) ? actionDescription(step)
+            : step.tool || ['failed', 'interrupted', 'unknown', 'requested'].includes(step.status) ? resultSummary(step) : actionDescription(step)
+          : step.title;
         const badge = document.createElement('span'); badge.className = 'activity-step-status';
         badge.textContent = labels[step.status] || 'Recorded';
         heading.append(title, badge);
         const children = [heading];
-        if (step.output && (step.kind === 'model' || step.kind === 'result' || step.kind === 'message')) {
+        if (step.output && (step.kind === 'model' || step.kind === 'result' || (step.kind === 'message' && step.title === 'Agent message'))) {
           const message = document.createElement('p'); message.className = 'activity-message'; message.textContent = step.output;
           children.push(message);
         }
-        if (hasDetails && (step.status === 'failed' || step.status === 'interrupted')) {
-          const result = document.createElement('p'); result.className = 'activity-action-result';
-          result.textContent = step.status === 'failed'
-            ? 'This step couldn’t finish. Artsy may try again.' : 'This step stopped before it finished.';
-          children.push(result);
-        }
-        const images = (step.previews || []).filter(url => /^preview-\d+-\d+\.png$/.test(url) || /^data:image\/png;base64,/.test(url));
+        const images = [...new Set(step.previews || [])].filter(url => /^preview-\d+-\d+\.png$/.test(url) || /^data:image\/png;base64,/.test(url));
         for (const [index, url] of images.entries()) {
           const image = document.createElement('img'); image.className = 'activity-preview';
           image.alt = `Preview ${index + 1} from ${step.title.toLowerCase()}`;
@@ -158,8 +187,20 @@
         }
         node.replaceChildren(...children);
       }
+      this.navigation?.remove(); this.navigation = null;
+      if (!active && history.length > 1) {
+        const navigation = document.createElement('li'); navigation.className = 'activity-navigation';
+        navigation.hidden = false;
+        const previous = document.createElement('button'), next = document.createElement('button');
+        previous.type = next.type = 'button'; previous.textContent = '← Previous'; next.textContent = 'Next →';
+        previous.disabled = this.selected === 0; next.disabled = this.selected === history.length - 1;
+        previous.onclick = () => { this.selected--; this.render(this.run); };
+        next.onclick = () => { this.selected++; this.render(this.run); };
+        const count = document.createElement('span'); count.textContent = `${this.selected + 1} of ${history.length}`;
+        navigation.append(previous, count, next); this.list.append(navigation); this.navigation = navigation;
+      }
     }
   }
-  if (typeof module !== 'undefined' && module.exports) module.exports = {Activity, stepsFor, traceSteps, actionDescription};
+  if (typeof module !== 'undefined' && module.exports) module.exports = {Activity, stepsFor, traceSteps, actionDescription, resultSummary};
   else root.ArtsyActivity = Activity;
 })(globalThis);

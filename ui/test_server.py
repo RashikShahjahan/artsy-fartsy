@@ -10,6 +10,21 @@ from drawing.config import MODEL_ID as LARGE_MODEL_ID
 
 
 class JobTests(unittest.TestCase):
+    def test_client_assets_are_fresh_even_with_a_conditional_request(self):
+        from io import BytesIO
+        handler = object.__new__(server.Handler)
+        handler.headers = {'Host': f'127.0.0.1:{server.PORT}',
+                           'If-Modified-Since': 'Wed, 01 Jan 2031 00:00:00 GMT'}
+        handler.path = '/activity.js?v=live-steps-2'
+        handler.wfile = BytesIO()
+        with patch.object(handler, 'send_response') as response, \
+                patch.object(handler, 'send_header') as header, \
+                patch.object(handler, 'end_headers'):
+            handler.do_GET()
+        response.assert_called_once_with(200)
+        self.assertIn(('Cache-Control', 'no-store'), [call.args for call in header.call_args_list])
+        self.assertEqual(handler.wfile.getvalue(), (server.ROOT / 'ui/activity.js').read_bytes())
+
     def test_drawing_page_is_allowed_without_exposing_arbitrary_files(self):
         handler = object.__new__(server.Handler)
         handler.headers = {'Host': f'127.0.0.1:{server.PORT}'}

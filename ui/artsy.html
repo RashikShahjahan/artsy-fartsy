@@ -6,10 +6,10 @@
   <meta name="theme-color" content="#f3ecdf">
   <meta name="description" content="Tell Artsy what to draw.">
   <title>Artsy — Let’s draw</title>
-  <link rel="stylesheet" href="/artsy.css">
+  <link rel="stylesheet" href="/artsy.css?v=single-live-status-1">
   <script src="/speech.js" defer></script>
   <script src="/trace.js" defer></script>
-  <script src="/activity.js" defer></script>
+  <script src="/activity.js?v=live-steps-2" defer></script>
   <script src="/run-client.js" defer></script>
   <script src="/artsy.js" defer></script>
 </head>
@@ -48,13 +48,12 @@
       <div class="canvas" id="canvas">
         <div class="working-placeholder" id="working-placeholder" aria-hidden="true"><svg><use href="#i-spark"/></svg></div>
         <img id="drawing-image" alt="" hidden>
-        <details class="drawing-process" id="drawing-process" hidden>
-          <summary>Drawing steps</summary>
+        <div class="drawing-process" id="drawing-process" hidden>
           <section class="agent-activity" id="agent-activity" aria-label="Drawing steps" hidden>
             <p class="sr-only" id="activity-status" role="status" aria-live="polite"></p>
             <ol class="activity-steps" id="activity-steps" aria-label="Agent steps" tabindex="0"></ol>
           </section>
-        </details>
+        </div>
       </div>
       <select class="versions" id="versions" aria-label="Drawing version" hidden></select>
     </section>

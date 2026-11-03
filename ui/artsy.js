@@ -81,7 +81,6 @@
   }
   function setBusy(value) {
     busy = value; ui.main.classList.toggle('is-busy', value);
-    ui.drawingProcess.open = value;
     ui.micButton.disabled = value || !Recognition; ui.send.disabled = value;
     ui.newDrawing.disabled = value; ui.newDrawing.hidden = !current;
     ui.versions.disabled = value;
@@ -110,7 +109,7 @@
     ui.drawingProcess.hidden = false;
     ui.download.href = ui.drawingImage.src; ui.download.hidden = false;
     renderVersions(version.id); updateVoiceLabel();
-    if (loadSteps) { ui.drawingProcess.open = false; loadActivity(version.id); }
+    if (loadSteps) { loadActivity(version.id); }
   }
   function openDrawing(drawing) {
     if (busy) return;
@@ -124,7 +123,7 @@
     if (busy) return;
     stopListening(true); speech.cancel();
     current = null; activeRun = null; rememberActive(null); showError(''); closeSidebar();
-    activityRequest++; activity.reset(); ui.drawingProcess.hidden = true; ui.drawingProcess.open = false;
+    activityRequest++; activity.reset(); ui.drawingProcess.hidden = true;
     ui.welcome.hidden = false; ui.drawingSpace.hidden = true;
     ui.main.classList.remove('has-drawing'); ui.newDrawing.hidden = true;
     ui.prompt.value = ''; ui.prompt.placeholder = 'What should we draw?';
@@ -272,7 +271,7 @@
     runClient.stop();
     activity.fail(message);
     activeRun = null; rememberActive(null); setBusy(false);
-    ui.drawingProcess.hidden = ui.agentActivity.hidden; ui.drawingProcess.open = true;
+    ui.drawingProcess.hidden = ui.agentActivity.hidden;
     ui.workingPlaceholder.hidden = true;
     if (current?.versions.length) {
       const version = current.versions.find(v => v.id === current.selectedId) || current.versions.at(-1);
