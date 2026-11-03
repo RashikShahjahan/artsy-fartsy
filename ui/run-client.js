@@ -74,9 +74,13 @@
       try { data=await response.json(); } catch { data={}; }
       if(!response.ok)throw new Error(data.error || 'Could not cancel run');
       if(isCurrent(version,runId)) {
+        // Invalidate any pre-cancellation response even if the transport ignores abort.
+        epoch++;
         clearTimeout(timer);
-        if(controller)controller.abort();
-        void poll(version);
+        timer=null;
+        controller?.abort();
+        controller=null;
+        void poll(epoch);
       }
       return true;
     }
