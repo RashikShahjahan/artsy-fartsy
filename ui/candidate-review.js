@@ -213,13 +213,13 @@ async function post(path, body) {
 }
 async function save() {
  if(saving)return;
+ let notice='';
  try{
   const reviewer=$('reviewer').value.trim();
   if(!reviewer)throw Error('Enter a reviewer name');
   const submittedRevision=revision;
   const body={dataset_sha256:data.sha256,reviewer,decisions:JSON.parse(JSON.stringify(reviews))};
   saving=true;status('Saving review decisions…');
-  let notice='';
   await post(data.basePath+'/api/review',body);
   acknowledgedRevision=Math.max(acknowledgedRevision,submittedRevision);
   changed=revision>acknowledgedRevision;
