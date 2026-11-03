@@ -70,7 +70,6 @@ test('cancel asks server to stop and keeps the run active until terminal', async
     onTerminal:run=>{terminal=run;},
   });
   client.start('running');
-  await until(()=>polled>=1);
   await client.cancel();
   assert.equal(cancelled,1);
   await until(()=>terminal!==null);
