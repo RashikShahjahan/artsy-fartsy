@@ -1,6 +1,7 @@
 """Exercise the real host loop and Inspect recording without paid inference."""
 
 import base64
+import asyncio
 import io
 import json
 import os
@@ -36,7 +37,7 @@ def reply(command=None, *, calls=None, usage=20):
 
 class HostAgentTests(unittest.TestCase):
     def run_agent(self, outputs, execute, *, callback=None, token_limit=32768, epochs=1,
-                  max_calls=20, turn_limit=16, max_turns=None, progress=None):
+                  max_calls=20, turn_limit=16, max_turns=None, progress=None, approval=None):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             model = get_model("mockllm/host-test", custom_outputs=outputs, memoize=False)
@@ -47,7 +48,7 @@ class HostAgentTests(unittest.TestCase):
                 logs = eval(Task(dataset=[Sample(id="drawing", input="Draw a circle")],
                     solver=drawing_agent("Use ArtCanvas.", GenerateConfig(max_tokens=4096,
                                          temperature=0.8, max_retries=0), callback,
-                                         max_calls=max_calls, max_turns=max_turns, progress=progress),
+                                         max_calls=max_calls, max_turns=max_turns, progress=progress, approval=approval),
                     token_limit=token_limit, turn_limit=turn_limit),
                     model=model, epochs=epochs, max_samples=2, log_dir=str(root / "logs"), display="none")
             self.assertEqual(logs[0].status, "success", logs[0].error)
@@ -186,9 +187,47 @@ class HostAgentTests(unittest.TestCase):
             lambda *a, **k: SimpleNamespace(stdout='', stderr='', returncode=0, success=True),
             max_calls=None, turn_limit=None, max_turns=10, progress=updates.append)
         self.assertTrue(samples[0].metadata['submitted'])
-        self.assertEqual([(item['phase'], item['turn']) for item in updates],
-            [('thinking', 1), ('drawing', 1), ('thinking', 2), ('drawing', 2), ('rendering', 2)])
+        self.assertEqual([(item['step']['id'], item['step']['status']) for item in updates if item.get('step')],
+            [('turn-1', 'running'), ('turn-1', 'completed'), ('action-1', 'running'), ('action-1', 'completed'),
+             ('turn-2', 'running'), ('turn-2', 'completed'), ('action-2', 'running'), ('action-2', 'completed')])
+        self.assertEqual(updates[-1]['phase'], 'rendering')
         self.assertTrue(all(item['max_turns'] == 10 for item in updates))
+
+    def test_approval_pauses_every_action_including_multiple_actions_per_turn(self):
+        updates, commands, decisions = [], [], []
+
+        async def approve(step_id):
+            self.assertEqual(len(commands), len(decisions))
+            self.assertEqual(updates[-1]['phase'], 'awaiting_approval')
+            self.assertEqual(updates[-1]['step']['status'], 'pending')
+            gate = asyncio.Event()
+            asyncio.get_running_loop().call_later(0.01, gate.set)
+            await gate.wait()
+            self.assertEqual(len(commands), len(decisions))
+            decisions.append(step_id)
+
+        async def execute(command, **kwargs):
+            self.assertEqual(len(decisions), len(commands) + 1)
+            commands.append(command[-1])
+            return SimpleNamespace(stdout='', stderr='', returncode=0, success=True)
+
+        samples, _ = self.run_agent([reply(calls=[
+            ToolCall(id='a', function='bash', arguments={'command': 'draw'}),
+            ToolCall(id='b', function='bash', arguments={'command': SUBMIT})])], execute,
+            max_calls=None, turn_limit=None, max_turns=10, progress=updates.append, approval=approve)
+        self.assertEqual(decisions, ['action-1', 'action-2'])
+        self.assertEqual(commands, ['draw', SUBMIT])
+        self.assertTrue(samples[0].metadata['submitted'])
+
+    def test_live_steps_keep_nested_render_errors_and_preview_images(self):
+        from evaluation.host_agent import activity_result
+        from inspect_ai.model import ContentText
+        content = [ContentText(text='Return code: 0\n{"ok":false,"exitCode":1,"stderr":"bad code"}'),
+                   ContentImage(image='data:image/png;base64,AAAA')]
+        result = activity_result(content)
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('bad code', result['output'])
+        self.assertEqual(result['previews'], ['data:image/png;base64,AAAA'])
 
     def test_operation_budget_cannot_be_bypassed_with_multiple_calls_per_turn(self):
         from drawing.config import LIMITS

@@ -14,7 +14,7 @@ from .harness import (BASE_MODEL, ROOT, check_native_bridge, drawing_task,
                       model_from_env, model_url, sha256, DEFAULT_MAX_TURNS)
 
 
-def main(*, progress=None) -> int:
+def main(*, progress=None, approval=None) -> int:
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("prompt", nargs="+")
@@ -68,7 +68,7 @@ def main(*, progress=None) -> int:
     if reference is not None:
         spec['reference_source'] = reference
     logs = eval(drawing_task([spec], str(directory / "artifacts"),
-                            max_turns=args.max_turns, progress=progress),
+                            max_turns=args.max_turns, progress=progress, approval=approval),
                 model=model_from_env(args.model), log_dir=str(directory / "logs"), max_samples=1)
     artifact = directory / "artifacts/drawing-1"
     for name in ("program.py", "image.png", "result.json"):

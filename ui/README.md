@@ -8,21 +8,39 @@ From the repository root:
 
 Open http://127.0.0.1:4173 for the voice-first Artsy experience. It introduces
 Artsy, asks what to draw, shows live drawing progress, then presents the finished
-image with voice or text follow-ups. The minimal home screen has a greeting,
-microphone, keyboard toggle, and mute control. Saved drawings live in an
+image with voice or text follow-ups. The home screen offers voice and keyboard input. Open **Drawing settings**
+to choose a model or require approval for each action. Saved drawings live in an
 on-demand history drawer. Image download and new-drawing controls appear with
 the artwork; a compact version selector appears after edits. Selecting a version
 makes it the basis of the next edit; **New drawing** starts a separate idea. Active jobs
 resume polling after a reload, and completed drawings remain in the sketchbook.
 
-The consumer endpoint (`POST /api/artsy/runs`) fixes the model to
-`openai/gpt-6-luna` through OpenRouter and enforces **10 internal model turns per
-response**, including edits. Configure `OPENROUTER_API_KEY` in `.env` and start
-Docker before drawing. This experience does not require the native bridge.
-Edits reuse the completed drawing's verified ArtCanvas source. Progress messages
-come from actual agent stages, with no fabricated percentage or internal code in
-the consumer UI. The browser stores sketchbook metadata; run artifacts stay on
-the local server under `episodes/ui/`.
+The model selector offers **Base**, **SFT**, **GRPO**, and **GPT-6 Luna**. Base uses
+`Qwen/Qwen3.8-27B`; SFT uses `artsy/sft-v2-qwen3.8-27b-final-preview-masked-cosine`;
+GRPO uses `artsy/grpo-v4-subset200-b16-c64`. These three require the native bridge
+(`make serve`) with the completed checkpoints available. GPT-6 Luna uses
+`openai/gpt-6-luna` through OpenRouter, requires `OPENROUTER_API_KEY` in `.env`,
+and works without the bridge. Luna is the default; the browser remembers your
+selection. The selected model handles both new drawings and subsequent edits,
+so you can switch models between versions.
+
+The consumer endpoint (`POST /api/artsy/runs`) accepts the selected model ID and
+enforces **10 internal model turns per response**, including edits. Start Docker
+before drawing.
+Edits reuse the completed drawing's verified ArtCanvas source. Choose **Auto** to
+let Artsy continue drawing, or **Approve steps** to pause before every drawing
+action, review its details, and click **Approve action** to continue. Each approval
+releases only that action, including when one model turn proposes several actions.
+The mode is fixed for the current drawing and can be changed before the next request.
+
+The **Artsy at work** timeline shows every recorded model turn and drawing action
+as it happens, with running, waiting, completed, and failed states. Expand an action
+to see its command and output; failed actions expand automatically. Previews appear
+inline, and final output is marked ready only after validation. Activity survives
+reloads and can be reopened with a saved drawing or version; older drawings use
+their exported trace when available. Progress comes from recorded execution events.
+The browser stores sketchbook metadata and the selected mode; run artifacts and
+step history stay on the local server under `episodes/ui/`.
 
 Voice input uses the browser's Web Speech API and starts only when the user taps
 the mic. Microphone permission and a supported browser are required. Typing is
@@ -102,7 +120,7 @@ Removed models are not restored to the dropdown by saved runs.
 
 Runs are stored in `episodes/ui/<id>/`. The UI shows process output while running. After the CLI finishes, it exports the full Inspect logs with resolved attachments to `output/trace.json`. The completed-run timeline pairs each command with its recorded tool results, shows failed renders and inline previews, and distinguishes submission requests from final render validation. Source rewrites show a line diff against the previous successful write, with full commands and source available to expand. Model response timing and token counts appear when recorded. The Transcript view preserves all messages; the Events view searches full event data and loads raw records when expanded. Failed actions open automatically. Downloads include the final PNG, Python source, result JSON, and full trace when present. Refusals and failures are displayed without substituting artwork. Reloading the same browser tab resumes polling its last run. Run URLs include `#run=<id>` so a saved run can be reopened directly.
 
-The trace is the recorded execution history, not inferred or invented model reasoning. Full agent events currently appear after completion, not live. Runs interrupted by server shutdown are not resumed. Keep the server running until the job ends. This service binds only to loopback, checks Host and Origin, and serves only the UI and explicitly allowed run artifacts.
+The trace is recorded execution history, not inferred or invented model reasoning. Studio's full Inspect events appear after completion; the consumer timeline shows recorded turns and actions live. Runs interrupted by server shutdown are not resumed. Keep the server running until the job ends. This service binds only to loopback, checks Host and Origin, and serves only the UI and explicitly allowed run artifacts.
 
 Validation: `node --check ui/app.js`, `node --test ui/test_trace.cjs`,
 `.venv/bin/python -m unittest ui.test_server`,

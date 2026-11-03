@@ -7,15 +7,42 @@
   const ID = /^[a-f0-9]{32}$/;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const speech = new window.ArtsySpeech();
+  const activity = new window.ArtsyActivity(ui.agentActivity, ui.activitySteps, ui.activityStatus, approveAction);
   let drawings = [], current = null, activeRun = null, busy = false, listening = false;
-  let recognition = null, canceled = false, finalTranscript = '', pollTimer = null;
+  let recognition = null, pollTimer = null;
   let pollFailures = 0, lastPhase = '', previewSpoken = false, lastPrompt = '', voiceOn = true;
+  let activityRequest = 0;
   const progressMessages = {
     thinking: 'Imagining your drawing…',
     drawing: 'Putting it on paper…',
     previewing: 'Taking a closer look…',
     rendering: 'Finishing up…',
+    awaiting_approval: 'Waiting for your approval…',
   };
+
+  async function approveAction(stepId) {
+    if (!activeRun) return false;
+    try {
+      const response = await fetch(`/api/runs/${activeRun}/approve`, {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({step_id: stepId})});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'The action could not be approved. Please try again.');
+      showError('');
+      return true;
+    } catch (error) { showError(error.message); return false; }
+  }
+  async function loadActivity(id) {
+    const request = ++activityRequest;
+    activity.reset(id);
+    try {
+      const response = await fetch(`/api/runs/${id}`, {cache: 'no-store'});
+      if (!response.ok) throw new Error('Activity unavailable');
+      const run = await response.json();
+      if (request === activityRequest && !busy) activity.render({...run, id});
+    } catch {
+      if (request === activityRequest && !busy) ui.activityStatus.textContent = 'Step history is unavailable for this drawing.';
+    }
+  }
 
   function persist() {
     try { localStorage.setItem(STORAGE, JSON.stringify(drawings.slice(0, 50))); } catch { /* Artifacts stay on the server. */ }
@@ -48,13 +75,15 @@
     }
   }
   function updateVoiceLabel() {
-    ui.voiceTitle.textContent = busy ? 'Drawing…' : listening ? 'Listening…' : current?.versions.length ? 'Anything you’d like to change?' : Recognition ? 'Tap to talk' : 'Type your idea';
+    ui.voiceTitle.textContent = busy ? 'Drawing…' : listening ? 'Listening…' : current?.versions.length && ui.promptForm.hidden ? 'Anything you’d like to change?' : '';
   }
   function setBusy(value) {
     busy = value; ui.main.classList.toggle('is-busy', value);
     ui.micButton.disabled = value || !Recognition; ui.send.disabled = value;
     ui.newDrawing.disabled = value; ui.newDrawing.hidden = !current;
     ui.versions.disabled = value;
+    ui.model.disabled = value;
+    ui.executionModes.disabled = value;
     renderHistory(); updateVoiceLabel();
   }
   function showWorkspace() {
@@ -70,17 +99,20 @@
       option.selected = version.id === selectedId; ui.versions.append(option);
     });
   }
-  function showVersion(version) {
+  function showVersion(version, loadSteps = true) {
+    current.selectedId = version.id;
     ui.drawingImage.src = `/api/runs/${version.id}/image.png`;
     ui.drawingImage.alt = version.prompt;
     ui.drawingImage.hidden = false; ui.workingPlaceholder.hidden = true;
     ui.download.href = ui.drawingImage.src; ui.download.hidden = false;
     renderVersions(version.id); updateVoiceLabel();
+    if (loadSteps) loadActivity(version.id);
   }
   function openDrawing(drawing) {
     if (busy) return;
     stopListening(true); showError(''); current = drawing; closeSidebar();
     showWorkspace();
+    ui.prompt.value = ''; ui.prompt.placeholder = 'What would you like to change?';
     showVersion(drawing.versions.find(version => version.id === drawing.selectedId) || drawing.versions.at(-1));
     renderHistory();
   }
@@ -88,6 +120,7 @@
     if (busy) return;
     stopListening(true); speech.cancel();
     current = null; activeRun = null; rememberActive(null); showError(''); closeSidebar();
+    activityRequest++; activity.reset();
     ui.welcome.hidden = false; ui.drawingSpace.hidden = true;
     ui.main.classList.remove('has-drawing'); ui.newDrawing.hidden = true;
     ui.prompt.value = ''; ui.prompt.placeholder = 'What should we draw?';
@@ -96,7 +129,9 @@
   }
   function setTypedInput(show, focus = true) {
     ui.promptForm.hidden = !show; ui.typeToggle.setAttribute('aria-expanded', String(show));
-    const label = show ? 'Hide typing area' : 'Type your idea instead';
+    ui.micButton.hidden = show || !Recognition;
+    updateVoiceLabel();
+    const label = show ? 'Use microphone' : 'Type an idea';
     ui.typeToggle.setAttribute('aria-label', label); ui.typeToggle.title = label;
     if (show && focus) ui.prompt.focus();
   }
@@ -110,18 +145,23 @@
   }
   function stopListening(discard = false) {
     if (!recognition) return;
-    canceled = discard;
-    if (discard) recognition.abort(); else recognition.stop();
+    const session = recognition;
+    if (discard) {
+      recognition = null; setListening(false); session.abort();
+    } else session.stop();
   }
   function startListening() {
     if (busy) return;
     if (!Recognition) { setTypedInput(true); return; }
-    if (listening) { stopListening(); return; }
+    if (recognition) { stopListening(); return; }
     showError(''); speech.cancel();
-    recognition = new Recognition(); finalTranscript = ''; canceled = false;
+    const session = new Recognition();
+    recognition = session;
+    let finalTranscript = '', canceled = false;
     recognition.lang = navigator.language || 'en-US'; recognition.continuous = false; recognition.interimResults = true;
-    recognition.onstart = () => setListening(true);
+    recognition.onstart = () => { if (recognition === session) setListening(true); };
     recognition.onresult = event => {
+      if (recognition !== session) return;
       let interim = ''; finalTranscript = '';
       for (let i = 0; i < event.results.length; i++) {
         if (event.results[i].isFinal) finalTranscript += event.results[i][0].transcript + ' ';
@@ -130,6 +170,7 @@
       ui.voiceTitle.textContent = (finalTranscript + interim).trim() || 'Listening…';
     };
     recognition.onerror = event => {
+      if (recognition !== session) return;
       canceled = true;
       const messages = {
         'not-allowed': 'Allow microphone access, or type your idea.',
@@ -142,6 +183,7 @@
       setListening(false);
     };
     recognition.onend = () => {
+      if (recognition !== session) return;
       setListening(false); recognition = null;
       if (!canceled && finalTranscript.trim()) submit(finalTranscript.trim());
     };
@@ -155,11 +197,12 @@
     let accepted = false;
     try {
       const parentId = current?.selectedId || current?.versions.at(-1)?.id;
-      const response = await fetch('/api/artsy/runs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({prompt, ...(parentId ? {parent_id: parentId} : {})})});
+      const response = await fetch('/api/artsy/runs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({prompt, model: ui.model.value, execution_mode: ui.modeApproval.checked ? 'approval' : 'auto', ...(parentId ? {parent_id: parentId} : {})})});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'I couldn’t start this drawing. Please try again.');
       if (!ID.test(data.id)) throw new Error('Something went wrong. Please try again.');
       accepted = true; activeRun = data.id; rememberActive(data.id); lastPrompt = prompt;
+      activityRequest++; activity.reset(data.id); activity.render({id: data.id, state: 'queued'});
       if (!current?.versions.length) current = {id: data.id, title: prompt, versions: []};
       showWorkspace(); setBusy(true);
       ui.prompt.value = ''; ui.prompt.placeholder = 'What would you like to change?';
@@ -192,18 +235,20 @@
       if (!current) {
         current = drawings.find(drawing => drawing.versions.some(version => version.id === run.parent_id)) || {id, title: run.prompt, versions: []};
         showWorkspace();
-        if (current.versions.length) showVersion(current.versions.find(v => v.id === run.parent_id) || current.versions.at(-1));
+        if (current.versions.length) showVersion(current.versions.find(v => v.id === run.parent_id) || current.versions.at(-1), false);
         else { ui.drawingImage.hidden = true; ui.workingPlaceholder.hidden = false; }
         setBusy(true);
       }
       applyProgress(run.progress);
+      ui.modeApproval.checked = run.execution_mode === 'approval'; ui.modeAuto.checked = !ui.modeApproval.checked;
+      activity.render({...run, id});
       if (run.state === 'queued') ui.voiceTitle.textContent = 'Getting ready…';
       if (run.state === 'running' || run.state === 'queued') { pollTimer = setTimeout(poll, 1500); return; }
       if (run.state === 'completed' && run.result?.outcome === 'submitted' && run.artifacts?.includes('image.png')) {
         if (!current.versions.some(version => version.id === id)) current.versions.push({id, prompt: run.prompt});
         current.selectedId = id;
         drawings = [current, ...drawings.filter(drawing => drawing.id !== current.id)].slice(0, 50); persist();
-        showVersion(current.versions.find(version => version.id === id));
+        showVersion(current.versions.find(version => version.id === id), false);
         activeRun = null; rememberActive(null); setBusy(false);
         if (!Recognition) setTypedInput(true, false);
         speak('Your drawing is ready. Anything you’d like to change?');
@@ -218,13 +263,23 @@
     }
   }
   function finishFailed(message) {
+    activity.fail(message);
     activeRun = null; rememberActive(null); setBusy(false);
-    if (!current?.versions.length) { ui.drawingSpace.hidden = true; ui.welcome.hidden = false; ui.main.classList.remove('has-drawing'); }
+    if (!current?.versions.length) { ui.drawingSpace.hidden = true; ui.welcome.hidden = ui.agentActivity.hidden === false; ui.main.classList.remove('has-drawing'); }
     showError(message); ui.prompt.value = lastPrompt; setTypedInput(true, false); speak(message);
   }
 
   ui.newDrawing.onclick = newDrawing;
-  ui.typeToggle.onclick = () => setTypedInput(ui.promptForm.hidden);
+  ui.model.onchange = () => {
+    try { localStorage.setItem('artsy.model', ui.model.value); } catch { /* Optional preference. */ }
+  };
+  for (const input of [ui.modeAuto, ui.modeApproval]) input.onchange = () => {
+    try { localStorage.setItem('artsy.executionMode', ui.modeApproval.checked ? 'approval' : 'auto'); } catch { /* Optional preference. */ }
+  };
+  ui.typeToggle.onclick = () => {
+    stopListening(true);
+    setTypedInput(ui.promptForm.hidden);
+  };
   ui.micButton.onclick = startListening;
   ui.promptForm.onsubmit = event => { event.preventDefault(); submit(ui.prompt.value); };
   ui.prompt.onkeydown = event => { if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submit(ui.prompt.value); } };
@@ -252,8 +307,11 @@
   ui.drawingImage.onerror = () => showError('This image couldn’t be loaded.');
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE) || '[]');
+    const savedModel = localStorage.getItem('artsy.model');
+    if ([...ui.model.options].some(option => option.value === savedModel)) ui.model.value = savedModel;
     if (Array.isArray(saved)) drawings = saved.filter(d => d && ID.test(d.id) && typeof d.title === 'string' && Array.isArray(d.versions) && d.versions.length && d.versions.every(v => v && ID.test(v.id) && typeof v.prompt === 'string')).slice(0, 50);
     if (localStorage.getItem('artsy.voice') === 'false') ui.soundToggle.click();
+    ui.modeApproval.checked = localStorage.getItem('artsy.executionMode') === 'approval'; ui.modeAuto.checked = !ui.modeApproval.checked;
     const resume = localStorage.getItem(ACTIVE);
     if (ID.test(resume || '')) activeRun = resume;
   } catch { /* Start clean when browser storage is unavailable. */ }

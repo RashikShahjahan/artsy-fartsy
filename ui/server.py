@@ -22,6 +22,12 @@ from evaluation.suite import dataset_path
 DIRECT_MODELS = [
     {"id": "openai/gpt-6-luna", "label": "GPT-6 Luna", "direct": True},
 ]
+ARTSY_MODELS = [
+    {"id": LARGE_MODEL_ID, "label": "Base"},
+    {"id": "artsy/sft-v2-qwen3.8-27b-final-preview-masked-cosine", "label": "SFT"},
+    {"id": "artsy/grpo-v4-subset200-b16-c64", "label": "GRPO"},
+    *[dict(model) for model in DIRECT_MODELS],
+]
 
 def model_catalog(bridge_models=None):
     """Studio's default models plus saved fine-tunes advertised by the bridge."""
@@ -129,12 +135,23 @@ def bridge_model_catalog():
 
 
 def artsy_request(body):
-    """Consumer requests always use Luna and ten internal turns per drawing/edit."""
+    """Consumer requests select one of four models with ten turns per drawing/edit."""
     if not isinstance(body, dict):
         raise ValueError('Invalid request.')
-    request = generation_request({'prompt': body.get('prompt'), 'seed': 42,
-                                  'model': DIRECT_MODELS[0]['id']})
-    request.update(experience='artsy', max_turns=10)
+    mode = body.get('execution_mode', 'auto')
+    if mode not in ('auto', 'approval'):
+        raise ValueError('Choose Auto or Approve steps.')
+    model = body.get('model', DIRECT_MODELS[0]['id'])
+    choice = next((entry for entry in ARTSY_MODELS if entry['id'] == model), None)
+    if choice is None:
+        raise ValueError('Choose Base, SFT, GRPO, or GPT-6 Luna.')
+    try:
+        request = generation_request({'prompt': body.get('prompt'), 'seed': 42, 'model': model})
+    except ValueError as error:
+        if str(error) == 'Choose an available Studio model.':
+            raise ValueError(f"{choice['label']} is unavailable. Start the native bridge with its completed checkpoint, then try again.") from error
+        raise
+    request.update(experience='artsy', max_turns=10, execution_mode=mode)
     parent_id = body.get('parent_id')
     if parent_id is not None:
         if not isinstance(parent_id, str) or not re.fullmatch(r'[a-f0-9]{32}', parent_id):
@@ -158,6 +175,23 @@ def artsy_request(body):
 
 def content_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest() if path and Path(path).is_file() else None
+
+
+def approve_action(run_id, body):
+    if not isinstance(body, dict) or not isinstance(body.get('step_id'), str):
+        raise ValueError('Choose the action awaiting approval.')
+    directory = JOBS / run_id
+    job = json.loads((directory / 'job.json').read_text())
+    progress = json.loads((directory / 'progress.json').read_text())
+    if (job.get('execution_mode') != 'approval' or job.get('state') != 'running'
+            or progress.get('phase') != 'awaiting_approval'
+            or not any(step.get('id') == body['step_id'] and step.get('status') == 'pending'
+                       for step in progress.get('steps', []))):
+        raise ValueError('This action is no longer awaiting approval.')
+    temporary = directory / 'approval.tmp'
+    temporary.write_text(json.dumps({'step_id': body['step_id']}))
+    temporary.replace(directory / 'approval.json')
+    return {'approved': body['step_id']}
 
 
 def interpreter():
@@ -309,6 +343,17 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({'error': 'Local requests only.'}, 403)
         if self.serve_workspace():
             return
+        approve = re.fullmatch(r'/api/runs/([a-f0-9]{32})/approve', self.path)
+        if approve:
+            try:
+                size = int(self.headers.get('Content-Length', '0'))
+                if not 0 < size <= 4096:
+                    raise ValueError('Invalid approval request size.')
+                with LOCK:
+                    decision = approve_action(approve[1], json.loads(self.rfile.read(size)))
+                return self.send_json(decision)
+            except (OSError, ValueError, TypeError) as error:
+                return self.send_json({'error': str(error)}, 409)
         if self.path == '/api/artsy/speech':
             try:
                 size = int(self.headers.get('Content-Length', '0'))
@@ -469,7 +514,7 @@ class Handler(SimpleHTTPRequestHandler):
                     if item.get('model_path') and 'label' not in item:
                         catalog[item['id']]['label'] = 'Qwen3.5 · 4B · configured checkpoint'
             return self.send_json({'models': list(catalog.values()), 'bridge_models': [item['id'] for item in served] if served is not None else None})
-        match = re.fullmatch(r'/api/runs/([a-f0-9]{32})(?:/(image.png|program.py|trace.json|result.json))?', self.path)
+        match = re.fullmatch(r'/api/runs/([a-f0-9]{32})(?:/(image\.png|program\.py|trace\.json|result\.json|preview-\d+-\d+\.png))?', self.path)
         if match:
             directory = JOBS / match[1]
             if not (directory / 'job.json').exists():
@@ -480,7 +525,7 @@ class Handler(SimpleHTTPRequestHandler):
                     return self.send_json({'error': 'Artifact not available.'}, 404)
                 data = file.read_bytes()
                 self.send_response(200)
-                self.send_header('Content-Type', 'image/png' if match[2] == 'image.png' else 'text/plain; charset=utf-8')
+                self.send_header('Content-Type', 'image/png' if match[2].endswith('.png') else 'text/plain; charset=utf-8')
                 self.send_header('X-Content-Type-Options', 'nosniff')
                 self.send_header('Content-Length', str(len(data)))
                 self.end_headers()
@@ -518,11 +563,17 @@ class Handler(SimpleHTTPRequestHandler):
                         .replace('__RL_DESCRIPTION__', description))
             return self.send_page(page)
         if target in ('/', '/index.html'):
-            return self.send_page((ROOT / 'ui/artsy.html').read_text())
+            from html import escape
+            options = ''.join(
+                f'<option value="{escape(model["id"], quote=True)}"'
+                + (' selected' if model['id'] == DIRECT_MODELS[0]['id'] else '')
+                + f'>{escape(model["label"])}</option>' for model in ARTSY_MODELS)
+            return self.send_page((ROOT / 'ui/artsy.html').read_text().replace(
+                '__ARTSY_MODEL_OPTIONS__', options))
         if target in ('/studio', '/studio/', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
             return self.send_page(page)
-        if target not in ('/speech.js', '/artsy.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css'):
+        if target not in ('/speech.js', '/artsy.js', '/activity.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 

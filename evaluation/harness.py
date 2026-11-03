@@ -348,7 +348,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                  token_limit: int | None = DEFAULT_TOKEN_LIMIT, token_limit_type: str = "output",
                  time_limit: int | None = DEFAULT_TIME_LIMIT,
                  max_turns: int | None = DEFAULT_MAX_TURNS,
-                 generation_filter: GenerateFilter | None = None, progress=None) -> Task:
+                 generation_filter: GenerateFilter | None = None, progress=None, approval=None) -> Task:
     if (type(temperature) not in (int, float) or not math.isfinite(temperature)
             or not 0 <= temperature <= 2):
         raise ValueError("temperature must be a finite number from 0 to 2")
@@ -384,7 +384,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                  for row in specs],
          solver=drawing_agent(config=config, generation_filter=generation_filter,
                               system_prompt=drawing_system_prompt(token_limit, token_limit_type, max_calls=None),
-                              max_calls=None, max_turns=max_turns, progress=progress),
+                              max_calls=None, max_turns=max_turns, progress=progress, approval=approval),
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=config,

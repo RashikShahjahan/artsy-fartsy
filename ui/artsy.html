@@ -8,6 +8,8 @@
   <title>Artsy — Let’s draw</title>
   <link rel="stylesheet" href="/artsy.css">
   <script src="/speech.js" defer></script>
+  <script src="/trace.js" defer></script>
+  <script src="/activity.js" defer></script>
   <script src="/artsy.js" defer></script>
 </head>
 <body>
@@ -49,7 +51,7 @@
       <select class="versions" id="versions" aria-label="Drawing version" hidden></select>
     </section>
     <section class="voice-dock" aria-label="Talk to Artsy">
-      <p class="voice-title" id="voice-title" role="status" aria-live="polite">Tap to talk</p>
+      <p class="voice-title" id="voice-title" role="status" aria-live="polite"></p>
       <div class="input-error" id="input-error" role="alert" hidden></div>
       <form id="prompt-form" class="prompt-form" hidden>
         <label class="sr-only" for="prompt">What would you like Artsy to draw or change?</label>
@@ -57,7 +59,28 @@
         <button class="send-button" id="send" type="submit" aria-label="Send to Artsy"><svg><use href="#i-arrow"/></svg></button>
       </form>
       <button class="mic-button" id="mic-button" aria-label="Start talking to Artsy" aria-pressed="false"><svg><use href="#i-mic"/></svg><span class="mic-stop" hidden></span></button>
-      <button class="type-toggle" id="type-toggle" aria-label="Type your idea instead" aria-expanded="false" aria-controls="prompt-form"><svg><use href="#i-keyboard"/></svg></button>
+      <button class="type-toggle" id="type-toggle" aria-label="Type an idea" title="Type an idea" aria-expanded="false" aria-controls="prompt-form"><svg class="type-closed"><use href="#i-keyboard"/></svg><svg class="type-open"><use href="#i-mic"/></svg></button>
+      <details class="drawing-options">
+        <summary>Drawing settings</summary>
+        <div class="options-content">
+          <label class="model-picker" for="model">
+            <span>Model</span>
+            <select id="model" aria-label="Drawing model">__ARTSY_MODEL_OPTIONS__</select>
+          </label>
+          <fieldset class="execution-modes" id="execution-modes">
+            <legend class="sr-only">How Artsy works</legend>
+            <label><input type="radio" name="execution-mode" id="mode-auto" value="auto" checked><span>Auto</span></label>
+            <label><input type="radio" name="execution-mode" id="mode-approval" value="approval"><span>Approve steps</span></label>
+          </fieldset>
+        </div>
+      </details>
+    </section>
+    <section class="agent-activity" id="agent-activity" aria-labelledby="activity-title" hidden>
+      <div class="activity-heading">
+        <h2 id="activity-title">Artsy at work</h2>
+        <p id="activity-status" role="status" aria-live="polite"></p>
+      </div>
+      <ol class="activity-steps" id="activity-steps" aria-label="Agent steps" tabindex="0"></ol>
     </section>
   </main>
 </body>

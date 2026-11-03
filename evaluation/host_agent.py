@@ -1,6 +1,7 @@
 """Host-side drawing policy; only tool commands enter the execution sandbox."""
 
 import base64
+import json
 from pathlib import Path
 import re
 from time import monotonic
@@ -57,9 +58,35 @@ def observation(result, image_pattern):
     return [ContentText(text=text), *images] if images else text
 
 
+def activity_result(content):
+    """Expose recorded tool output and previews, including nested render failures."""
+    parts = content if isinstance(content, list) else [ContentText(text=content)]
+    text = '\n'.join(part.text for part in parts if isinstance(part, ContentText))
+    failed = any(int(code) != 0 for code in re.findall(r'^Return code:\s*(-?\d+)', text, re.M))
+    for line in text.splitlines():
+        try:
+            feedback = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(feedback, dict):
+            failed |= feedback.get('ok') is False or feedback.get('exitCode', 0) != 0
+    return {'status': 'failed' if failed else 'completed', 'output': text,
+            'previews': [part.image for part in parts if isinstance(part, ContentImage)]}
+
+
+def action_title(command):
+    if command.strip() == SUBMIT:
+        return 'Submit drawing'
+    if re.search(r'(?:^|\s)/opt/artsy/render\.py(?:\s|$)', command):
+        return 'Render preview'
+    if re.search(r'(?:^|\n)cat\s*>\s*(?:/workspace/)?program\.py\b', command):
+        return 'Write drawing code'
+    return 'Run drawing action'
+
+
 @agent(name=AGENT_NAME)
 def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMITS["maxCalls"],
-                  max_turns=None, progress=None):
+                  max_turns=None, progress=None, approval=None):
     """Preserve the Mini SWE bash protocol without its container-side harness."""
     settings = yaml.safe_load(Path(__file__).with_name("mini.yaml").read_text())
     image_pattern = re.compile(settings["model"]["multimodal_regex"])
@@ -81,6 +108,12 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
             sample.metadata["submitted"] = False
         submitted = False
         operations = 0
+        actions = 0
+
+        def report(phase, step=None, *, turn=None):
+            if progress is not None:
+                progress({'phase': phase, 'turn': timing['model_calls'] if turn is None else turn,
+                          'max_turns': max_turns, **({'step': step} if step else {})})
 
         @tool(name="bash", parallel=False)
         def bash():
@@ -90,16 +123,28 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                 Args:
                     command: The bash command to execute.
                 """
-                nonlocal submitted, operations
-                if submitted:
-                    return "Submission already requested."
-                if max_calls is not None and operations >= max_calls:
-                    return "Return code: 1\nEpisode operation budget exhausted."
-                operations += 1
-                if progress is not None:
-                    progress({'phase': 'drawing',
-                              'turn': timing['model_calls'], 'max_turns': max_turns})
+                nonlocal submitted, operations, actions
+                actions += 1
+                step = {'id': f'action-{actions}', 'kind': 'tool', 'title': action_title(command),
+                        'command': command, 'turn': timing['model_calls'], 'status': 'running'}
+                report('drawing', step)
                 started = monotonic()
+
+                def finish(content):
+                    report('drawing', {**step, **activity_result(content),
+                                       'seconds': monotonic() - started})
+                    return content
+
+                if submitted:
+                    return finish("Return code: 1\nSubmission already requested.")
+                if max_calls is not None and operations >= max_calls:
+                    return finish("Return code: 1\nEpisode operation budget exhausted.")
+                if approval is not None:
+                    report('awaiting_approval', {**step, 'status': 'pending'})
+                    await approval(step['id'])
+                    report('drawing', step)
+                    started = monotonic()
+                operations += 1
                 try:
                     # GNU timeout kills the command process group inside Docker.
                     # No generated shell command is ever executed on the host.
@@ -108,18 +153,20 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                         cwd="/workspace", timeout=timeout + 2, timeout_retry=False,
                     )
                 except TimeoutError:
-                    return f"Return code: 124\nCommand timed out after {timeout} seconds."
+                    return finish(f"Return code: 124\nCommand timed out after {timeout} seconds.")
+                except Exception as error:
+                    finish(f"Return code: 1\n{error}")
+                    raise
                 finally:
                     timing["command_seconds"] += monotonic() - started
                 if command.strip() == SUBMIT and result.success:
                     submitted = True
-                    if progress is not None:
-                        progress({'phase': 'rendering', 'turn': timing['model_calls'],
-                                  'max_turns': max_turns})
                 content = observation(result, image_pattern)
-                if progress is not None and isinstance(content, list):
-                    progress({'phase': 'previewing', 'turn': timing['model_calls'],
-                              'max_turns': max_turns})
+                finish(content)
+                if submitted:
+                    report('rendering')
+                elif isinstance(content, list):
+                    report('previewing')
                 return content
             return execute
 
@@ -138,8 +185,9 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
             while ((max_calls is None or turns < max_calls)
                    and (max_turns is None or turns < max_turns)):
                 turns += 1
-                if progress is not None:
-                    progress({'phase': 'thinking', 'turn': turns, 'max_turns': max_turns})
+                step = {'id': f'turn-{turns}', 'kind': 'model', 'title': f'Agent turn {turns}',
+                        'turn': turns, 'status': 'running'}
+                report('thinking', step, turn=turns)
                 if max_turns is not None:
                     state.messages.append(ChatMessageUser(content=
                         f"Turn {turns} of {max_turns}." +
@@ -148,17 +196,31 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                 started = monotonic()
                 try:
                     output = await model.generate(state.messages, tools=tools, config=config)
+                except Exception as error:
+                    report('thinking', {**step, 'status': 'failed', 'output': str(error)}, turn=turns)
+                    raise
                 finally:
                     timing["model_seconds"] += monotonic() - started
                     timing["model_calls"] += 1
                 state.output = output
                 state.messages.append(output.message)
+                report('thinking', {**step, 'status': 'completed', 'output': output.message.text,
+                                    'seconds': monotonic() - started}, turn=turns)
                 if not output.message.tool_calls:
                     state.messages.append(ChatMessageUser(content=
                         'Every response must contain a bash tool call with {"command":"..."}.'))
                     continue
                 results, _ = await execute_tools(state.messages, tools)
                 state.messages.extend(results)
+                # Invalid tool names/arguments are rejected before bash() can report them.
+                for index, result in enumerate(results):
+                    if getattr(result, 'error', None):
+                        call = next((call for call in output.message.tool_calls
+                                     if call.id == getattr(result, 'tool_call_id', None)), None)
+                        report('drawing', {'id': f'tool-error-{turns}-{index}', 'kind': 'tool',
+                            'title': 'Action could not run', 'turn': turns, 'status': 'failed',
+                            'command': json.dumps(call.arguments) if call else '',
+                            'output': result.text or str(result.error)})
                 if submitted or (max_calls is not None and operations >= max_calls):
                     break
         finally:
