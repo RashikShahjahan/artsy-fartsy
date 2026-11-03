@@ -36,6 +36,7 @@
           throw error;
         }
         failures=0;
+        controller=null;
         onUpdate(data,runId);
         if(!isCurrent(version,runId))return;
         if(ACTIVE_STATES.has(data.state))schedule(version,interval);
@@ -45,6 +46,7 @@
         }
       } catch(error) {
         if(!isCurrent(version,runId) || error.name==='AbortError')return;
+        controller=null;
         if(error.status===404) {
           stop();
           onMissing(runId,error);
@@ -73,7 +75,8 @@
       if(!response.ok)throw new Error(data.error || 'Could not cancel run');
       if(isCurrent(version,runId)) {
         clearTimeout(timer);
-        if(!controller)void poll(version);
+        if(controller)controller.abort();
+        void poll(version);
       }
       return true;
     }
