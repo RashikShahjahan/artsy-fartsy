@@ -33,6 +33,29 @@ def drawing_system_prompt(token_limit: int | None = MODEL_CONTEXT_WINDOW, token_
 # Version 1 denotes historical unversioned recordings; version 2 records the
 # host turn limit and the countdown emitted before every model call.
 TRAJECTORY_CONTRACT_VERSION = 2
+# The interactive/evaluation harness now uses named drawing tools. Historical
+# bash recordings and the training importer keep their original version above.
+DRAWING_TOOLS_CONTRACT_VERSION = 3
+
+
+def drawing_tools_prompt() -> str:
+    """Instructions for the host harness's structured drawing tools."""
+    return (
+        "Fulfill the drawing request using the drawing tools. "
+        "Use update_drawing(source) to create or replace the complete Python program. "
+        "Use the installed ArtCanvas module to save output.png at 1920×1200. "
+        "Use read_drawing() to inspect the current source if needed. "
+        "After writing, call preview_drawing() on a separate turn to receive execution "
+        "feedback and the actual PNG image. Revise the source and preview again as needed. "
+        "Call submit_drawing() when the drawing is ready. The harness renders the final "
+        "source again in a fresh directory with no other files. "
+        "A text answer or a pre-existing PNG does not count. "
+        "If you cannot fulfill the request, call refuse_drawing(reason) with a concise "
+        "reason; this ends the request without submitting artwork. "
+        "Every response must include at least one drawing tool call. "
+        "Tools run in order; do not call more tools after submission or refusal.\n\n"
+        + (ROOT / "docs/artcanvas.md").read_text()
+    )
 
 
 def turn_limit_instruction(max_turns: int | None) -> str:

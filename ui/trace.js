@@ -31,6 +31,13 @@
     if (typeof args === 'string') { try { args = JSON.parse(args); } catch { return args; } }
     return typeof args?.command === 'string' ? args.command : JSON.stringify(args ?? {}, null, 2);
   }
+  const drawingTools = {
+    update_drawing: ['write', 'Refining your drawing'],
+    read_drawing: ['read', 'Reviewing your drawing'],
+    preview_drawing: ['render', 'Checking the preview'],
+    submit_drawing: ['submit', 'Finishing your drawing'],
+    refuse_drawing: ['refuse', 'Declining the request'],
+  };
   function sourceFor(command) {
     // Only extract a literal, complete here-document. Other edits stay as commands.
     const match = command.match(/(?:^|\n)cat\s*>\s*(?:\/workspace\/)?program\.py\s*<<\s*(['"]?)([A-Za-z_][\w]*)\1\s*\n([\s\S]*?)\n\2(?:\n|$)/);
@@ -54,12 +61,17 @@
       if (message.role === 'assistant' && message.tool_calls?.length) {
         lastResult = null;
         message.tool_calls.forEach((call, index) => {
-          const command = commandFor(call), source = sourceFor(command);
-          const kind = /^\s*echo\s+['"]?COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT['"]?\s*$/.test(command) ? 'submit'
+          const command = commandFor(call), drawingTool = drawingTools[call.function];
+          let args = call.arguments;
+          if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
+          const source = call.function === 'update_drawing' && typeof args?.source === 'string'
+            ? args.source : drawingTool ? null : sourceFor(command);
+          const kind = drawingTool ? drawingTool[0] : /^\s*echo\s+['"]?COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT['"]?\s*$/.test(command) ? 'submit'
             : source !== null ? 'write' : /(?:^|\s)\/opt\/artsy\/render\.py(?:\s|$)/.test(command) ? 'render' : 'tool';
           const matched = call.id ? results.get(call.id) || [] : [];
           matched.forEach(m => used.add(m));
-          const step = {kind, title: kind === 'write' ? (previousSource === null ? 'Write program.py' : 'Update program.py')
+          const step = {kind, tool: drawingTool ? call.function : undefined,
+            title: drawingTool ? drawingTool[1] : kind === 'write' ? (previousSource === null ? 'Write program.py' : 'Update program.py')
             : kind === 'render' ? 'Render preview' : kind === 'submit' ? 'Submit drawing' : `Run ${call.function || 'tool'}`,
             call, command, source, previousSource, results: matched, model: models.get(call.id),
             content: index === 0 ? message.content : '', observations: [], status: statusFor(call, matched, kind)};

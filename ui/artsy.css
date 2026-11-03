@@ -71,7 +71,7 @@ main.is-busy .voice-dock { margin-top: 0; }
 main.is-busy .voice-title { margin-bottom: 0; }
 main.is-busy .prompt-form { display: none; }
 main.is-busy .drawing-options { display: none; }
-/* Recorded steps stay available without timeline markers or connecting lines. */
+/* Only the current stage occupies the canvas during generation. */
 main.is-busy .drawing-space:has(.activity-step:not([hidden])) { display: flex; }
 main.is-busy .drawing-space:has(.activity-step:not([hidden])) + .voice-dock { margin-top: 26px; }
 main.is-busy .canvas { min-height: 0; }
@@ -98,7 +98,6 @@ main.is-busy .mic-button, main.is-busy .type-toggle { display: none; }
 .activity-step { padding: 28px 0; }
 main.is-busy .activity-step { padding: 0; }
 main.is-busy .activity-steps { max-height: 64svh; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #79685f55 transparent; }
-main.is-busy .activity-step:not([hidden]) ~ .activity-step { padding-top: 28px; }
 main.is-busy .activity-preview { max-height: 42svh; }
 .activity-step-heading { display: flex; flex-direction: column; align-items: center; gap: 8px; line-height: 1.3; }
 .activity-step-heading strong { min-width: 0; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
@@ -106,10 +105,7 @@ main.is-busy .activity-preview { max-height: 42svh; }
 .activity-step.pending .activity-step-status, .activity-step.failed .activity-step-status { color: #954d3c; }
 .activity-message { font-size: 16px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; margin: 14px 0 0; }
 .activity-preview { display: block; max-width: 100%; max-height: 58svh; margin: 20px auto 0; object-fit: contain; border-radius: 3px; }
-.activity-details { min-width: 0; text-align: center; font-size: 14px; line-height: 1.7; color: var(--ink); }
-.activity-details p { margin: 12px 0 5px; overflow-wrap: anywhere; }
-.activity-details p:first-child { margin-top: 0; }
-.activity-action-result { color: #954d3c; }
+.activity-action-result { color: #954d3c; font-size: 14px; line-height: 1.7; }
 .approve-action { margin-top: 12px; padding: 9px 16px; border-radius: 20px; background: var(--ink); color: var(--paper); font-size: 12px; }
 
 .sidebar-scrim { position: fixed; inset: 0; background: #41303f33; z-index: 3; }

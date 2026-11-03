@@ -10,7 +10,7 @@ function node(tag = 'div') {
     remove() { this.parent.children = this.parent.children.filter(child => child !== this); }};
 }
 function find(parent, tag) { return parent.children.flatMap(child => [child, ...find(child, tag)]).filter(child => child.tag === tag); }
-function actionDetails(parent) { return find(parent, 'div').find(child => child.className === 'activity-details'); }
+function title(parent) { return find(parent, 'strong')[0].textContent; }
 const run = (overrides = {}) => ({id: 'a'.repeat(32), state: 'running', execution_mode: 'approval',
   progress: {phase: 'awaiting_approval', turn: 1, max_turns: 10, steps: [
     {id: 'turn-1', kind: 'model', title: 'Agent turn 1', status: 'completed', output: '<script>text only</script>'},
@@ -57,30 +57,29 @@ test('old saved traces recover every recorded action and preview', () => {
   assert.equal(steps[0].previews.length, 1);
 });
 
-test('action details appear directly and polling offers approval only for pending steps', async () => {
+test('only the current action appears and polling offers approval only for pending steps', async () => {
   global.document = {createElement: node};
   const panel = node(), list = node('ol'), status = node();
   const approved = [];
   const activity = new Activity(panel, list, status, async id => { approved.push(id); return true; });
   activity.render(run());
   assert.equal(status.textContent, 'Your approval is needed');
-  assert.equal(list.children.length, 2);
-  assert.equal(find(list, 'p')[0].textContent, '<script>text only</script>');
-  const details = actionDetails(list);
-  assert.equal(find(details, 'p')[0].textContent, 'Create or update the instructions that make your drawing.');
+  assert.equal(list.children.length, 1);
+  assert.equal(title(list), 'Create your drawing');
+  const heading = find(list, 'strong')[0];
+  assert.equal(find(list, 'p').length, 0);
   assert.equal(find(list, 'pre').length, 0);
   assert.equal(find(list, 'details').length, 0);
   assert.equal(find(list, 'summary').length, 0);
-  assert.equal(find(list.children[1], 'strong').length, 0);
   activity.render(run());
-  assert.equal(actionDetails(list), details);
+  assert.equal(find(list, 'strong')[0], heading);
   const button = find(list, 'button')[0];
   await button.onclick();
   assert.deepEqual(approved, ['action-1']);
   assert.equal(button.disabled, true);
   const next = run(); next.progress.phase = 'drawing'; next.progress.steps[1].status = 'running';
   activity.render(next);
-  assert.equal(find(actionDetails(list), 'p')[0].textContent, 'Create or update the instructions that make your drawing.');
+  assert.equal(title(list), 'Creating your drawing…');
   assert.equal(find(list, 'button').length, 0);
   const auto = run({id: 'b'.repeat(32), execution_mode: 'auto'});
   activity.render(auto);
@@ -94,61 +93,108 @@ test('failed action output stays visible and previews use only approved image pa
   const activity = new Activity(panel, list, status);
   const current = run();
   activity.render(current);
-  assert.equal(find(actionDetails(list), 'p')[0].textContent, 'Create or update the instructions that make your drawing.');
+  assert.equal(title(list), 'Create your drawing');
   current.progress.steps[1] = {id: 'action-1', kind: 'tool', title: 'Render preview',
     status: 'failed', output: 'SyntaxError', previews: ['preview-1-0.png', 'https://untrusted.example/image.png', '../secret']};
   activity.render(current);
-  assert.match(find(actionDetails(list), 'p')[1].textContent, /couldn’t finish/);
+  assert.match(find(list, 'p')[0].textContent, /couldn’t finish/);
   assert.equal(find(list, 'pre').length, 0);
   assert.equal(find(list, 'img').length, 1);
   assert.equal(find(list, 'img')[0].src, `/api/runs/${current.id}/preview-1-0.png`);
 });
 
-test('all recorded actions and previews remain visible during auto mode and later thinking', () => {
-  global.document = {createElement: node};
-  const list = node('ol');
-  const activity = new Activity(node(), list, node());
-  const current = run({execution_mode: 'auto'});
-  current.progress.steps[1].status = 'completed';
-  current.progress.steps[1].previews = ['preview-1-0.png'];
-  activity.render(current);
-  assert.deepEqual(list.children.map(row => row.hidden), [false, false]);
-  assert.equal(find(list, 'button').length, 0);
-  current.progress.steps.push({id: 'turn-2', kind: 'model', title: 'Agent turn 2', status: 'running'});
-  activity.render(current);
-  assert.deepEqual(list.children.map(row => row.hidden), [false, false, true]);
-  assert.equal(find(list.children[1], 'img')[0].src, `/api/runs/${current.id}/preview-1-0.png`);
-  current.progress.steps[2].output = 'Adding the finishing touches.';
-  activity.render(current);
-  assert.deepEqual(list.children.map(row => row.hidden), [false, false, false]);
-  current.progress.steps.push({id: 'action-2', kind: 'tool', title: 'Render preview', status: 'completed', previews: ['preview-3-0.png']});
-  activity.render(current);
-  assert.equal(find(list, 'img').length, 2);
-  assert.equal(list.children.every(row => !row.hidden), true);
-  assert.equal(find(list, 'button').length, 0);
-  current.state = 'completed'; current.result = {outcome: 'submitted'}; current.artifacts = ['image.png'];
-  activity.render(current);
-  assert.equal(list.children.every(row => !row.hidden), true);
+test('each new stage replaces the previous action and preview in both modes', () => {
+  for (const execution_mode of ['auto', 'approval']) {
+    global.document = {createElement: node};
+    const list = node('ol');
+    const activity = new Activity(node(), list, node());
+    const current = run({execution_mode});
+    current.progress.steps[1].status = 'completed';
+    current.progress.steps[1].previews = ['preview-1-0.png'];
+    activity.render(current);
+    assert.equal(list.children.length, 1);
+    assert.equal(title(list), 'Drawing created');
+    assert.equal(find(list, 'button').length, 0);
+    current.progress.steps.push({id: 'turn-2', kind: 'model', title: 'Agent turn 2', status: 'running'});
+    activity.render(current);
+    assert.equal(list.children.length, 1);
+    assert.equal(list.children[0].hidden, true);
+    assert.equal(find(list, 'img').length, 0);
+    current.progress.steps[2].output = 'Adding the finishing touches.';
+    activity.render(current);
+    assert.deepEqual(list.children.map(row => row.hidden), [false]);
+    assert.equal(find(list, 'p')[0].textContent, 'Adding the finishing touches.');
+    current.progress.steps[2].status = 'completed';
+    current.progress.steps.push({id: 'action-2', kind: 'tool', title: 'Render preview', status: 'completed', previews: ['preview-3-0.png']});
+    activity.render(current);
+    assert.equal(list.children.length, 1);
+    assert.equal(find(list, 'img').length, 1);
+    assert.equal(find(list, 'img')[0].src, `/api/runs/${current.id}/preview-3-0.png`);
+    assert.equal(list.children.every(row => !row.hidden), true);
+    assert.equal(find(list, 'button').length, 0);
+    current.state = 'completed'; current.result = {outcome: 'submitted'}; current.artifacts = ['image.png'];
+    activity.render(current);
+    assert.equal(list.children.length, 5);
+    assert.equal(find(list, 'img').length, 2);
+    assert.equal(list.children.every(row => !row.hidden), true);
+    assert.equal(title(list.children[0]), 'Drawing update');
+    assert.equal(title(list.children.at(-1)), 'Drawing ready');
+  }
 });
 
-test('action descriptions explain shell effects without showing commands or tool logs', () => {
-  assert.match(actionDescription({command: "cat > /workspace/program.py <<'PY'\nsecret code\nPY\n/opt/artsy/render.py --preview"}), /instructions.*Render a preview/);
-  assert.match(actionDescription({command: 'echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'}), /Submit your drawing/);
-  assert.match(actionDescription({command: 'sed -i s/red/blue/ program.py'}), /Adjust the instructions/);
-  assert.match(actionDescription({command: 'cat program.py'}), /Inspect the drawing files/);
-  assert.match(actionDescription({command: 'python program.py'}), /Run the drawing instructions/);
+test('shell actions use short, status-aware drawing labels', () => {
+  assert.equal(actionDescription({command: "cat > /workspace/program.py <<'PY'\nsecret code\nPY\n/opt/artsy/render.py --preview"}), 'Checking the preview…');
+  assert.equal(actionDescription({command: 'echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'}), 'Finishing your drawing…');
+  assert.equal(actionDescription({command: 'sed -i s/red/blue/ program.py'}), 'Refining your drawing…');
+  assert.equal(actionDescription({command: 'cat program.py'}), 'Reviewing your drawing…');
+  assert.equal(actionDescription({command: 'python program.py'}), 'Checking your drawing…');
+  assert.equal(actionDescription({kind: 'write', status: 'pending'}), 'Create your drawing');
+  assert.equal(actionDescription({kind: 'render', status: 'completed'}), 'Preview checked');
   assert.equal(actionDescription({command: 'unknown --secret-value'}).includes('secret'), false);
 });
 
-test('image loading follows new steps unless the user scrolls back', () => {
+test('named drawing tools drive consumer labels without inspecting source or commands', () => {
+  assert.equal(actionDescription({tool: 'update_drawing', kind: 'write', status: 'running'}), 'Refining your drawing…');
+  assert.equal(actionDescription({tool: 'preview_drawing', status: 'pending'}), 'Check the preview');
+  assert.equal(actionDescription({tool: 'read_drawing', status: 'completed'}), 'Drawing reviewed');
+  assert.equal(actionDescription({tool: 'refuse_drawing', status: 'completed'}), 'Request declined');
+  const saved = stepsFor({state: 'completed', trace: [{samples: [{messages: [
+    {role: 'assistant', tool_calls: [{id: 'one', function: 'preview_drawing', arguments: {}}]},
+    {role: 'tool', tool_call_id: 'one', content: 'Return code: 0'},
+  ]}]}]}, traceApi);
+  assert.equal(actionDescription(saved[0]), 'Preview checked');
+});
+
+test('final checks replace earlier steps without changing the recorded history', () => {
+  global.document = {createElement: node};
+  const list = node('ol');
+  const activity = new Activity(node(), list, node());
+  const current = run();
+  current.progress.phase = 'rendering';
+  activity.render(current);
+  activity.render(current);
+  assert.equal(list.children.length, 1);
+  assert.equal(title(list), 'Checking the final drawing');
+  assert.equal(current.progress.steps.length, 2);
+  current.state = 'completed';
+  activity.render(current);
+  activity.render(current);
+  assert.equal(list.children.length, 3);
+  assert.equal(current.progress.steps.length, 2);
+});
+
+test('polling preserves the current stage scroll position and new stages start at the top', () => {
   global.document = {createElement: node};
   const list = node('ol');
   const activity = new Activity(node(), list, node());
   const current = run(); current.progress.steps[1].previews = ['preview-1-0.png'];
   activity.render(current);
-  const image = find(list, 'img')[0];
-  list.scrollHeight = 900; image.onload();
-  assert.equal(list.scrollTop, 900);
-  list.scrollTop = 0; list.onscroll(); image.onload();
+  list.scrollHeight = 900; list.scrollTop = 200;
+  activity.render(current);
+  assert.equal(list.scrollTop, 200);
+  current.progress.steps[1].status = 'completed';
+  current.progress.steps.push({id: 'turn-2', kind: 'model', title: 'Agent turn 2',
+    status: 'running', output: 'Adding the leaves.'});
+  activity.render(current);
   assert.equal(list.scrollTop, 0);
 });

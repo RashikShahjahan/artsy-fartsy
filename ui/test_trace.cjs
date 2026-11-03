@@ -47,3 +47,20 @@ test('keeps shell-expanded source as a command instead of claiming literal sourc
   const {steps} = normalizeSample({messages:[assistant(call('a', 'cat > program.py <<EOF\nprint("$VALUE")\nEOF'))]});
   assert.equal(steps[0].source, null);
 });
+
+test('named drawing tools retain source revisions, previews, and submission status', () => {
+  const named = (id, name, args = {}) => ({id, function: name, arguments: args});
+  const {steps} = normalizeSample({messages: [
+    assistant(named('a', 'update_drawing', {source: 'first source'})), result('a', 'Return code: 0'),
+    assistant(named('b', 'update_drawing', JSON.stringify({source: 'revised source'}))), result('b', 'Return code: 0'),
+    assistant(named('p', 'preview_drawing')), result('p', [{type: 'text', text: 'Return code: 0'},
+      {type: 'image', image: 'data:image/png;base64,AAAA'}]),
+    assistant(named('s', 'submit_drawing')), result('s', 'Return code: 0'),
+  ]});
+  assert.deepEqual(steps.map(step => step.kind), ['write', 'write', 'render', 'submit']);
+  assert.equal(steps[1].source, 'revised source');
+  assert.equal(steps[1].previousSource, 'first source');
+  assert.equal(steps[2].tool, 'preview_drawing');
+  assert.equal(steps[2].results[0].content[1].type, 'image');
+  assert.equal(steps[3].status, 'requested');
+});

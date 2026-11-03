@@ -1,4 +1,4 @@
-"""Host-side drawing policy; only tool commands enter the execution sandbox."""
+"""Host-side drawing policy with structured tools and sandboxed rendering."""
 
 import base64
 import json
@@ -16,12 +16,11 @@ from inspect_ai.util import sandbox
 import yaml
 
 from drawing.config import LIMITS
-from drawing.agent_contract import (TRAJECTORY_CONTRACT_VERSION, host_user_prompt,
+from drawing.agent_contract import (DRAWING_TOOLS_CONTRACT_VERSION, host_user_prompt,
                                     turn_countdown, turn_limit_instruction)
 
 AGENT_NAME = "artsy-host"
-AGENT_VERSION = "2"
-SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
+AGENT_VERSION = "3"
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 
@@ -76,20 +75,10 @@ def activity_result(content):
             'previews': [part.image for part in parts if isinstance(part, ContentImage)]}
 
 
-def action_title(command):
-    if command.strip() == SUBMIT:
-        return 'Submit drawing'
-    if re.search(r'(?:^|\s)/opt/artsy/render\.py(?:\s|$)', command):
-        return 'Render preview'
-    if re.search(r'(?:^|\n)cat\s*>\s*(?:/workspace/)?program\.py\b', command):
-        return 'Write drawing code'
-    return 'Run drawing action'
-
-
 @agent(name=AGENT_NAME)
 def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMITS["maxCalls"],
                   max_turns=None, progress=None, approval=None):
-    """Preserve the Mini SWE bash protocol without its container-side harness."""
+    """Expose drawing operations directly, without a model-facing shell."""
     settings = yaml.safe_load(Path(__file__).with_name("mini.yaml").read_text())
     image_pattern = re.compile(settings["model"]["multimodal_regex"])
     timeout = settings["environment"]["timeout"]
@@ -104,7 +93,7 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
         if sample is not None:
             sample.metadata["harnessTiming"] = timing
             sample.metadata["submitted"] = False
-            sample.metadata["trajectoryContractVersion"] = TRAJECTORY_CONTRACT_VERSION
+            sample.metadata["trajectoryContractVersion"] = DRAWING_TOOLS_CONTRACT_VERSION
             sample.metadata["maxTurns"] = max_turns
         submitted = False
         operations = 0
@@ -115,68 +104,136 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                 progress({'phase': phase, 'turn': timing['model_calls'] if turn is None else turn,
                           'max_turns': max_turns, **({'step': step} if step else {})})
 
-        @tool(name="bash", parallel=False)
-        def bash():
-            async def execute(command: str) -> ToolResult:
-                """Execute a bash command in the drawing workspace.
+        async def perform(name, kind, title, operation, *, terminal=False):
+            nonlocal submitted, operations, actions
+            actions += 1
+            step = {'id': f'action-{actions}', 'kind': kind, 'tool': name, 'title': title,
+                    'turn': timing['model_calls'], 'status': 'running'}
+            report('drawing', step)
+            started = monotonic()
 
-                Args:
-                    command: The bash command to execute.
-                """
-                nonlocal submitted, operations, actions
-                actions += 1
-                step = {'id': f'action-{actions}', 'kind': 'tool', 'title': action_title(command),
-                        'command': command, 'turn': timing['model_calls'], 'status': 'running'}
+            def finish(content):
+                report('drawing', {**step, **activity_result(content),
+                                   'seconds': monotonic() - started})
+                return content
+
+            if submitted:
+                return finish("Return code: 1\nThis request has already ended.")
+            if max_calls is not None and operations >= max_calls:
+                return finish("Return code: 1\nEpisode operation budget exhausted.")
+            if approval is not None:
+                report('awaiting_approval', {**step, 'status': 'pending'})
+                await approval(step['id'])
                 report('drawing', step)
                 started = monotonic()
+            operations += 1
+            try:
+                content = await operation()
+            except TimeoutError:
+                return finish(f"Return code: 124\nDrawing operation timed out after {timeout} seconds.")
+            except FileNotFoundError:
+                return finish("Return code: 1\nNo drawing yet. Call update_drawing with the complete source first.")
+            except ValueError as error:
+                return finish(f"Return code: 1\n{error}")
+            except Exception as error:
+                finish(f"Return code: 1\n{error}")
+                raise
+            finally:
+                timing["command_seconds"] += monotonic() - started
+            finish(content)
+            if terminal and activity_result(content)['status'] == 'completed':
+                submitted = True
+                report('rendering')
+            elif isinstance(content, list):
+                report('previewing')
+            return content
 
-                def finish(content):
-                    report('drawing', {**step, **activity_result(content),
-                                       'seconds': monotonic() - started})
-                    return content
+        async def read_source():
+            source = await sandbox().read_file('/workspace/program.py')
+            if not source.strip() or len(source.encode('utf-8')) > LIMITS['sourceBytes']:
+                raise ValueError('Expected 1–65536 bytes of Python source')
+            return source
 
-                if submitted:
-                    return finish("Return code: 1\nSubmission already requested.")
-                if max_calls is not None and operations >= max_calls:
-                    return finish("Return code: 1\nEpisode operation budget exhausted.")
-                if approval is not None:
-                    report('awaiting_approval', {**step, 'status': 'pending'})
-                    await approval(step['id'])
-                    report('drawing', step)
-                    started = monotonic()
-                operations += 1
-                try:
-                    # GNU timeout kills the command process group inside Docker.
-                    # No generated shell command is ever executed on the host.
-                    result = await sandbox().exec(
-                        ["timeout", "--signal=KILL", str(timeout), "bash", "-c", command],
-                        cwd="/workspace", timeout=timeout + 2, timeout_retry=False,
-                    )
-                except TimeoutError:
-                    return finish(f"Return code: 124\nCommand timed out after {timeout} seconds.")
-                except Exception as error:
-                    finish(f"Return code: 1\n{error}")
-                    raise
-                finally:
-                    timing["command_seconds"] += monotonic() - started
-                if command.strip() == SUBMIT and result.success:
-                    submitted = True
-                content = observation(result, image_pattern)
-                finish(content)
-                if submitted:
-                    report('rendering')
-                elif isinstance(content, list):
-                    report('previewing')
-                return content
+        @tool(name='update_drawing', parallel=False)
+        def update_drawing():
+            async def execute(source: str) -> ToolResult:
+                """Create or replace the drawing with a complete ArtCanvas Python program.
+
+                Args:
+                    source: Complete Python source saving a 1920×1200 output.png, at most 64 KiB.
+                """
+                async def update():
+                    if not source.strip() or len(source.encode('utf-8')) > LIMITS['sourceBytes']:
+                        return 'Return code: 1\nExpected 1–65536 bytes of Python source.'
+                    await sandbox().write_file('/workspace/program.py', source)
+                    return 'Return code: 0\nDrawing updated. Call preview_drawing to check it.'
+                return await perform('update_drawing', 'write', 'Refining your drawing', update)
             return execute
 
-        tools = [bash()]
+        @tool(name='read_drawing', parallel=False)
+        def read_drawing():
+            async def execute() -> ToolResult:
+                """Read the current drawing's Python source."""
+                async def read():
+                    return 'Return code: 0\n' + await read_source()
+                return await perform('read_drawing', 'read', 'Reviewing your drawing', read)
+            return execute
+
+        @tool(name='preview_drawing', parallel=False)
+        def preview_drawing():
+            async def execute() -> ToolResult:
+                """Render the current drawing and return execution feedback and its PNG preview."""
+                async def preview():
+                    source = await read_source()
+                    seed = sample.metadata.get('seed', 42) if sample is not None else 42
+                    result = await sandbox().exec(
+                        ['timeout', '--signal=KILL', str(timeout), 'python', '/opt/artsy/render.py',
+                         '--seed', str(seed), '--output', '/workspace/preview', '--preview'],
+                        input=source, cwd='/workspace', timeout=timeout + 2, timeout_retry=False,
+                    )
+                    return observation(result, image_pattern)
+                return await perform('preview_drawing', 'render', 'Checking the preview', preview)
+            return execute
+
+        @tool(name='submit_drawing', parallel=False)
+        def submit_drawing():
+            async def execute() -> ToolResult:
+                """Finish the drawing and submit its current source for independent final validation."""
+                async def submit():
+                    await read_source()
+                    return 'Return code: 0\nDrawing submitted for final validation.'
+                return await perform('submit_drawing', 'submit', 'Finishing your drawing', submit, terminal=True)
+            return execute
+
+        @tool(name='refuse_drawing', parallel=False)
+        def refuse_drawing():
+            async def execute(reason: str) -> ToolResult:
+                """Decline the drawing request with a reason and end without submitting artwork.
+
+                Args:
+                    reason: Concise reason for declining, at most 2048 UTF-8 bytes.
+                """
+                async def refuse():
+                    if not reason.strip() or len(reason.encode('utf-8')) > 2048:
+                        return 'Return code: 1\nExpected a reason of 1–2048 bytes.'
+                    # Fixed paths and argv only; model arguments never enter a shell.
+                    removed = await sandbox().exec(['rm', '-f', '/workspace/program.py'],
+                                                  timeout=timeout, timeout_retry=False)
+                    if not removed.success:
+                        return observation(removed, image_pattern)
+                    await sandbox().write_file('/workspace/refusal.json', json.dumps({'reason': reason}))
+                    return 'Return code: 0\nRequest declined.'
+                return await perform('refuse_drawing', 'refuse', 'Declining the request', refuse, terminal=True)
+            return execute
+
+        tools = [update_drawing(), read_drawing(), preview_drawing(), submit_drawing(), refuse_drawing()]
         model = get_model()
         if generation_filter is not None:
             model = Model(FilteredAPI(model, generation_filter), config=config)
-        # Match the previous Mini SWE system/instance framing for trained policies.
         state.messages = [
-            ChatMessageSystem(content=settings["agent"]["system_template"]),
+            ChatMessageSystem(content='You are Artsy, a drawing agent. Use the drawing tools to create, '
+                               'inspect, preview, and submit artwork, or refuse a request. '
+                               'Every response must contain at least one drawing tool call.'),
             ChatMessageUser(content=host_user_prompt(system_prompt, state.messages[-1].text, max_turns)),
         ]
         try:
@@ -205,18 +262,19 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                                     'seconds': monotonic() - started}, turn=turns)
                 if not output.message.tool_calls:
                     state.messages.append(ChatMessageUser(content=
-                        'Every response must contain a bash tool call with {"command":"..."}.'))
+                        'Use a drawing tool: update_drawing, read_drawing, preview_drawing, '
+                        'submit_drawing, or refuse_drawing.'))
                     continue
                 results, _ = await execute_tools(state.messages, tools)
                 state.messages.extend(results)
-                # Invalid tool names/arguments are rejected before bash() can report them.
+                # Invalid tool names/arguments are rejected before a tool can report them.
                 for index, result in enumerate(results):
                     if getattr(result, 'error', None):
                         call = next((call for call in output.message.tool_calls
                                      if call.id == getattr(result, 'tool_call_id', None)), None)
                         report('drawing', {'id': f'tool-error-{turns}-{index}', 'kind': 'tool',
                             'title': 'Action could not run', 'turn': turns, 'status': 'failed',
-                            'command': json.dumps(call.arguments) if call else '',
+                            'tool': call.function if call else None,
                             'output': result.text or str(result.error)})
                 if submitted or (max_calls is not None and operations >= max_calls):
                     break

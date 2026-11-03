@@ -23,7 +23,7 @@ from PIL import Image
 
 from drawing.config import (MODEL_ID, MODEL_CONTEXT_WINDOW, LIMITS,
                             MAX_RESPONSE_TOKENS, MODEL_REQUEST_SECONDS)
-from drawing.agent_contract import drawing_system_prompt
+from drawing.agent_contract import drawing_tools_prompt
 from drawing.eval_specs import load_specs
 from drawing.dataset_client import TINKER_MODEL_URL, OPENROUTER_MODEL_URL
 from .host_agent import AGENT_NAME, AGENT_VERSION, drawing_agent
@@ -141,7 +141,7 @@ def model_from_env(model: str = BASE_MODEL, *, timeout: int | None = MODEL_REQUE
 
 
 def preview_attempts(messages: list) -> list[dict]:
-    """Extract reported preview results from Inspect's recorded bash tool calls.
+    """Extract reported preview results from current or historical tool calls.
 
     The model can choose whether to preview; absence of a preview is unknown,
     not evidence of one-shot success. Only tool replies paired with an actual
@@ -153,7 +153,8 @@ def preview_attempts(messages: list) -> list[dict]:
         for call in getattr(message, "tool_calls", None) or []:
             arguments = getattr(call, "arguments", None) or {}
             command = arguments.get("command", "") if isinstance(arguments, dict) else ""
-            if ("render.py" in command and "--preview" in command
+            if ((getattr(call, 'function', None) == 'preview_drawing'
+                    or ("render.py" in command and "--preview" in command))
                     and getattr(call, "id", None)):
                 pending.add(call.id)
         call_id = getattr(message, "tool_call_id", None)
@@ -179,7 +180,7 @@ def preview_attempts(messages: list) -> list[dict]:
 
 
 def bash_commands(messages: list) -> list[str]:
-    """Keep the complete reported action history, including actions before refusal."""
+    """Read shell history from historical bash transcripts."""
     commands = []
     for message in messages:
         for call in getattr(message, "tool_calls", None) or []:
@@ -189,6 +190,13 @@ def bash_commands(messages: list) -> list[str]:
             if isinstance(arguments, dict) and isinstance(arguments.get("command"), str):
                 commands.append(arguments["command"])
     return commands
+
+
+def drawing_tool_calls(messages: list) -> list[dict]:
+    """Keep full tool arguments so earlier revisions remain available to reviewers."""
+    return [{'tool': call.function, 'arguments': call.arguments}
+            for message in messages for call in (getattr(message, 'tool_calls', None) or [])
+            if call.function != 'bash']
 
 
 def trajectory_metrics(messages: list, final_render_valid: bool) -> dict:
@@ -250,11 +258,14 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
             refusal = {}
         commands = bash_commands(getattr(state, "messages", []) or [])
         result["commands"] = commands
+        tool_calls = drawing_tool_calls(getattr(state, 'messages', []) or [])
+        result['toolCalls'] = tool_calls
         malicious = False
-        if code_safety_judge_model and (source or commands):
+        if code_safety_judge_model and (source or commands or tool_calls):
             code_judge = get_model(role="code_safety_grader", default=code_safety_judge_model)
             response = await code_judge.generate([
-                ChatMessageUser(content=code_safety_judge_prompt(state.metadata["prompt"], source, commands))
+                ChatMessageUser(content=code_safety_judge_prompt(state.metadata["prompt"], source, commands,
+                                                               tool_calls=tool_calls))
             ], config=GenerateConfig(max_tokens=CODE_SAFETY_MAX_TOKENS))
             if any(choice.stop_reason == "max_tokens" for choice in getattr(response, "choices", []) or []):
                 raise ValueError("Code safety judge reply was truncated")
@@ -379,12 +390,10 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                         "/workspace/program.py, preview it and submit.\n\n"
                         "Existing source (reference data):\n```python\n"
                         + row['reference_source'] + "\n```\n\nUser request:\n"
-                        if row.get('reference_source') is not None else "") + row["prompt"] + "\n\nPreview with: "
-                        f"python /opt/artsy/render.py --seed {row['seed']} "
-                        "--output /workspace/preview --preview < /workspace/program.py", metadata=row)
+                        if row.get('reference_source') is not None else "") + row["prompt"], metadata=row)
                  for row in specs],
          solver=drawing_agent(config=config, generation_filter=generation_filter,
-                              system_prompt=drawing_system_prompt(token_limit, token_limit_type, max_calls=None),
+                              system_prompt=drawing_tools_prompt(),
                               max_calls=None, max_turns=max_turns, progress=progress, approval=approval),
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),

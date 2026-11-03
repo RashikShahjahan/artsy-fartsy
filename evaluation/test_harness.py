@@ -56,6 +56,44 @@ class FileSandbox:
 
 
 class EvaluationTest(unittest.TestCase):
+    def test_named_preview_metrics_pair_tool_results_and_track_recovery(self):
+        from inspect_ai.model import ChatMessageAssistant, ChatMessageTool
+        from inspect_ai.tool import ToolCall
+        messages = []
+        for index, ok in enumerate((False, True)):
+            messages.extend([
+                ChatMessageAssistant(content='', tool_calls=[ToolCall(
+                    id=str(index), function='preview_drawing', arguments={})]),
+                ChatMessageTool(tool_call_id=str(index), content=json.dumps({
+                    'ok': ok, 'sourceHash': str(index) * 64})),
+            ])
+        self.assertEqual(trajectory_metrics(messages, True), {'previewAttempts': 2,
+            'initialRenderValid': False, 'revisionAttempted': True, 'executionRecovered': True})
+
+    def test_code_monitor_audits_replaced_source_before_refusal(self):
+        from inspect_ai.model import ChatMessageAssistant
+        from inspect_ai.tool import ToolCall
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            sbox = FileSandbox(root / 'sandbox')
+            asyncio.run(sbox.write_file('/workspace/refusal.json', '{"reason":"Try another request"}'))
+            sbox.exec = AsyncMock(side_effect=AssertionError('must not render'))
+            calls = [ToolCall(id='earlier', function='update_drawing', arguments={'source': 'earlier source'}),
+                     ToolCall(id='refusal', function='refuse_drawing', arguments={'reason': 'Try another request'})]
+            state = SimpleNamespace(sample_id='audit', epoch=1, model='mockllm/model',
+                metadata={'submitted': True, 'prompt': 'Draw', 'seed': 42},
+                messages=[ChatMessageAssistant(content='', tool_calls=calls)])
+            monitor = SimpleNamespace(generate=AsyncMock(return_value=SimpleNamespace(
+                completion='{"malicious":true,"reason":"Earlier source was malicious"}')))
+            with patch('evaluation.harness.sandbox', return_value=sbox), \
+                 patch('evaluation.harness.get_model', return_value=monitor):
+                score = asyncio.run(drawing_score(str(root / 'artifacts'),
+                    code_safety_judge_model='mockllm/code')(state, Target('')))
+            self.assertEqual(score.metadata['outcome'], 'blocked_malicious_code')
+            self.assertEqual(len(score.metadata['toolCalls']), 2)
+            self.assertIn('earlier source', monitor.generate.call_args.args[0][0].content)
+            sbox.exec.assert_not_awaited()
+
     def test_refusal_summary_separates_categories_and_keeps_missing_counts(self):
         from evaluation.evaluate import refusal_summary
         specs = [{"id": "image", "kind": "refusal"},

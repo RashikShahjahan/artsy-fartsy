@@ -5,25 +5,32 @@
     interrupted: 'Stopped', refused: 'Declined', recorded: 'Recorded', requested: 'Requested', unknown: 'No result'};
 
   function actionDescription(step) {
-    const command = step.command || '';
-    const actions = [];
-    if (step.kind === 'write' || /(?:cat\s*>|write_text\(|write_bytes\(|open\([^\n]+['"]w)/.test(command))
-      actions.push('Create or update the instructions that make your drawing.');
-    else if (/\b(?:sed|perl|patch|apply_patch)\b|replace\(/.test(command))
-      actions.push('Adjust the instructions for your drawing.');
-    if (step.kind === 'render' || /(?:\/opt\/artsy\/render\.py|\brender\.py\b)/.test(command))
-      actions.push('Render a preview to check how your drawing looks.');
-    if (step.kind === 'submit' || /COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT/.test(command))
-      actions.push('Submit your drawing for final checks.');
-    if (actions.length) return actions.join(' ');
-    if (/\b(?:cat|head|tail|ls|find|grep|rg|wc)\b/.test(command)) return 'Inspect the drawing files before continuing.';
-    if (/\b(?:python\S*|compileall|py_compile)\b/.test(command)) return 'Run the drawing instructions and check the result.';
-    const descriptions = {
-      'Write drawing code': 'Create or update the instructions that make your drawing.',
-      'Render preview': 'Render a preview to check how your drawing looks.',
-      'Submit drawing': 'Submit your drawing for final checks.',
+    const drawingTools = {
+      update_drawing: ['Refine your drawing', 'Refining your drawing…', 'Drawing updated'],
+      read_drawing: ['Review your drawing', 'Reviewing your drawing…', 'Drawing reviewed'],
+      preview_drawing: ['Check the preview', 'Checking the preview…', 'Preview checked'],
+      submit_drawing: ['Finish your drawing', 'Finishing your drawing…', 'Drawing submitted for final checks'],
+      refuse_drawing: ['Decline this request', 'Declining the request…', 'Request declined'],
     };
-    return descriptions[step.title] || 'Carry out the next action for your drawing.';
+    const tense = step.status === 'pending' ? 0 : ['completed', 'success', 'recorded'].includes(step.status) ? 2 : 1;
+    if (drawingTools[step.tool]) return drawingTools[step.tool][tense];
+    // Historical drawings still have shell commands instead of named tools.
+    const command = step.command || '';
+    let phrases;
+    if (step.kind === 'submit' || step.title === 'Submit drawing' || /COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT/.test(command))
+      phrases = ['Finish your drawing', 'Finishing your drawing…', 'Drawing submitted for final checks'];
+    else if (step.kind === 'render' || step.title === 'Render preview' || /\brender\.py\b/.test(command))
+      phrases = ['Check the preview', 'Checking the preview…', 'Preview checked'];
+    else if (/\b(?:sed|perl|patch|apply_patch)\b|replace\(/.test(command) || step.title === 'Update program.py')
+      phrases = ['Refine your drawing', 'Refining your drawing…', 'Drawing refined'];
+    else if (step.kind === 'write' || step.title === 'Write drawing code' || /(?:cat\s*>|write_text\(|write_bytes\(|open\([^\n]+['"]w)/.test(command))
+      phrases = ['Create your drawing', 'Creating your drawing…', 'Drawing created'];
+    else if (/\b(?:cat|head|tail|ls|find|grep|rg|wc)\b/.test(command))
+      phrases = ['Review your drawing', 'Reviewing your drawing…', 'Drawing reviewed'];
+    else if (/\b(?:python\S*|compileall|py_compile)\b/.test(command))
+      phrases = ['Check your drawing', 'Checking your drawing…', 'Drawing checked'];
+    else phrases = ['Continue drawing', 'Working on your drawing…', 'Drawing updated'];
+    return phrases[tense];
   }
 
   function responseSummary(step) {
@@ -39,7 +46,7 @@
     const records = Array.isArray(trace) ? trace : [trace];
     return records.flatMap((record, recordIndex) => (record?.samples || []).flatMap((sample, sampleIndex) =>
       api.normalizeSample(sample).steps.filter(step => step.title !== 'Request / context').map((step, index) => ({
-        id: `trace-${recordIndex}-${sampleIndex}-${index}`, title: step.title, kind: step.kind,
+        id: `trace-${recordIndex}-${sampleIndex}-${index}`, title: step.title, kind: step.kind, tool: step.tool,
         status: step.status === 'success' ? 'completed' : step.status,
         command: step.command, output: [api.text(step.content), ...(step.results || []).map(result => api.text(result.content))].filter(Boolean).join('\n'),
         previews: [...(step.results || []), ...(step.observations || [])].flatMap(message =>
@@ -49,7 +56,7 @@
 
   function stepsFor(run, traceApi) {
     const terminal = !['queued', 'running'].includes(run.state);
-    let steps = run.progress?.steps || [];
+    let steps = [...(run.progress?.steps || [])];
     if (!steps.length && run.trace && traceApi) steps = traceSteps(run.trace, traceApi);
     steps = steps.map(step => terminal && ['running', 'pending'].includes(step.status)
       ? {...step, status: 'interrupted'} : step);
@@ -69,15 +76,12 @@
       this.panel = panel; this.list = list; this.status = status;
       this.id = null; this.rows = new Map();
       this.onApprove = onApprove;
-      this.follow = true;
-      this.list.onscroll = () => {
-        this.follow = this.list.scrollHeight - this.list.scrollTop - this.list.clientHeight < 48;
-      };
     }
     reset(id = null) {
       this.id = id; this.rows.clear(); this.list.replaceChildren();
-      this.follow = true;
+      this.list.scrollTop = 0;
       this.run = null;
+      this.active = null;
       this.panel.hidden = !id; this.status.textContent = id ? 'Getting ready…' : '';
     }
     fail(message) {
@@ -88,22 +92,28 @@
       if (this.id !== run.id) this.reset(run.id);
       this.run = run;
       const steps = stepsFor(run, root.ArtsyTrace);
-      const follow = this.follow;
       this.panel.hidden = false;
       const active = ['queued', 'running'].includes(run.state);
+      if (this.active !== active) {
+        this.rows.clear(); this.list.replaceChildren(); this.list.scrollTop = 0;
+        this.active = active;
+      }
+      // Live progress replaces the previous stage. Full history belongs to the saved drawing.
+      const current = [...steps].reverse().find(step => ['running', 'pending'].includes(step.status)) || steps.at(-1);
+      const displayed = active ? current ? [current] : [] : steps;
       const turn = run.progress?.turn;
       this.status.textContent = active ? run.progress?.phase === 'awaiting_approval' ? 'Your approval is needed' : turn ? `Turn ${turn}${run.progress.max_turns ? ` of ${run.progress.max_turns}` : ''}` : 'Getting ready…'
         : `${steps.length} ${steps.length === 1 ? 'step' : 'steps'} recorded`;
-      const visible = new Set(steps.map(step => step.id));
+      const visible = new Set(displayed.map(step => step.id));
       for (const [id, row] of this.rows) if (!visible.has(id)) { row.node.remove(); this.rows.delete(id); }
-      for (const step of steps) {
+      for (const step of displayed) {
         const signature = JSON.stringify(step);
         let row = this.rows.get(step.id);
         if (!row) {
           const node = document.createElement('li');
           row = {node}; this.rows.set(step.id, row); this.list.append(node);
+          if (active) this.list.scrollTop = 0;
         }
-        // Keep earlier actions and previews available as generation continues in either mode.
         row.node.hidden = step.id === 'starting' ||
           (step.kind === 'model' && !step.output && !step.previews?.length);
         const renderSignature = JSON.stringify([signature, active, run.execution_mode]);
@@ -112,34 +122,27 @@
         const node = row.node;
         node.className = `activity-step ${step.status}`;
         const heading = document.createElement('div'); heading.className = 'activity-step-heading';
-        const title = document.createElement('strong'); title.textContent = step.title;
+        const hasDetails = step.tool || step.command || ['tool', 'write', 'read', 'render', 'submit', 'refuse'].includes(step.kind);
+        const title = document.createElement('strong'); title.textContent = hasDetails ? actionDescription(step) : step.title;
         const badge = document.createElement('span'); badge.className = 'activity-step-status';
         badge.textContent = labels[step.status] || 'Recorded';
         heading.append(title, badge);
-        const hasDetails = step.command || ['tool', 'write', 'render', 'submit'].includes(step.kind);
-        const children = hasDetails ? [] : [heading];
+        const children = [heading];
         if (step.output && (step.kind === 'model' || step.kind === 'result' || step.kind === 'message')) {
           const message = document.createElement('p'); message.className = 'activity-message'; message.textContent = step.output;
           children.push(message);
         }
-        if (hasDetails) {
-          const details = document.createElement('div'); details.className = 'activity-details';
-          const description = document.createElement('p'); description.textContent = actionDescription(step);
-          details.append(description);
-          if (step.status === 'failed' || step.status === 'interrupted') {
-            const result = document.createElement('p'); result.className = 'activity-action-result';
-            result.textContent = step.status === 'failed'
-              ? 'This action couldn’t finish. Artsy may need to adjust the drawing and try again.'
-              : 'This action stopped before it finished.';
-            details.append(result);
-          }
-          children.push(details);
+        if (hasDetails && (step.status === 'failed' || step.status === 'interrupted')) {
+          const result = document.createElement('p'); result.className = 'activity-action-result';
+          result.textContent = step.status === 'failed'
+            ? 'This step couldn’t finish. Artsy may try again.' : 'This step stopped before it finished.';
+          children.push(result);
         }
         const images = (step.previews || []).filter(url => /^preview-\d+-\d+\.png$/.test(url) || /^data:image\/png;base64,/.test(url));
         for (const [index, url] of images.entries()) {
           const image = document.createElement('img'); image.className = 'activity-preview';
           image.alt = `Preview ${index + 1} from ${step.title.toLowerCase()}`;
-          image.loading = 'lazy'; image.onload = () => { if (this.follow) this.list.scrollTop = this.list.scrollHeight; };
+          image.loading = 'lazy';
           image.src = url.startsWith('data:') ? url : `/api/runs/${run.id}/${url}`;
           children.push(image);
         }
@@ -155,7 +158,6 @@
         }
         node.replaceChildren(...children);
       }
-      if (follow) this.list.scrollTop = this.list.scrollHeight;
     }
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = {Activity, stepsFor, traceSteps, actionDescription};

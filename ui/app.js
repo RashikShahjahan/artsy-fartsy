@@ -124,7 +124,7 @@ function diffHTML(lines) {
 function actionHTML(step, index) {
   let body = ArtsyTrace.text(step.content) || Array.isArray(step.content) ? contentHTML(step.content) : '';
   if (step.call) {
-    body += step.source !== null ? `<details><summary>Full command</summary><pre>${esc(step.command)}</pre></details>` : `<h4>Command / arguments</h4><pre>${esc(step.command)}</pre>`;
+    body += step.source !== null ? `<details><summary>${step.tool ? 'Tool arguments' : 'Full command'}</summary><pre>${esc(step.command)}</pre></details>` : `<h4>${step.tool ? 'Tool arguments' : 'Command / arguments'}</h4><pre>${esc(step.command)}</pre>`;
     if (step.source !== null) {
       if (step.previousSource !== null) {
         const lines = ArtsyTrace.diff(step.previousSource, step.source);

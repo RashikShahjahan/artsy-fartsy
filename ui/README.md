@@ -33,12 +33,11 @@ action, review its details, and click **Approve action** to continue. Each appro
 releases only that action, including when one model turn proposes several actions.
 The mode is fixed for the current drawing and can be changed before the next request.
 
-The drawing canvas keeps recorded model updates, action descriptions, and intermediate
-renders visible as centered entries in a scrollable view, without timeline markers.
-Both modes show the same steps and previews; Auto continues without pausing, while
-Approve steps adds an approval button for the pending action. Actions use plain-language
-descriptions rather than shell commands or tool logs. New steps and loaded previews
-stay in view unless you scroll back to inspect an earlier step. Empty thinking states
+The drawing canvas shows only the current stage during generation. Each new model
+update, action, or preview replaces the previous stage instead of building a timeline.
+Both modes show the same current stage; Auto continues without pausing, while
+Approve steps adds an approval button for the pending action. Named harness tools
+provide short drawing labels such as “Refining your drawing” and “Checking the preview.” Empty thinking states
 use the progress message. Once the final image passes validation, it takes the place
 of the live steps. The **Drawing steps** disclosure keeps recorded steps and previews
 available after completion. Activity survives
@@ -119,13 +118,15 @@ renderer, and context profile. The bridge refreshes its model catalog
 periodically; reload Studio to see new options.
 Qwen uses the local native Tinker sampling bridge. GPT-6 Luna uses OpenRouter's
 OpenAI-compatible endpoint with `OPENROUTER_API_KEY` from the environment or `.env`.
-Both use the same Docker drawing harness. GPT-6 Luna does not require the local bridge.
+Both use the same Docker drawing harness with explicit update, read, preview, submit,
+and refusal tools. GPT-6 Luna does not require the local bridge. Existing fine-tunes
+were trained on the historical bash tool schema and have not been retrained for these tools.
 Removed models are not restored to the dropdown by saved runs.
 
 
-Runs are stored in `episodes/ui/<id>/`. The UI shows process output while running. After the CLI finishes, it exports the full Inspect logs with resolved attachments to `output/trace.json`. The completed-run timeline pairs each command with its recorded tool results, shows failed renders and inline previews, and distinguishes submission requests from final render validation. Source rewrites show a line diff against the previous successful write, with full commands and source available to expand. Model response timing and token counts appear when recorded. The Transcript view preserves all messages; the Events view searches full event data and loads raw records when expanded. Failed actions open automatically. Downloads include the final PNG, Python source, result JSON, and full trace when present. Refusals and failures are displayed without substituting artwork. Reloading the same browser tab resumes polling its last run. Run URLs include `#run=<id>` so a saved run can be reopened directly.
+Runs are stored in `episodes/ui/<id>/`. The UI shows process output while running. After the CLI finishes, it exports the full Inspect logs with resolved attachments to `output/trace.json`. The completed-run timeline pairs each named tool call with its recorded results, shows failed renders and inline previews, and distinguishes submission requests from final render validation. Source rewrites show a line diff against the previous successful write, with full tool arguments and source available to expand. Historical bash runs remain readable. Model response timing and token counts appear when recorded. The Transcript view preserves all messages; the Events view searches full event data and loads raw records when expanded. Failed actions open automatically. Downloads include the final PNG, Python source, result JSON, and full trace when present. Refusals and failures are displayed without substituting artwork. Reloading the same browser tab resumes polling its last run. Run URLs include `#run=<id>` so a saved run can be reopened directly.
 
-The trace is recorded execution history, not inferred or invented model reasoning. Studio's full Inspect events appear after completion; the consumer timeline shows recorded turns and actions live. Runs interrupted by server shutdown are not resumed. Keep the server running until the job ends. This service binds only to loopback, checks Host and Origin, and serves only the UI and explicitly allowed run artifacts.
+The trace is recorded execution history, not inferred or invented model reasoning. Studio's full Inspect events appear after completion; the consumer view shows only the current stage live and keeps history in the completed drawing's disclosure. Runs interrupted by server shutdown are not resumed. Keep the server running until the job ends. This service binds only to loopback, checks Host and Origin, and serves only the UI and explicitly allowed run artifacts.
 
 Validation: `node --check ui/app.js`, `node --test ui/test_trace.cjs`,
 `.venv/bin/python -m unittest ui.test_server`,

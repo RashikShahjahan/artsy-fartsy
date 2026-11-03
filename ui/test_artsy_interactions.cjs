@@ -76,7 +76,8 @@ test('opening history uses the displayed fallback version for the next revision'
 
 test('live drawing advances from recorded steps to a downloadable validated render', async () => {
   const id = 'b'.repeat(32);
-  const step = {id: 'action-1', kind: 'tool', status: 'completed', title: 'Render preview', previews: ['preview-1-0.png']};
+  const step = {id: 'action-1', kind: 'render', tool: 'preview_drawing', status: 'completed',
+    title: 'Checking the preview', previews: ['preview-1-0.png']};
   let run = {state: 'running', execution_mode: 'auto', prompt: 'A cat', progress: {phase: 'previewing', steps: [step]}};
   const {elements: ui, timers, requests} = setup([], url => url === '/api/artsy/runs' ? {id} : run);
   ui.prompt.value = run.prompt;
@@ -91,9 +92,9 @@ test('live drawing advances from recorded steps to a downloadable validated rend
   run = {...run, progress: {phase: 'thinking', steps: [step,
     {id: 'turn-2', kind: 'model', title: 'Agent turn 2', status: 'running'}]}};
   await timers.shift()();
-  assert.equal(ui['activity-steps'].children[0].hidden, false);
-  assert.equal(ui['activity-steps'].children[0].children[1].src, `/api/runs/${id}/preview-1-0.png`);
-  assert.equal(ui['activity-steps'].children[1].hidden, true);
+  assert.equal(ui['activity-steps'].children.length, 1);
+  assert.equal(ui['activity-steps'].children[0].hidden, true);
+  assert.equal(ui['activity-steps'].children[0].children.length, 1);
   assert.ok(timers.length, 'Auto mode keeps polling while the next step runs');
   assert.equal(requests.some(request => request.url.endsWith('/approve')), false);
   run = {...run, state: 'completed', result: {outcome: 'submitted'}, artifacts: ['image.png']};
