@@ -2,9 +2,14 @@ PYTHON ?= .venv/bin/python
 EVAL_PYTHON ?= $(if $(wildcard .eval-venv/bin/python),.eval-venv/bin/python,$(PYTHON))
 ARGS ?=
 
-.PHONY: ui serve render draw eval eval-base dataset grpo test test-eval check
+.PHONY: ui tts-setup serve render draw eval eval-base dataset grpo test test-eval check
 ui:
 	$(PYTHON) -m ui.server $(ARGS)
+
+tts-setup:
+	UV_CACHE_DIR="$(CURDIR)/.cache/uv" uv venv --allow-existing --python 3.12 .tts-venv
+	UV_CACHE_DIR="$(CURDIR)/.cache/uv" uv pip install --python .tts-venv/bin/python -r ui/requirements-tts.txt
+	$(PYTHON) -m ui.setup_tts
 
 serve:
 	$(PYTHON) -m uvicorn inference.server:app --host 127.0.0.1 --port 8080 $(ARGS)

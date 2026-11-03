@@ -11,24 +11,38 @@ from dotenv import load_dotenv
 from inspect_ai import eval
 
 from .harness import (BASE_MODEL, ROOT, check_native_bridge, drawing_task,
-                      model_from_env, model_url, sha256)
+                      model_from_env, model_url, sha256, DEFAULT_MAX_TURNS)
 
 
-def main() -> int:
+def main(*, progress=None) -> int:
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("prompt", nargs="+")
     parser.add_argument("--episode", type=Path, default=Path("episodes") / str(uuid4()))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--model", default=os.getenv("ARTSY_MODEL", BASE_MODEL))
+    parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_TURNS)
+    parser.add_argument("--reference-source", type=Path,
+                        help="Completed ArtCanvas source to use as the basis for an edit")
     args = parser.parse_args()
     if not 0 <= args.seed <= 2**53 - 1:
         parser.error("seed must be a nonnegative safe integer")
+    if args.max_turns < 1:
+        parser.error("max-turns must be positive")
     prompt = " ".join(args.prompt).strip()
     if not prompt:
         parser.error("prompt must not be empty")
     request = {"prompt": prompt, "seed": args.seed, "model": args.model,
                "base_url": model_url()}
+    if args.max_turns != DEFAULT_MAX_TURNS:
+        request['max_turns'] = args.max_turns
+    reference = None
+    if args.reference_source:
+        raw = args.reference_source.read_bytes()
+        if len(raw) > 64 * 1024:
+            parser.error('reference source exceeds 64 KiB')
+        reference = raw.decode('utf-8')
+        request['reference_source_hash'] = sha256(raw)
     directory = args.episode.resolve()
     if directory.exists() and any(directory.iterdir()):
         manifest = directory / "episode.json"
@@ -51,7 +65,10 @@ def main() -> int:
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "episode.json").write_text(json.dumps(request, indent=2) + "\n")
     spec = {"id": "drawing", "prompt": prompt, "seed": args.seed}
-    logs = eval(drawing_task([spec], str(directory / "artifacts")),
+    if reference is not None:
+        spec['reference_source'] = reference
+    logs = eval(drawing_task([spec], str(directory / "artifacts"),
+                            max_turns=args.max_turns, progress=progress),
                 model=model_from_env(args.model), log_dir=str(directory / "logs"), max_samples=1)
     artifact = directory / "artifacts/drawing-1"
     for name in ("program.py", "image.png", "result.json"):

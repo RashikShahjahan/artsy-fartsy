@@ -4,7 +4,7 @@ import re
 
 
 def navigation(current):
-    links = [('studio', '/', 'Studio'), ('review', '/review', 'Prompt review'),
+    links = [('studio', '/studio', 'Studio'), ('review', '/review', 'Prompt review'),
              ('candidates', '/candidates', 'SFT candidates'),
              ('runs', '/runs', 'Runs'),
              ('preferences', '/preferences', 'Blind ranking'),
@@ -40,4 +40,4 @@ def review_page(page, current):
 def empty_page(current, title, message):
     return review_page(f'<header><h1>{html.escape(title)}</h1></header>'
                        f'<main><div class="panel empty-state"><p>{html.escape(message)}</p>'
-                       '<a href="/">Return to Studio</a></div></main>', current)
+                       '<a href="/studio">Return to Studio</a></div></main>', current)

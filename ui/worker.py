@@ -8,9 +8,26 @@ def main():
     directory, prompt, seed, model = sys.argv[1:]
     output = Path(directory) / 'output'
     sys.argv = ['evaluation.draw', prompt, '--seed', seed, '--model', model, '--episode', str(output)]
+    job = json.loads((Path(directory) / 'job.json').read_text())
+    progress = None
+    if job.get('experience') == 'artsy':
+        sys.argv += ['--max-turns', '10']
+        if job.get('parent_id'):
+            from ui.server import artsy_request, JOBS
+            # Revalidate hashes immediately before passing completed source to the model.
+            artsy_request({'prompt': prompt, 'parent_id': job['parent_id']})
+            parent = JOBS / job['parent_id']
+            previous = json.loads((parent / 'job.json').read_text())
+            sys.argv[1] = f"Previous request: {previous['prompt']}\n\nRequested change: {prompt}"
+            sys.argv += ['--reference-source', str(parent / 'output/program.py')]
+
+        def progress(event):
+            temporary = Path(directory) / 'progress.tmp'
+            temporary.write_text(json.dumps(event))
+            temporary.replace(Path(directory) / 'progress.json')
     try:
         from evaluation.draw import main as draw
-        return draw()
+        return draw(progress=progress)
     finally:
         logs = sorted((output / 'logs').glob('*.eval'))
         if logs:

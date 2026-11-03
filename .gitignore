@@ -1,6 +1,7 @@
 .venv/
 .eval-venv/
 .inference-venv/
+.tts-venv/
 .sft-venv/
 checkpoints/
 __pycache__/

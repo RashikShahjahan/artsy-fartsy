@@ -36,7 +36,7 @@ def reply(command=None, *, calls=None, usage=20):
 
 class HostAgentTests(unittest.TestCase):
     def run_agent(self, outputs, execute, *, callback=None, token_limit=32768, epochs=1,
-                  max_calls=20, turn_limit=16, max_turns=None):
+                  max_calls=20, turn_limit=16, max_turns=None, progress=None):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             model = get_model("mockllm/host-test", custom_outputs=outputs, memoize=False)
@@ -47,7 +47,7 @@ class HostAgentTests(unittest.TestCase):
                 logs = eval(Task(dataset=[Sample(id="drawing", input="Draw a circle")],
                     solver=drawing_agent("Use ArtCanvas.", GenerateConfig(max_tokens=4096,
                                          temperature=0.8, max_retries=0), callback,
-                                         max_calls=max_calls, max_turns=max_turns),
+                                         max_calls=max_calls, max_turns=max_turns, progress=progress),
                     token_limit=token_limit, turn_limit=turn_limit),
                     model=model, epochs=epochs, max_samples=2, log_dir=str(root / "logs"), display="none")
             self.assertEqual(logs[0].status, "success", logs[0].error)
@@ -170,6 +170,25 @@ class HostAgentTests(unittest.TestCase):
         self.assertTrue(samples[0].metadata['submitted'])
         self.assertFalse(samples[0].metadata['turnLimitReached'])
         self.assertEqual(sbox.exec.await_count, 1)
+
+    def test_consumer_ten_turn_budget_stops_before_an_eleventh_call(self):
+        outputs = [reply() for _ in range(10)] + [reply(SUBMIT)]
+        samples, sbox = self.run_agent(outputs, None, max_calls=None,
+                                      turn_limit=None, max_turns=10)
+        self.assertEqual(samples[0].metadata['harnessTiming']['model_calls'], 10)
+        self.assertTrue(samples[0].metadata['turnLimitReached'])
+        self.assertFalse(samples[0].metadata['submitted'])
+        sbox.exec.assert_not_awaited()
+
+    def test_live_progress_reports_actual_turns_and_successful_submission(self):
+        updates = []
+        samples, _ = self.run_agent([reply('draw'), reply(SUBMIT)],
+            lambda *a, **k: SimpleNamespace(stdout='', stderr='', returncode=0, success=True),
+            max_calls=None, turn_limit=None, max_turns=10, progress=updates.append)
+        self.assertTrue(samples[0].metadata['submitted'])
+        self.assertEqual([(item['phase'], item['turn']) for item in updates],
+            [('thinking', 1), ('drawing', 1), ('thinking', 2), ('drawing', 2), ('rendering', 2)])
+        self.assertTrue(all(item['max_turns'] == 10 for item in updates))
 
     def test_operation_budget_cannot_be_bypassed_with_multiple_calls_per_turn(self):
         from drawing.config import LIMITS

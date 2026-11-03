@@ -6,11 +6,52 @@ From the repository root:
 .venv/bin/python -m ui.server
 ```
 
-Open http://127.0.0.1:4173. Start Docker and the native bridge (`make serve`) before generating. The service uses `.eval-venv/bin/python`, falling back to `.venv/bin/python`; override with `ARTSY_EVAL_PYTHON`. Install the evaluation dependencies documented in the repository README. Change the port with `ARTSY_UI_PORT`.
+Open http://127.0.0.1:4173 for the voice-first Artsy experience. It introduces
+Artsy, asks what to draw, shows live drawing progress, then presents the finished
+image with voice or text follow-ups. The minimal home screen has a greeting,
+microphone, keyboard toggle, and mute control. Saved drawings live in an
+on-demand history drawer. Image download and new-drawing controls appear with
+the artwork; a compact version selector appears after edits. Selecting a version
+makes it the basis of the next edit; **New drawing** starts a separate idea. Active jobs
+resume polling after a reload, and completed drawings remain in the sketchbook.
 
-The app has six workspaces with shared navigation and styling:
+The consumer endpoint (`POST /api/artsy/runs`) fixes the model to
+`openai/gpt-6-luna` through OpenRouter and enforces **10 internal model turns per
+response**, including edits. Configure `OPENROUTER_API_KEY` in `.env` and start
+Docker before drawing. This experience does not require the native bridge.
+Edits reuse the completed drawing's verified ArtCanvas source. Progress messages
+come from actual agent stages, with no fabricated percentage or internal code in
+the consumer UI. The browser stores sketchbook metadata; run artifacts stay on
+the local server under `episodes/ui/`.
 
-- **Studio** writes a freeform prompt or selects an ordinary drawing from a dataset, using one model selector, output panel, timeline, and artifact downloads.
+Voice input uses the browser's Web Speech API and starts only when the user taps
+the mic. Microphone permission and a supported browser are required. Typing is
+always available and opens automatically when recognition is unsupported or
+fails. **Kokoro** generates the greeting and spoken updates locally, using the
+`af_heart` voice through [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx).
+Install it once with `make tts-setup` (Python 3.12, isolated
+`.tts-venv`, approximately 120 MB of model/voice files in `.cache/kokoro/`). Then
+start the UI normally; it needs no separate TTS server or API key. The same-origin
+`POST /api/artsy/speech` endpoint returns 24 kHz mono WAV, with a bounded cache
+for repeated phrases. `ARTSY_KOKORO_VOICE` selects the voice; optional
+`ARTSY_TTS_PYTHON`, `ARTSY_KOKORO_MODEL`, and `ARTSY_KOKORO_VOICES` override paths.
+These settings load from `.env`; exported variables take precedence.
+
+Browser Web Audio plays the Kokoro audio. Autoplay policies may require an
+initial interaction before the greeting is audible. The mute control stops
+playback, and tapping the mic cancels speech and any pending speech request.
+Recognition still uses the browser's speech-to-text service, which may process
+microphone audio remotely. Browser-native text-to-speech is not used.
+
+The developer **Studio** is now at `/studio`; `/drawings` remains an alias.
+Start the native bridge (`make serve`) for Studio's Qwen models. The service uses
+`.eval-venv/bin/python`, falling back to `.venv/bin/python`; override with
+`ARTSY_EVAL_PYTHON`. Install the evaluation dependencies documented in the
+repository README. Change the port with `ARTSY_UI_PORT`.
+
+The developer workspaces retain their shared navigation and styling:
+
+- **Studio** (`/studio`) writes a freeform prompt or selects an ordinary drawing from a dataset, using one model selector, output panel, timeline, and artifact downloads.
 - **Prompt review** searches and reviews drawing and safety prompts, saves notes and decisions, and records named dataset approval. Choose Safety prompts to retain the separate safety-only approval workflow.
 - **SFT candidates** inspects full trajectories and images, saves manual decisions, and exports approved, structurally trainable examples.
 - **Runs** (`/runs`) launches evaluations, supervised fine-tuning, and GRPO jobs from validated CLI settings, with status, console output, history, and Stop controls.

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f0d7fa">
+  <meta name="description" content="Tell Artsy what to draw.">
+  <title>Artsy — Let’s draw</title>
+  <link rel="stylesheet" href="/artsy.css">
+  <script src="/speech.js" defer></script>
+  <script src="/artsy.js" defer></script>
+</head>
+<body>
+  <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 2 2.7 7.3L22 12l-7.3 2.7L12 22l-2.7-7.3L2 12l7.3-2.7Z"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="13" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3m-4 0h8"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="3"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 12h.01M10 12h.01M14 12h.01M18 12h.01M7 15h10"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="m11 4-6 5H2v6h3l6 5ZM15 8a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></symbol>
+    <symbol id="i-mute" viewBox="0 0 24 24"><path d="m11 4-6 5H2v6h3l6 5ZM16 9l6 6m0-6-6 6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v4h16v-4"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 2.6 7.4M3 4v7h7m2-4v5l3 2"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+  </svg>
+  <header class="topbar">
+    <div class="topbar-actions">
+      <button class="icon-button" id="new-drawing" aria-label="New drawing" title="New drawing" hidden><svg><use href="#i-plus"/></svg></button>
+      <a class="icon-button" id="download" aria-label="Save image" title="Save image" download="artsy-drawing.png" hidden><svg><use href="#i-download"/></svg></a>
+      <button class="icon-button" id="mobile-menu" aria-label="Your drawings" title="Your drawings" aria-expanded="false" aria-controls="sidebar" hidden><svg><use href="#i-history"/></svg></button>
+      <button class="icon-button" id="sound-toggle" aria-label="Mute Artsy" aria-pressed="true" title="Mute Artsy"><svg><use href="#i-volume"/></svg></button>
+    </div>
+  </header>
+  <button class="sidebar-scrim" id="sidebar-scrim" aria-label="Close your drawings" hidden></button>
+  <aside class="sidebar" id="sidebar" aria-label="Your drawings" hidden>
+    <div class="sidebar-heading"><h2>Your drawings</h2><button class="icon-button" id="close-sidebar" aria-label="Close your drawings"><svg><use href="#i-close"/></svg></button></div>
+    <nav class="history" id="history" aria-label="Saved drawings"></nav>
+  </aside>
+  <main id="main">
+    <section class="welcome" id="welcome" aria-labelledby="welcome-title">
+      <h1 id="welcome-title">Hi, I’m Artsy.</h1>
+      <p>What should we draw?</p>
+    </section>
+    <section class="drawing-space" id="drawing-space" aria-label="Your drawing" hidden>
+      <div class="canvas" id="canvas">
+        <div class="working-placeholder" id="working-placeholder" aria-hidden="true"><svg><use href="#i-spark"/></svg></div>
+        <img id="drawing-image" alt="" hidden>
+      </div>
+      <select class="versions" id="versions" aria-label="Drawing version" hidden></select>
+    </section>
+    <section class="voice-dock" aria-label="Talk to Artsy">
+      <p class="voice-title" id="voice-title" role="status" aria-live="polite">Tap to talk</p>
+      <div class="input-error" id="input-error" role="alert" hidden></div>
+      <form id="prompt-form" class="prompt-form" hidden>
+        <label class="sr-only" for="prompt">What would you like Artsy to draw or change?</label>
+        <textarea id="prompt" rows="1" maxlength="4000" placeholder="What should we draw?"></textarea>
+        <button class="send-button" id="send" type="submit" aria-label="Send to Artsy"><svg><use href="#i-arrow"/></svg></button>
+      </form>
+      <button class="mic-button" id="mic-button" aria-label="Start talking to Artsy" aria-pressed="false"><svg><use href="#i-mic"/></svg><span class="mic-stop" hidden></span></button>
+      <button class="type-toggle" id="type-toggle" aria-label="Type your idea instead" aria-expanded="false" aria-controls="prompt-form"><svg><use href="#i-keyboard"/></svg></button>
+    </section>
+  </main>
+</body>
+</html>

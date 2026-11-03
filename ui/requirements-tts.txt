@@ -1,0 +1,2 @@
+# Isolated Python 3.12 environment; no changes to inference/training dependencies.
+kokoro-onnx==0.4.9

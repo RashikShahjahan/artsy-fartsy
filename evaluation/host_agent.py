@@ -59,7 +59,7 @@ def observation(result, image_pattern):
 
 @agent(name=AGENT_NAME)
 def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMITS["maxCalls"],
-                  max_turns=None):
+                  max_turns=None, progress=None):
     """Preserve the Mini SWE bash protocol without its container-side harness."""
     settings = yaml.safe_load(Path(__file__).with_name("mini.yaml").read_text())
     image_pattern = re.compile(settings["model"]["multimodal_regex"])
@@ -96,6 +96,9 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                 if max_calls is not None and operations >= max_calls:
                     return "Return code: 1\nEpisode operation budget exhausted."
                 operations += 1
+                if progress is not None:
+                    progress({'phase': 'drawing',
+                              'turn': timing['model_calls'], 'max_turns': max_turns})
                 started = monotonic()
                 try:
                     # GNU timeout kills the command process group inside Docker.
@@ -110,7 +113,14 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                     timing["command_seconds"] += monotonic() - started
                 if command.strip() == SUBMIT and result.success:
                     submitted = True
-                return observation(result, image_pattern)
+                    if progress is not None:
+                        progress({'phase': 'rendering', 'turn': timing['model_calls'],
+                                  'max_turns': max_turns})
+                content = observation(result, image_pattern)
+                if progress is not None and isinstance(content, list):
+                    progress({'phase': 'previewing', 'turn': timing['model_calls'],
+                              'max_turns': max_turns})
+                return content
             return execute
 
         tools = [bash()]
@@ -128,6 +138,8 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
             while ((max_calls is None or turns < max_calls)
                    and (max_turns is None or turns < max_turns)):
                 turns += 1
+                if progress is not None:
+                    progress({'phase': 'thinking', 'turn': turns, 'max_turns': max_turns})
                 if max_turns is not None:
                     state.messages.append(ChatMessageUser(content=
                         f"Turn {turns} of {max_turns}." +

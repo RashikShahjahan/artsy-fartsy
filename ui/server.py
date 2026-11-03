@@ -11,7 +11,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 from urllib.parse import urlsplit, parse_qs
 from ui.shell import navigation, review_page, empty_page
-from ui import rl_monitor, launch, preferences
+from ui import rl_monitor, launch, preferences, speech
 from urllib.request import urlopen
 
 from drawing.config import MODEL_ID
@@ -126,6 +126,34 @@ def bridge_model_catalog():
         return [item for item in status.get('models', []) if isinstance(item, dict) and isinstance(item.get('id'), str)] or [{'id': status.get('model'), 'model_path': status.get('model_path')}]
     except (OSError, ValueError):
         return None
+
+
+def artsy_request(body):
+    """Consumer requests always use Luna and ten internal turns per drawing/edit."""
+    if not isinstance(body, dict):
+        raise ValueError('Invalid request.')
+    request = generation_request({'prompt': body.get('prompt'), 'seed': 42,
+                                  'model': DIRECT_MODELS[0]['id']})
+    request.update(experience='artsy', max_turns=10)
+    parent_id = body.get('parent_id')
+    if parent_id is not None:
+        if not isinstance(parent_id, str) or not re.fullmatch(r'[a-f0-9]{32}', parent_id):
+            raise ValueError('Choose a completed drawing to edit.')
+        try:
+            directory = JOBS / parent_id
+            parent = json.loads((directory / 'job.json').read_text())
+            result = json.loads((directory / 'output/result.json').read_text())
+            source = directory / 'output/program.py'
+            image = directory / 'output/image.png'
+            if (parent.get('state') != 'completed' or result.get('outcome') != 'submitted'
+                    or not source.is_file() or not image.is_file() or source.stat().st_size > 64 * 1024
+                    or content_hash(source) != result.get('sourceHash')
+                    or content_hash(image) != result.get('imageHash')):
+                raise ValueError('The original drawing is incomplete or has changed. Start a new drawing.')
+        except (OSError, json.JSONDecodeError, AttributeError) as error:
+            raise ValueError('That drawing is unavailable. Start a new drawing.') from error
+        request['parent_id'] = parent_id
+    return request
 
 
 def content_hash(path):
@@ -281,6 +309,25 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({'error': 'Local requests only.'}, 403)
         if self.serve_workspace():
             return
+        if self.path == '/api/artsy/speech':
+            try:
+                size = int(self.headers.get('Content-Length', '0'))
+                if not 0 < size <= 4096:
+                    raise ValueError('Invalid speech request size.')
+                text = speech.validate_text(json.loads(self.rfile.read(size)))
+                data = speech.synthesize(text)
+            except (ValueError, TypeError) as error:
+                return self.send_json({'error': str(error)}, 400)
+            except RuntimeError as error:
+                return self.send_json({'error': str(error)}, 503)
+            self.send_response(200)
+            self.send_header('Content-Type', 'audio/wav')
+            self.send_header('Content-Length', str(len(data)))
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.path in ('/api/preferences/rank', '/api/preferences/reveal'):
             try:
                 size = int(self.headers.get('Content-Length', '0'))
@@ -315,14 +362,14 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(launch.cancel(cancel[1]))
             except (ValueError, OSError) as error:
                 return self.send_json({'error': str(error)}, 409)
-        if self.path != '/api/runs':
+        if self.path not in ('/api/runs', '/api/artsy/runs'):
             return self.send_json({'error': 'Not found.'}, 404)
         try:
             size = int(self.headers.get('Content-Length', '0'))
             if not 0 < size <= 20000:
                 raise ValueError('Invalid request size.')
             body = json.loads(self.rfile.read(size))
-            request = generation_request(body)
+            request = artsy_request(body) if self.path == '/api/artsy/runs' else generation_request(body)
         except (OSError, ValueError, TypeError) as error:
             return self.send_json({'error': str(error)}, 400)
         with LOCK:
@@ -447,6 +494,9 @@ class Handler(SimpleHTTPRequestHandler):
                 if file.exists() and status['state'] not in ('queued', 'running'):
                     status[name.split('.')[0]] = json.loads(file.read_text())
             status['artifacts'] = [name for name in ('image.png', 'program.py', 'trace.json', 'result.json') if (directory / 'output' / name).exists()]
+            progress = directory / 'progress.json'
+            if progress.exists():
+                status['progress'] = json.loads(progress.read_text())
             return self.send_json(status)
         if self.path.startswith('/api/'):
             return self.send_json({'error': 'Not found.'}, 404)
@@ -467,10 +517,12 @@ class Handler(SimpleHTTPRequestHandler):
                         .replace('__RL_TITLE__', title)
                         .replace('__RL_DESCRIPTION__', description))
             return self.send_page(page)
-        if urlsplit(self.path).path in ('/', '/index.html', '/drawings', '/drawings.html'):
+        if target in ('/', '/index.html'):
+            return self.send_page((ROOT / 'ui/artsy.html').read_text())
+        if target in ('/studio', '/studio/', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
             return self.send_page(page)
-        if target not in ('/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css'):
+        if target not in ('/speech.js', '/artsy.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 

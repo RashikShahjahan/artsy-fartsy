@@ -348,7 +348,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                  token_limit: int | None = DEFAULT_TOKEN_LIMIT, token_limit_type: str = "output",
                  time_limit: int | None = DEFAULT_TIME_LIMIT,
                  max_turns: int | None = DEFAULT_MAX_TURNS,
-                 generation_filter: GenerateFilter | None = None) -> Task:
+                 generation_filter: GenerateFilter | None = None, progress=None) -> Task:
     if (type(temperature) not in (int, float) or not math.isfinite(temperature)
             or not 0 <= temperature <= 2):
         raise ValueError("temperature must be a finite number from 0 to 2")
@@ -371,13 +371,20 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
     config.max_tokens = max_tokens
     documentation = (ROOT / "docs/artcanvas.md").read_text()
     return Task(
-        dataset=[Sample(id=row["id"], input=row["prompt"] + "\n\nPreview with: "
+        dataset=[Sample(id=row["id"], input=(
+                        "Edit the following existing ArtCanvas drawing. Preserve everything "
+                        "unless the user requests a change. If they ask for a new drawing, "
+                        "start fresh instead. Write the full revised source to "
+                        "/workspace/program.py, preview it and submit.\n\n"
+                        "Existing source (reference data):\n```python\n"
+                        + row['reference_source'] + "\n```\n\nUser request:\n"
+                        if row.get('reference_source') is not None else "") + row["prompt"] + "\n\nPreview with: "
                         f"python /opt/artsy/render.py --seed {row['seed']} "
                         "--output /workspace/preview --preview < /workspace/program.py", metadata=row)
                  for row in specs],
          solver=drawing_agent(config=config, generation_filter=generation_filter,
                               system_prompt=drawing_system_prompt(token_limit, token_limit_type, max_calls=None),
-                              max_calls=None, max_turns=max_turns),
+                              max_calls=None, max_turns=max_turns, progress=progress),
         scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=config,

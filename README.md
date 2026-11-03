@@ -60,13 +60,18 @@ Start the native Tinker bridge in one terminal:
 HF_HOME="$PWD/.cache/huggingface" make serve
 ```
 
-Start the UI in another:
+Install the local Kokoro voice once, then start the UI in another terminal:
 
 ```sh
+make tts-setup
 make ui
 ```
 
-Open [http://127.0.0.1:4173](http://127.0.0.1:4173). Studio generates drawings;
+Open [http://127.0.0.1:4173](http://127.0.0.1:4173) for the voice-first Artsy
+experience: describe a drawing, watch its progress, then ask for changes by voice
+or text. It uses GPT-6 Luna through OpenRouter with ten internal turns per
+response; configure `OPENROUTER_API_KEY` and start Docker. The native bridge is
+only needed for Qwen. The developer [Studio](http://127.0.0.1:4173/studio) generates drawings;
 Prompt review and SFT candidates review training data; Runs launches evaluation,
 SFT, and GRPO jobs. RL prompts and RL rollouts browse saved training artifacts.
 The `/preferences` workspace supports blind ranking of existing model outputs.
