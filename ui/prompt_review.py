@@ -53,7 +53,7 @@ def prompt_suite(path):
 
 
 def make_handler(prompts=None, output=None, include_drawings=True, port=4173, *,
-                 base_path='', page_transform=None, navigation_html=None):
+                 base_path='', navigation_html=None):
     if prompts:
         manifest, items = prompt_suite(prompts)
         output = output or prompts.with_suffix('.review.json')
@@ -113,7 +113,7 @@ def make_handler(prompts=None, output=None, include_drawings=True, port=4173, *,
                 'validated': manifest.get('status') == 'validated',
             }).replace('<', '\\u003c')
             rendered = page.replace('__DATA__', payload)
-            self.respond(200, page_transform(rendered) if page_transform else rendered, 'text/html')
+            self.respond(200, rendered, 'text/html')
         def do_POST(self):
             if self.path!='/review':return self.respond(404,'{}')
             if self.headers.get('Origin') not in (None,f'http://127.0.0.1:{port}',f'http://localhost:{port}'):return self.respond(403,'{}')
