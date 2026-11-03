@@ -38,10 +38,12 @@ function setup(saved = [], runResponse) {
       return Promise.resolve({ok: true, json: async () => runResponse(url, options)});
     },
     Option: function(text, value) { return {text, value}; },
+    AbortController: class { constructor(){this.signal={};} abort(){this.signal.aborted=true;} },
     setTimeout: callback => timers.push(callback), clearTimeout() {},
   });
   vm.runInContext(fs.readFileSync(`${__dirname}/activity.js`, 'utf8'), context);
   context.window.ArtsyActivity = context.ArtsyActivity;
+  vm.runInContext(fs.readFileSync(`${__dirname}/run-client.js`, 'utf8'), context);
   vm.runInContext(fs.readFileSync(`${__dirname}/artsy.js`, 'utf8'), context);
   return {elements, sessions, requests, timers};
 }

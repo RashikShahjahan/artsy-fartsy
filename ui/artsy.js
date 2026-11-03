@@ -9,8 +9,8 @@
   const speech = new window.ArtsySpeech();
   const activity = new window.ArtsyActivity(ui.agentActivity, ui.activitySteps, ui.activityStatus, approveAction);
   let drawings = [], current = null, activeRun = null, busy = false, listening = false;
-  let recognition = null, pollTimer = null;
-  let pollFailures = 0, lastPhase = '', previewSpoken = false, lastPrompt = '', voiceOn = true;
+  let recognition = null;
+  let lastPhase = '', previewSpoken = false, lastPrompt = '', voiceOn = true;
   let activityRequest = 0;
   const progressMessages = {
     thinking: 'Imagining your drawing…',
@@ -213,7 +213,7 @@
       setTypedInput(false, false); lastPhase = ''; previewSpoken = false;
       if (!parentId) { ui.drawingImage.hidden = true; ui.workingPlaceholder.hidden = false; ui.download.hidden = true; ui.versions.hidden = true; }
       speak(parentId ? 'I’ll make that change.' : 'I’ll draw that for you.');
-      pollFailures = 0; poll();
+      poll();
     } catch (error) {
       showError(error.message); ui.prompt.value = prompt; setTypedInput(true, false);
     } finally { if (!accepted) setBusy(false); }
@@ -223,51 +223,53 @@
     lastPhase = progress.phase; ui.voiceTitle.textContent = progressMessages[progress.phase];
     if (progress.phase === 'previewing' && !previewSpoken) { speak('I’m taking a closer look.'); previewSpoken = true; }
   }
-  async function poll() {
-    const id = activeRun;
-    if (!id) return;
-    clearTimeout(pollTimer);
-    try {
-      const response = await fetch(`/api/runs/${id}`, {cache: 'no-store'});
-      const run = await response.json();
-      if (activeRun !== id) return;
-      if (!response.ok) {
-        if (response.status === 404) { finishFailed('This drawing is unavailable. Please try again.'); return; }
-        throw new Error('Drawing service unavailable.');
-      }
-      pollFailures = 0; showError(''); lastPrompt = run.prompt;
-      if (!current) {
-        current = drawings.find(drawing => drawing.versions.some(version => version.id === run.parent_id)) || {id, title: run.prompt, versions: []};
-        showWorkspace();
-        if (current.versions.length) showVersion(current.versions.find(v => v.id === run.parent_id) || current.versions.at(-1), false);
-        else { ui.drawingImage.hidden = true; ui.workingPlaceholder.hidden = false; }
-        setBusy(true);
-      }
-      applyProgress(run.progress);
-      ui.modeApproval.checked = run.execution_mode === 'approval'; ui.modeAuto.checked = !ui.modeApproval.checked;
-      activity.render({...run, id});
-      ui.drawingProcess.hidden = false;
-      if (run.state === 'queued') ui.voiceTitle.textContent = 'Getting ready…';
-      if (run.state === 'running' || run.state === 'queued') { pollTimer = setTimeout(poll, 1500); return; }
-      if (run.state === 'completed' && run.result?.outcome === 'submitted' && run.artifacts?.includes('image.png')) {
-        if (!current.versions.some(version => version.id === id)) current.versions.push({id, prompt: run.prompt});
-        current.selectedId = id;
-        drawings = [current, ...drawings.filter(drawing => drawing.id !== current.id)].slice(0, 50); persist();
-        showVersion(current.versions.find(version => version.id === id), false);
-        activeRun = null; rememberActive(null); setBusy(false);
-        if (!Recognition) setTypedInput(true, false);
-        speak('Your drawing is ready. Anything you’d like to change?');
-      } else if (run.result?.outcome === 'refused') {
-        finishFailed(run.result.refusalReason || run.result.reason || 'Let’s try a different idea.');
-      } else finishFailed('I couldn’t finish that. Try again?');
-    } catch {
-      if (activeRun !== id) return;
-      pollFailures++;
-      showError('Connection lost. Reconnecting…');
-      pollTimer = setTimeout(poll, Math.min(10000, 1500 * pollFailures));
+  function updateRun(run,id) {
+    if(activeRun!==id)return;
+    showError('');lastPrompt=run.prompt;
+    if(!current) {
+      current=drawings.find(drawing=>drawing.versions.some(version=>version.id===run.parent_id)) || {id,title:run.prompt,versions:[]};
+      showWorkspace();
+      if(current.versions.length)showVersion(current.versions.find(v=>v.id===run.parent_id)||current.versions.at(-1),false);
+      else {ui.drawingImage.hidden=true;ui.workingPlaceholder.hidden=false;}
+      setBusy(true);
     }
+    applyProgress(run.progress);
+    ui.modeApproval.checked=run.execution_mode==='approval';
+    ui.modeAuto.checked=!ui.modeApproval.checked;
+    activity.render({...run,id});
+    ui.drawingProcess.hidden=false;
+    if(run.state==='queued')ui.voiceTitle.textContent='Getting ready…';
+    if(run.state==='stopping')ui.voiceTitle.textContent='Stopping…';
   }
+  function finishRun(run,id) {
+    if(activeRun!==id)return;
+    if(run.state==='completed' && run.result?.outcome==='submitted' && run.artifacts?.includes('image.png')) {
+      if(!current.versions.some(version=>version.id===id))current.versions.push({id,prompt:run.prompt});
+      current.selectedId=id;
+      drawings=[current,...drawings.filter(drawing=>drawing.id!==current.id)].slice(0,50);persist();
+      showVersion(current.versions.find(version=>version.id===id),false);
+      activeRun=null;rememberActive(null);setBusy(false);
+      if(!Recognition)setTypedInput(true,false);
+      speak('Your drawing is ready. Anything you’d like to change?');
+    } else if(run.result?.outcome==='refused') {
+      finishFailed(run.result.refusalReason||run.result.reason||'Let’s try a different idea.');
+    } else if(['cancelled','canceled','stopped'].includes(run.state)) {
+      finishFailed('Drawing stopped.');
+    } else finishFailed('I couldn’t finish that. Try again?');
+  }
+  const runClient=window.ArtsyRunClient.createRunClient({
+    onUpdate:updateRun,
+    onTerminal:finishRun,
+    onMissing:id=>{
+      if(activeRun===id)finishFailed('This drawing is unavailable. Please try again.');
+    },
+    onRetry:(error,{id})=>{
+      if(activeRun===id)showError('Connection lost. Reconnecting…');
+    }
+  });
+  function poll(){if(activeRun)runClient.start(activeRun);}
   function finishFailed(message) {
+    runClient.stop();
     activity.fail(message);
     activeRun = null; rememberActive(null); setBusy(false);
     ui.drawingProcess.hidden = ui.agentActivity.hidden; ui.drawingProcess.open = true;

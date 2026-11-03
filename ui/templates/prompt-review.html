@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Artsy · __PAGE_TITLE__</title>
+<link rel="stylesheet" href="__BASE_PATH__/assets/style.css">
+<link rel="stylesheet" href="__BASE_PATH__/assets/review.css">
+<script src="__BASE_PATH__/assets/dom.js" defer></script>
+<script src="__BASE_PATH__/assets/prompt-review.js" defer></script>
+</head><body class="review-page">
+__NAVIGATION__
+<header class="workspace-header">
+<div class="review-scope" aria-label="Review scope">__SCOPE_LINKS__</div>
+<h1>__PAGE_TITLE__</h1>
+<div id="overview">__OVERVIEW__</div>
+<nav aria-label="Prompt review filters">
+<input id="search" aria-label="Search prompts or skills" placeholder="Search prompts or skills">
+<select id="slice" aria-label="Prompt category"><option value="">All categories</option>__SLICE_OPTIONS__</select>
+<select id="filter" aria-label="Review decision"><option value="">All decisions</option><option>pending</option><option>approved</option><option>rejected</option></select>
+<input id="reviewer" aria-label="Reviewer name" placeholder="Your name">
+<button id="save" type="button">Save review</button><button id="final" type="button" class="approve"></button>
+</nav><div id="status" class="ui-status" role="status" aria-live="polite"></div>
+</header>
+<main class="review-workspace"><p>__PAGE_DESCRIPTION__</p><div id="cards"></div></main>
+<script type="application/json" id="review-data">__DATA__</script>
+</body></html>

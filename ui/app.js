@@ -214,41 +214,66 @@ document.querySelectorAll('[data-trace-view]').forEach(button => button.onclick 
   traceView = button.dataset.traceView; renderTraceView();
 });
 $('#event-search').oninput = e => {eventFilter = e.target.value.toLowerCase(); renderTraceView();};
-async function poll(id) {
-  try {
-    const response=await fetch(`/api/runs/${id}`,{cache:'no-store'});
-    if(!response.ok) throw new Error('Could not read the run. Reload to retry.');
-    const run=await response.json();
-    if(run.prompt_id && run.dataset_sha256!==drawingData?.sha256) {
-      active=null;try{sessionStorage.removeItem(sessionKey);}catch{}
-      $('#form-status').textContent='This saved run belongs to another dataset revision. Select a drawing from this dataset.';
-      updateModelAvailability();return;
-    }
-    if(active===id && displayedRun!==id) { setSource(run.prompt_id?'dataset':'freeform',false); displayedRun=id; if(drawingOnly){const spec=drawingData?.items.find(row=>row.id===run.prompt_id);if(spec)showDrawing(spec,false);displayedRun=id;} $('#prompt').value=run.prompt;
-      if ([...$('#model').options].some(option => option.value === run.model)) $('#model').value=run.model; }
-    $('#run-status').textContent=(run.result?.outcome || run.state) + (drawingOnly ? ` · ${run.model}` : '');
-    $('#console').textContent=run.console || 'Waiting for process output…';
-    $('#downloads').innerHTML=(run.artifacts || []).map(name=>`<a href="/api/runs/${id}/${name}" download="${name}">${esc(name)}</a>`).join('');
-    if(run.artifacts.includes('image.png')) $('#output').innerHTML=`<img src="/api/runs/${id}/image.png" alt="Generated image">`;
-    if(['queued','running'].includes(run.state)) {
-      $('#trace-note').textContent='Process output updates during generation. The complete recorded agent trace appears when the run ends.';
-      setTimeout(()=>poll(id),1500);return;
-    }
-    active=null;updateModelAvailability();refreshDrawingRuns();
-    $('#trace-note').textContent='Commands, results, and previews in order. Expand any action for its full record.';
-    if(run.trace) renderTrace(run.trace);
-    else $('#trace').innerHTML='<p class="empty">No agent trace was produced. See process output below.</p>';
-    if(run.state==='failed') {
-      $('#form-status').textContent=run.error || 'Generation failed. See process output for details.';
-      $('#console-panel').open=true;
-      if(!run.artifacts.includes('image.png')) $('#output').innerHTML='<p>No image produced.</p>';
-    } else if(!run.artifacts.includes('image.png')) $('#output').innerHTML=`<p>${esc(run.result?.reason || 'The run ended without an image.')}</p>`;
-  } catch(error) {
-    $('#form-status').textContent=error.message;
-    $('#run-status').textContent='Connection lost';
-    // Keep generation disabled: the job may still be running. Reload resumes polling.
+function updateRun(run,id) {
+  if(active!==id)return;
+  if(run.prompt_id && run.dataset_sha256!==drawingData?.sha256) {
+    runClient.stop();active=null;
+    try{sessionStorage.removeItem(sessionKey);}catch{}
+    $('#form-status').textContent='This saved run belongs to another dataset revision. Select a drawing from this dataset.';
+    updateModelAvailability();return;
+  }
+  $('#form-status').textContent='';
+  if(displayedRun!==id) {
+    setSource(run.prompt_id?'dataset':'freeform',false); displayedRun=id;
+    if(drawingOnly) {const spec=drawingData?.items.find(row=>row.id===run.prompt_id);if(spec)showDrawing(spec,false);displayedRun=id;}
+    $('#prompt').value=run.prompt;
+    if ([...$('#model').options].some(option=>option.value===run.model))$('#model').value=run.model;
+  }
+  $('#run-status').textContent=(run.result?.outcome || run.state)+(drawingOnly?` · ${run.model}`:'');
+  $('#console').textContent=run.console || 'Waiting for process output…';
+  $('#downloads').innerHTML=(run.artifacts||[]).map(name=>`<a href="/api/runs/${id}/${name}" download="${name}">${esc(name)}</a>`).join('');
+  if((run.artifacts||[]).includes('image.png'))$('#output').innerHTML=`<img src="/api/runs/${id}/image.png" alt="Generated image">`;
+  if(window.ArtsyRunClient.ACTIVE_STATES.has(run.state)) {
+    $('#trace-note').textContent=run.state==='stopping'?'Stopping run…':'Process output updates during generation. The complete recorded agent trace appears when the run ends.';
+    $('#cancel-generation').disabled=run.state==='stopping';
   }
 }
+function finishRun(run,id) {
+  if(active!==id)return;
+  active=null;try{sessionStorage.removeItem(sessionKey);}catch{}
+  updateModelAvailability();refreshDrawingRuns();
+  $('#trace-note').textContent='Commands, results, and previews in order. Expand any action for its full record.';
+  if(run.trace)renderTrace(run.trace);
+  else $('#trace').innerHTML='<p class="empty">No agent trace was produced. See process output below.</p>';
+  if(['failed','cancelled','canceled','stopped'].includes(run.state)) {
+    $('#form-status').textContent=run.error || (run.state==='failed'?'Generation failed. See process output for details.':'Generation stopped.');
+    $('#console-panel').open=true;
+    if(!(run.artifacts||[]).includes('image.png'))$('#output').innerHTML='<p>No image produced.</p>';
+  } else if(!(run.artifacts||[]).includes('image.png'))$('#output').innerHTML=`<p>${esc(run.result?.reason||'The run ended without an image.')}</p>`;
+}
+const runClient=window.ArtsyRunClient.createRunClient({
+  onUpdate:updateRun,
+  onTerminal:finishRun,
+  onRetry:(error,{id})=>{
+    if(active!==id)return;
+    $('#form-status').textContent='Connection lost. Reconnecting… '+error.message;
+    $('#run-status').textContent='Reconnecting';
+  },
+  onMissing:id=>{
+    if(active!==id)return;
+    active=null;try{sessionStorage.removeItem(sessionKey);}catch{}
+    $('#form-status').textContent='Run not found. Check the server or start a new generation.';
+    $('#run-status').textContent='Unavailable';
+    updateModelAvailability();
+  }
+});
+function poll(id){runClient.start(id);}
+$('#cancel-generation').onclick=async()=>{
+  if(!active || !window.confirm('Stop this generation?'))return;
+  $('#cancel-generation').disabled=true;
+  try{await runClient.cancel();$('#form-status').textContent='Stopping generation…';}
+  catch(error){$('#form-status').textContent=error.message;$('#cancel-generation').disabled=false;}
+};
 $('#generation-form').onsubmit=async e=>{
   e.preventDefault();if(active || (drawingOnly && !selectedDrawing))return;
   const prompt=$('#prompt').value.trim();if(!prompt){$('#form-status').textContent='Enter a prompt.';return;}
@@ -273,6 +298,7 @@ function updateModelAvailability() {
     : unavailable ? 'This model is unavailable on the running bridge. Restart make serve, then reload.'
     : 'Native Tinker sampling · same Docker drawing harness and PNG previews.';
   $('#generate').disabled = Boolean(active) || unavailable || (drawingOnly && (!selectedDrawing || !drawingData));
+  $('#cancel-generation').hidden = !active;
   $('#drawing-select').disabled=Boolean(active);$('#drawing-search').disabled=Boolean(active);
   document.querySelectorAll('[data-source]').forEach(button=>button.disabled=Boolean(active));
 }

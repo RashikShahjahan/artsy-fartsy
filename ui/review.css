@@ -1,0 +1,12 @@
+/* Review-only layout; no global tag selectors. */
+.review-page .review-workspace #cards{display:grid;gap:14px}
+.review-page .review-workspace article{margin:0;scroll-margin-top:20px}
+.review-page .review-workspace .meta{margin-top:8px}
+.review-page .review-workspace #cards textarea{min-height:70px}
+.review-page .workspace-header #overview{color:var(--muted);font-size:13px}
+.review-page .review-workspace article .controls span{font-size:12px;color:var(--muted)}
+.candidates-page .review-workspace #items{scrollbar-gutter:stable}
+.candidates-page .review-workspace #detail{min-height:200px}
+.candidates-page .review-workspace .attempt-card details{margin:10px 0}
+.candidates-page .review-workspace .message-card{background:white}
+@media(max-width:700px){.review-page .workspace-header .review-scope{margin-bottom:12px}}

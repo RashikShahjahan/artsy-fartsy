@@ -316,23 +316,14 @@ class Handler(SimpleHTTPRequestHandler):
                        CANDIDATE_REVIEW_OUTPUT, ACCEPTED_OUTPUT,
                        content_hash(source), content_hash(manual_path))
                 if key not in MOUNTED_HANDLERS:
-                    def transform(page):
-                        rendered = review_page(page, mount)
-                        if mount == 'review':
-                            switch = '<div class="review-scope" aria-label="Review scope">'
-                            for url, label, selected in [('/review', 'All prompts', not safety_only),
-                                    ('/review?scope=safety', 'Safety prompts', safety_only)]:
-                                switch += f'<a href="{url}"' + (' aria-current="true"' if selected else '') + f'>{label}</a>'
-                            rendered = rendered.replace('<h1>', switch + '</div><h1>', 1)
-                        return rendered
                     if mount == 'review':
                         from ui.prompt_review import make_handler
                         handler_type = make_handler(Path(DRAWING_DATASET) if DRAWING_DATASET else None,
-                            PROMPT_REVIEW_OUTPUT, not safety_only, PORT, base_path='/review', page_transform=transform)
+                            PROMPT_REVIEW_OUTPUT, not safety_only, PORT, base_path='/review', navigation_html=navigation('review'))
                     elif source:
                         from ui.candidate_review import make_handler
                         handler_type = make_handler(Path(source), PORT, CANDIDATE_REVIEW_OUTPUT,
-                            ACCEPTED_OUTPUT, base_path=base, page_transform=transform)
+                            ACCEPTED_OUTPUT, base_path=base, navigation_html=navigation('candidates'))
                     else:
                         handler_type = None
                     for old in list(MOUNTED_HANDLERS):
@@ -621,7 +612,7 @@ class Handler(SimpleHTTPRequestHandler):
         if target in ('/studio', '/studio/', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
             return self.send_page(page)
-        if target not in ('/speech.js', '/artsy.js', '/activity.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css'):
+        if target not in ('/speech.js', '/artsy.js', '/activity.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css', '/run-client.js', '/dom.js'):
             return self.send_json({'error': 'Not found.'}, 404)
         super().do_GET()
 

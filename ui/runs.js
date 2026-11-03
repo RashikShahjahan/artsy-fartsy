@@ -55,6 +55,7 @@ let bridgeOnline = false;
 let selectedId = new URLSearchParams(location.hash.slice(1)).get("run");
 let activeKind = "eval";
 let refreshing = false;
+let refreshQueued = false;
 let submitting = false;
 
 function fieldValue(input) {
@@ -220,38 +221,49 @@ function relativeDate(date) {
   const value = new Date(date);
   return Number.isNaN(value.getTime()) ? date : value.toLocaleString();
 }
+const historyNodes=new Map();
 function renderHistory(rows) {
-  const root = $("runs-history");
-  root.replaceChildren();
-  if (!rows.length) {
-    const paragraph = document.createElement("p");
-    paragraph.className = "note";
-    paragraph.textContent = "No experiment runs yet.";
-    root.append(paragraph);
+  const root=$("runs-history");
+  if(!rows.length) {
+    const paragraph=document.createElement("p");
+    paragraph.className="note";
+    paragraph.textContent="No experiment runs yet.";
+    window.ArtsyUI.reconcile(root,[paragraph]);
+    historyNodes.clear();
     return;
   }
-  for (const row of rows) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.setAttribute("aria-current", String(row.id === selectedId));
-    const name = document.createElement("span");
-    name.className = "runs-entry-name";
-    name.textContent = (row.kind || "").toUpperCase() + " · " + (row.output || row.id);
-    const meta = document.createElement("small");
-    meta.className = "runs-entry-meta";
-    meta.textContent = relativeDate(row.created_at);
-    name.append(meta);
-    const badge = document.createElement("span");
-    badge.className = "runs-entry-state";
-    badge.textContent = row.state;
-    button.append(name, badge);
-    button.addEventListener("click", () => {
-      selectedId = row.id;
-      location.hash = "run=" + row.id;
-      refresh().catch(error => message(error.message, true));
-    });
-    root.append(button);
-  }
+  const visible=new Set();
+  const elements=rows.map(row=>{
+    visible.add(row.id);
+    let entry=historyNodes.get(row.id);
+    if(!entry) {
+      const button=document.createElement("button");
+      button.type="button";
+      const name=document.createElement("span");
+      name.className="runs-entry-name";
+      const title=document.createElement("span");
+      const meta=document.createElement("small");
+      meta.className="runs-entry-meta";
+      name.append(title,meta);
+      const badge=document.createElement("span");
+      badge.className="runs-entry-state";
+      button.append(name,badge);
+      button.addEventListener("click",()=>{
+        selectedId=row.id;
+        location.hash="run="+row.id;
+        refresh().catch(error=>message(error.message,true));
+      });
+      entry={button,title,meta,badge};
+      historyNodes.set(row.id,entry);
+    }
+    entry.button.setAttribute("aria-current",String(row.id===selectedId));
+    entry.title.textContent=(row.kind||"").toUpperCase()+" · "+(row.output||row.id);
+    entry.meta.textContent=relativeDate(row.created_at);
+    entry.badge.textContent=row.state;
+    return entry.button;
+  });
+  for(const id of historyNodes.keys())if(!visible.has(id))historyNodes.delete(id);
+  window.ArtsyUI.reconcile(root,elements);
 }
 function renderDetail(data) {
   $("detail-title").textContent = data.kind.toUpperCase() + " run";
@@ -267,21 +279,28 @@ function renderDetail(data) {
   $("monitor-link").hidden = data.kind !== "rl";
 }
 async function refresh() {
-  if (refreshing) return;
+  if (refreshing) {refreshQueued = true; return;}
   refreshing = true;
   try {
     const rows = (await request("/api/launches")).runs;
     if (!selectedId && rows.length) selectedId = rows[0].id;
     renderHistory(rows);
     if (selectedId) {
+      const requestedId = selectedId;
       try {
-        renderDetail(await request("/api/launches/" + encodeURIComponent(selectedId)));
+        const details = await request("/api/launches/" + encodeURIComponent(requestedId));
+        if (requestedId === selectedId) renderDetail(details);
+        else refreshQueued = true;
       } catch (error) {
-        $("detail-state").textContent = error.message;
+        if (requestedId === selectedId) $("detail-state").textContent = error.message;
       }
     }
   } finally {
     refreshing = false;
+    if (refreshQueued) {
+      refreshQueued = false;
+      Promise.resolve().then(() => refresh().catch(error => message(error.message, true)));
+    }
   }
 }
 $("run-kind").addEventListener("change", event => {
