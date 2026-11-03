@@ -158,7 +158,13 @@ def main(argv=None):
         for epoch in range(1, args.group_size + 1):
             if not (args.output / "artifacts" / f"{spec['id']}-{epoch}" / "result.json").is_file():
                 raise RuntimeError("Missing rollout result; cannot compute reward variation")
-    groups = asyncio.run(score_outputs(specs, args.output, args.group_size, judge, args.max_samples))
+    async def score_and_close():
+        from drawing.dataset_client import close_chat_clients
+        try:
+            return await score_outputs(specs, args.output, args.group_size, judge, args.max_samples)
+        finally:
+            await close_chat_clients()
+    groups = asyncio.run(score_and_close())
     summary = {**plan, "completed_at": datetime.now(timezone.utc).isoformat(), "groups": groups,
                "groups_with_learning_signal": sum(g["has_learning_signal"] for g in groups),
                "valid_renders": sum(a["render_valid"] for g in groups for a in g["attempts"])}

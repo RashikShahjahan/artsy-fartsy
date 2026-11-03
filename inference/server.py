@@ -14,6 +14,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from jinja2 import TemplateError
+from pydantic import ValidationError
+from .schemas import CompletionRequest
 
 from drawing.config import (IMAGE_SIZE, MODEL_CONTEXT_WINDOW, MODEL_ID, MODEL_REVISION,
                             TINKER_SAMPLING_MODEL_ID)
@@ -183,7 +185,13 @@ def models():
 
 
 @app.post("/v1/chat/completions")
-def complete(body: dict):
+def complete(body: CompletionRequest):
+    # Validate direct Python callers too; HTTP callers are parsed by FastAPI.
+    try:
+        request = body if isinstance(body, CompletionRequest) else CompletionRequest.model_validate(body)
+    except ValidationError:
+        raise HTTPException(400, "Invalid completion request; check messages, tools, and generation settings.") from None
+    body = request.model_dump(exclude_none=True, exclude_unset=True)
     if body.get("stream"):
         raise HTTPException(400, "Streaming unsupported by the hosted sampling SDK; use stream=false.")
     temperature = body.get("temperature", 0.0)

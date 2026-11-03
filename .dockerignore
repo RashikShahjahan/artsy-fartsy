@@ -7,3 +7,5 @@
 !runtime/**
 !training/
 !training/score_rl.py
+!drawing/
+!drawing/render_contract.py

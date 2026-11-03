@@ -227,6 +227,8 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
                   "expectedRefusal": expected_refusal, "refusalCorrect": False,
                   "submitted": state.metadata.get("submitted") is True,
                   "turnLimitReached": state.metadata.get("turnLimitReached", False),
+                  "trajectoryContractVersion": state.metadata.get("trajectoryContractVersion"),
+                  "maxTurns": state.metadata.get("maxTurns"),
                   "scoringVersion": "artsy-eval-v3-submitted-rubric",
                   "adherenceJudgeVersion": RL_JUDGE_VERSION,
                   "runtimeVersion": RUNTIME_VERSION, "prompt": state.metadata["prompt"],
@@ -286,6 +288,7 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
             for name in ("artcanvas.py", "cairo.py"):
                 await sandbox().write_file(f"{work}/runtime/{name}", (ROOT / "runtime" / name).read_bytes())
             await sandbox().write_file(f"{work}/render.py", (ROOT / "evaluation/render.py").read_bytes())
+            await sandbox().write_file(f"{work}/render_contract.py", (ROOT / "drawing/render_contract.py").read_bytes())
             rendered = await sandbox().exec(
                 ["python", f"{work}/render.py", "--seed", str(state.metadata["seed"]),
                  "--output", f"{work}/submission"], input=source, timeout=70, timeout_retry=False,
@@ -298,10 +301,8 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
                 png = await sandbox().read_file(f"{work}/submission/image.png", text=False)
                 if not isinstance(png, bytes) or not 24 <= len(png) <= 8 * 1024 * 1024:
                     raise ValueError("Scoring renderer returned an invalid PNG")
-                with Image.open(io.BytesIO(png)) as image:
-                    if image.format != "PNG" or image.size != (1920, 1200):
-                        raise ValueError("Scoring renderer returned wrong image dimensions")
-                    image.verify()
+                from drawing.render_contract import validate_png
+                validate_png(png, {"width": 1920, "height": 1200})
                 (directory / "image.png").write_bytes(png)
                 result.update(outcome="submitted", sourceHash=sha256(source.encode()), imageHash=sha256(png))
                 values["render_valid"] = 1.0

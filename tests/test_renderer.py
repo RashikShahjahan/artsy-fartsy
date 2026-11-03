@@ -29,6 +29,10 @@ class RendererTests(unittest.IsolatedAsyncioTestCase):
         damaged[png.index(b"IDAT") + 4] ^= 1
         with self.assertRaisesRegex(ValueError, "Invalid PNG"):
             validate_png(bytes(damaged))
+        with self.assertRaisesRegex(ValueError, "Invalid PNG"):
+            validate_png(png + b"extra")
+        with self.assertRaisesRegex(ValueError, "Invalid PNG"):
+            validate_png(png[:-1])
         with self.assertRaisesRegex(ValueError, "Invalid or oversized"):
             validate_png(b"not png")
 
@@ -99,3 +103,46 @@ class RendererTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class DockerRendererTests(unittest.IsolatedAsyncioTestCase):
+    async def test_environment_defaults_to_isolated_backend(self):
+        from drawing.environment import DrawingEnvironment
+        from drawing.renderer import DockerRenderer
+        with tempfile.TemporaryDirectory() as root:
+            self.assertIsInstance(DrawingEnvironment(root).renderer, DockerRenderer)
+
+    async def test_docker_command_is_isolated_and_validates_result(self):
+        import json
+        import os
+        from unittest.mock import patch
+        from drawing.renderer import DockerRenderer
+
+        png = make_png(1920, 1200)
+        with tempfile.TemporaryDirectory() as root:
+            executable = Path(root) / "docker"
+            args_file = Path(root) / "args"
+            encoded = base64.b64encode(png).decode("ascii")
+            executable.write_text(
+                "#!/usr/bin/env python3\nimport json, os, sys\n"
+                "if sys.argv[1] == 'run':\n"
+                " open(os.environ['TEST_DOCKER_ARGS'], 'w').write(json.dumps(sys.argv[1:]))\n"
+                " sys.stdin.read()\n"
+                " print(json.dumps({'ok': True, 'stdout': '', 'stderr': ''}))\n"
+                f" print('<MSWEA_MULTIMODAL_CONTENT><CONTENT_TYPE>image_url</CONTENT_TYPE>data:image/png;base64,{encoded}</MSWEA_MULTIMODAL_CONTENT>')\n"
+            )
+            executable.chmod(0o755)
+            with patch.dict(os.environ, {"TEST_DOCKER_ARGS": str(args_file)}):
+                result = await DockerRenderer(docker=str(executable)).render("pass", 42)
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["png"], png)
+            args = json.loads(args_file.read_text())
+            for argument in ("--network", "none", "--read-only", "--cap-drop", "ALL", "--user", "65534:65534"):
+                self.assertIn(argument, args)
+            self.assertNotIn("--privileged", args)
+            self.assertNotIn("--volume", args)
+            self.assertNotIn("--env", args)
+
+    async def test_missing_docker_is_infrastructure_failure(self):
+        from drawing.renderer import DockerRenderer
+        result = await DockerRenderer(docker="/nonexistent-artsy-docker").render("pass", 0)
+        self.assertEqual(result["failureKind"], "infrastructure")

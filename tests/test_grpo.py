@@ -43,7 +43,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(evaluation)
 
     async def test_submit_is_the_only_terminating_bash_command(self):
-        configure_concurrency(2)
+        configure_concurrency(2, 2)
         spec = {"id": "draw", "prompt": "Draw a circle", "seed": 42}
         with tempfile.TemporaryDirectory() as root:
             session = DockerSession(spec, Path(root), MagicMock())
@@ -367,6 +367,7 @@ class NativeContextTests(unittest.IsolatedAsyncioTestCase):
         from tinker_cookbook.rl.rollouts import do_single_rollout
         from drawing.config import MODEL_CONTEXT_WINDOW
         for length, expected in ((40000, MODEL_CONTEXT_WINDOW - 40000), (MODEL_CONTEXT_WINDOW - 13, 13)):
+            configure_concurrency(1, 1)
             renderer = MagicMock()
             renderer.get_stop_sequences.return_value = [2]
             renderer.build_generation_prompt.return_value = tinker.ModelInput.from_ints([1] * length)
@@ -396,6 +397,7 @@ class NativeContextTests(unittest.IsolatedAsyncioTestCase):
 class ToolBudgetTests(unittest.IsolatedAsyncioTestCase):
     async def test_countdown_tracks_tool_and_no_tool_turns_and_stops_on_last(self):
         from tinker_cookbook.renderers import ToolCall
+        configure_concurrency(1, 1)
         builder = ArtsyGroupBuilder({'id': 'x', 'prompt': 'disk', 'seed': 1},
                                    1, 1, Path('/tmp'), MagicMock(), None, 262144, False)
         settings = {'agent': {'step_limit': 3}}
@@ -451,6 +453,14 @@ class RolloutPromptTests(unittest.TestCase):
         with patch('training.cookbook_env.encoder', return_value=SimpleNamespace(renderer=renderer)):
             messages = initial_messages({'prompt': 'Draw a disk', 'seed': 1}, [])
         content = messages[-1]['content']
+        from drawing.agent_contract import drawing_system_prompt
+        prompt = ('Draw a disk\n\nPreview with: python /opt/artsy/render.py --seed 1 '
+                  '--output /workspace/preview --preview < /workspace/program.py')
+        expected = (f"System instructions:\n{drawing_system_prompt(token_limit=None)}"
+                    "\n\nYou have 20 model turns to complete this task. "
+                    "Each response uses one turn. Submit your final output by the last turn."
+                    f"\n\nTask:\n{prompt}")
+        self.assertEqual(content, expected)
         self.assertIn('20 model turns', content)
         self.assertIn('Submit your final output by the last turn.', content)
         self.assertNotIn('20 bash', content)
@@ -461,3 +471,97 @@ class RolloutPromptTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class RolloutResourceTests(unittest.IsolatedAsyncioTestCase):
+    def test_invalid_capacity_is_rejected(self):
+        for capacity, group in ((0, 1), (1, 0), (1, 2)):
+            with self.subTest(capacity=capacity, group=group), self.assertRaises(ValueError):
+                configure_concurrency(capacity, group)
+
+    async def test_cancelled_start_waits_for_docker_then_removes_container(self):
+        import threading
+        from training.cookbook_env import _docker
+        configure_concurrency(1, 1)
+        started, finish = threading.Event(), threading.Event()
+        calls = []
+        def run(argv, **kwargs):
+            calls.append(argv)
+            if argv[1] == 'run':
+                started.set()
+                finish.wait(2)
+            return response()
+        session = DockerSession({'id': 'x'}, Path('/tmp'), MagicMock())
+        with patch('training.cookbook_env._run', side_effect=run):
+            task = asyncio.create_task(session.start())
+            await asyncio.to_thread(started.wait, 2)
+            task.cancel()
+            await asyncio.sleep(0)
+            self.assertFalse(task.done())
+            finish.set()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertEqual([call[1] for call in calls], ['run', 'rm'])
+        self.assertIsNone(session.container)
+        self.assertFalse(session._owns_slot)
+
+    async def test_failed_start_removes_named_container_and_releases_slot(self):
+        configure_concurrency(1, 1)
+        session = DockerSession({'id': 'x'}, Path('/tmp'), MagicMock())
+        with patch('training.cookbook_env._docker', new=AsyncMock(side_effect=[
+                response(1, stderr=b'failure'), response()])) as docker:
+            with self.assertRaises(RuntimeError):
+                await session.start()
+            self.assertEqual(docker.await_args_list[1].args[0][0], 'rm')
+            self.assertFalse(session._owns_slot)
+
+    def test_subprocess_output_is_bounded_and_drained(self):
+        from training.cookbook_env import _run, MAX_OUTPUT
+        result = _run([sys.executable, '-c',
+                       'import sys; sys.stdout.buffer.write(b"x" * 13000000); '
+                       'sys.stderr.buffer.write(b"y" * 13000000)'])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(result.stdout), MAX_OUTPUT)
+        self.assertEqual(len(result.stderr), MAX_OUTPUT)
+
+    async def test_failed_group_construction_releases_reservation(self):
+        configure_concurrency(2, 2)
+        spec = {'id': 'x', 'prompt': 'disk', 'seed': 1}
+        first = ArtsyGroupBuilder(spec, 2, 1, Path('/tmp'), MagicMock(), 128, 32768, False)
+        second = ArtsyGroupBuilder(spec, 2, 1, Path('/tmp'), MagicMock(), 128, 32768, False)
+        with patch('training.cookbook_env.initial_messages', side_effect=ValueError('bad prompt')):
+            for builder in (first, second):
+                with self.assertRaisesRegex(ValueError, 'bad prompt'):
+                    await asyncio.wait_for(builder.make_envs(), timeout=1)
+                self.assertFalse(builder._owns_group_slot)
+                self.assertEqual(builder.sessions, [])
+
+    async def test_group_size_must_match_reservation(self):
+        configure_concurrency(2, 2)
+        builder = ArtsyGroupBuilder({'id': 'x'}, 1, 1, Path('/tmp'), MagicMock(), 128, 32768, False)
+        with self.assertRaisesRegex(ValueError, 'Group size'):
+            await builder.make_envs()
+
+    async def test_cancelled_scorer_is_removed(self):
+        configure_concurrency(1, 1)
+        session = DockerSession({'id': 'x', 'prompt': 'draw', 'seed': 1}, Path('/tmp'), MagicMock())
+        session.container = 'workspace'
+        session._read_source = AsyncMock(return_value='print(1)')
+        session._read_refusal = AsyncMock(return_value=None)
+        session._judge = AsyncMock(return_value={'malicious': False})
+        started = asyncio.Event()
+        calls = []
+        async def docker(argv, **kwargs):
+            calls.append(argv)
+            if argv[0] == 'run':
+                started.set()
+                await asyncio.Future()
+            return response()
+        with tempfile.TemporaryDirectory() as root, patch('training.cookbook_env._docker', side_effect=docker):
+            session.directory = Path(root)
+            task = asyncio.create_task(session.grade([]))
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        name = calls[0][calls[0].index('--name') + 1]
+        self.assertEqual(calls[1], ['rm', '-f', name])

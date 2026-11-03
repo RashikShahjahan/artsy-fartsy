@@ -23,11 +23,14 @@ from drawing.config import IMAGE_SIZE, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
 from training.data import ROOT, digest
 from training.sft import batches
+from training.run_store import atomic_json, atomic_text, contents, recover_jsonl_tail, run_lock
 
 ALGORITHM = "tinker-cookbook-rlhf-v4"
 PROVENANCE_FILES = (
     "docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
     "drawing/agent_contract.py", "drawing/eval_specs.py",
+    "drawing/render_contract.py", "drawing/model_profiles.py", "drawing/vision.py",
+    "training/run_store.py",
     "runtime/artcanvas.py", "runtime/cairo.py", "runtime/requirements.txt",
     "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/mini.yaml",
     "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
@@ -171,7 +174,38 @@ def seed_continuation(output_dir, config):
         source = config["continuation"]
         record = {"name": "continuation", "batch": source["start_step"],
                   "state_path": source["state_path"], "sampler_path": source["sampler_path"]}
-        path.write_text(json.dumps(record) + "\n")
+        atomic_text(path, json.dumps(record) + "\n")
+
+
+def validate_resume(output_dir, config, total, *, finalize=False):
+    """Reject unrelated or malformed histories and recover a torn final append."""
+    path = output_dir / "checkpoints.jsonl"
+    if not finalize and (output_dir / "final.json").exists():
+        raise ValueError("Run is already finalized")
+    if not path.exists():
+        if finalize:
+            raise ValueError("Missing checkpoint history")
+        if any(p.name != "training-manifest.json" for p in contents(output_dir)):
+            raise ValueError("Output has artifacts but no checkpoint history")
+        return
+
+    def validate_records(records):
+        continuation = config.get("continuation")
+        if continuation:
+            first = records[0]
+            if (first.get("name") != "continuation" or first.get("batch") != continuation["start_step"]
+                    or any(first.get(k) != continuation[k] for k in ("state_path", "sampler_path"))):
+                raise ValueError("Continuation checkpoint does not match its source")
+        previous = -1
+        for record in records:
+            step = record.get("batch")
+            if (type(step) is not int or step < previous or step > total
+                    or not isinstance(record.get("state_path"), str)
+                    or not record["state_path"].startswith("tinker://")):
+                raise ValueError("Invalid checkpoint history")
+            previous = step
+
+    recover_jsonl_tail(path, validate_records)
 
 
 def make_cookbook_config(args, specs, plan, total):
@@ -247,16 +281,18 @@ def artsy_final_checkpoint(record, plan):
             "sampler_path": record.sampler_path, "config": plan}
 
 
-def write_final_checkpoint(output_dir: Path, plan: dict):
+def write_final_checkpoint(output_dir: Path, plan: dict, total_steps=None):
     """Publish the completed Cookbook checkpoint for Artsy's model catalog."""
     from tinker_cookbook import checkpoint_utils
 
     record = checkpoint_utils.get_last_checkpoint(str(output_dir))
     final = artsy_final_checkpoint(record, plan)
+    if total_steps is not None and final["step"] != total_steps:
+        raise ValueError("Final checkpoint does not match the planned total steps")
     destination = output_dir / "final.json"
     if destination.exists() and json.loads(destination.read_text()) != final:
         raise ValueError("An incompatible final.json already exists in the output directory")
-    destination.write_text(json.dumps(final, indent=2) + "\n")
+    atomic_json(destination, final)
     return final
 
 
@@ -266,9 +302,13 @@ async def train(args, specs, plan, total):
 
     configure_concurrency(args.max_samples, args.group_size)
     config = make_cookbook_config(args, specs, plan, total)
-    await cookbook.main(config)
+    from drawing.dataset_client import close_chat_clients
+    try:
+        await cookbook.main(config)
+    finally:
+        await close_chat_clients()
     # Retain Artsy's model-catalog format for make serve, evaluation and the UI.
-    final = write_final_checkpoint(args.output_dir, plan)
+    final = write_final_checkpoint(args.output_dir, plan, total)
     print(json.dumps(final, indent=2))
 
 
@@ -322,17 +362,19 @@ def main(argv=None):
         if args.dry_run:
             p.error("--finalize-only and --dry-run are mutually exclusive")
         try:
-            recorded = json.loads((args.output_dir / "training-manifest.json").read_text())
-            config = recorded["config"]
-            if not isinstance(config, dict) or config.get("algorithm") != ALGORITHM:
-                raise ValueError("Output directory does not contain a compatible Cookbook run")
-            print(json.dumps(write_final_checkpoint(args.output_dir, config), indent=2))
+            with run_lock(args.output_dir):
+                recorded = json.loads((args.output_dir / "training-manifest.json").read_text())
+                config = recorded["config"]
+                if not isinstance(config, dict) or config.get("algorithm") != ALGORITHM:
+                    raise ValueError("Output directory does not contain a compatible Cookbook run")
+                validate_resume(args.output_dir, config, recorded["total_steps"], finalize=True)
+                print(json.dumps(write_final_checkpoint(args.output_dir, config, recorded["total_steps"]), indent=2))
         except (OSError, ValueError, KeyError, RuntimeError) as error:
             p.error(str(error))
         return 0
     if (any(value < 1 for value in (args.epochs, args.batch_size, args.max_samples,
                                    args.save_every, args.max_length))
-            or args.group_size < 2 or args.max_steps == 0 or args.max_steps < -1
+            or args.group_size < 2 or args.max_samples < args.group_size or args.max_steps == 0 or args.max_steps < -1
             or (args.limit is not None and args.limit < 1)
             or not 0 <= args.seed <= 2**32 - 1 or args.max_length > MODEL_CONTEXT_WINDOW
             or (args.max_tokens is not None and not 1 <= args.max_tokens <= args.max_length)
@@ -359,18 +401,22 @@ def main(argv=None):
             p.error("Set ARTSY_SAFETY_JUDGE_MODEL/URL and ARTSY_CODE_SAFETY_JUDGE_MODEL/URL")
     if args.output_dir.resolve() == args.init_checkpoint.resolve().parent:
         p.error("RL output must differ from the initial SFT checkpoint directory")
-    manifest = args.output_dir / "training-manifest.json"
-    if args.output_dir.exists() and any(args.output_dir.iterdir()):
-        if not manifest.is_file() or (not args.continue_from and not (args.output_dir / "checkpoints.jsonl").is_file()):
-            p.error("Output is not a resumable Cookbook run; choose a new directory")
-        if json.loads(manifest.read_text()) != plan:
-            p.error("Training configuration changed; resume with the original settings")
-    else:
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        manifest.write_text(json.dumps(plan, indent=2) + "\n")
-    seed_continuation(args.output_dir, config)
-    _build_sandbox_image()
-    asyncio.run(train(args, specs, config, total))
+    try:
+        with run_lock(args.output_dir):
+            manifest = args.output_dir / "training-manifest.json"
+            if contents(args.output_dir):
+                if not manifest.is_file():
+                    raise ValueError("Output is not a resumable Cookbook run; choose a new directory")
+                if json.loads(manifest.read_text()) != plan:
+                    raise ValueError("Training configuration changed; resume with the original settings")
+                validate_resume(args.output_dir, config, total)
+            else:
+                atomic_json(manifest, plan)
+            seed_continuation(args.output_dir, config)
+            _build_sandbox_image()
+            asyncio.run(train(args, specs, config, total))
+    except (OSError, ValueError, KeyError, RuntimeError) as error:
+        p.error(str(error))
     return 0
 
 

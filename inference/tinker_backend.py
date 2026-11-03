@@ -9,7 +9,7 @@ class TinkerBackend:
     def __init__(self, model_id, revision, image_size, model_path=None, *, sampling_model_id=None,
                  renderer_name=RENDERER):
         import tinker
-        from transformers import AutoImageProcessor, AutoTokenizer
+        from drawing.model_profiles import load_metadata, resolve_model
         from tinker_cookbook import renderers
 
         if os.getenv('ARTSY_DISABLE_THINKING') == '1':
@@ -24,18 +24,8 @@ class TinkerBackend:
         self.client = self.service.create_sampling_client(
             base_model=self.sampling_model_id,
             **({"model_path": model_path} if model_path else {}))
-        if renderer_name.startswith('kimi_'):
-            # Use the pinned vendor tokenizer rather than HF's generic backend;
-            # Kimi's tool tokens and TypeScript declarations require this class.
-            from transformers.dynamic_module_utils import get_class_from_dynamic_module
-            tokenizer_class = get_class_from_dynamic_module(
-                'tokenization_kimi.TikTokenTokenizer', model_id, revision=revision)
-            self.tokenizer = tokenizer_class.from_pretrained(model_id, revision=revision)
-            self.image_processor = AutoImageProcessor.from_pretrained(
-                model_id, revision=revision, trust_remote_code=True)
-        else:
-            self.tokenizer = AutoTokenizer.from_pretrained(model_id, revision=revision)
-            self.image_processor = AutoImageProcessor.from_pretrained(model_id, revision=revision)
+        self.tokenizer, self.image_processor = load_metadata(model_id, revision)
+        self.vision = resolve_model(model_id)['vision']
         self.image_size = image_size
         self.renderer = renderers.get_renderer(
             renderer_name, self.tokenizer, image_processor=self.image_processor)
@@ -50,21 +40,10 @@ class TinkerBackend:
         return backend
 
     def prepare_image(self, image):
-        """Apply the training-compatible Qwen resize before retaining request pixels."""
-        if getattr(self, 'native_tools', False):
-            image = image.convert('RGB')
-            edge = int(self.image_size['longest_edge'] ** 0.5)
-            image.thumbnail((edge, edge))
-            return image
-        from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
-        height, width = smart_resize(
-            image.height, image.width,
-            factor=self.image_processor.patch_size * self.image_processor.merge_size,
-            min_pixels=self.image_size["shortest_edge"],
-            max_pixels=self.image_size["longest_edge"])
-        if image.mode != "RGB":
-            image = image.convert("RGB")
-        return image if image.size == (width, height) else image.resize((width, height))
+        """Apply the model profile's shared image preparation."""
+        from drawing.vision import prepare_image
+        return prepare_image(image, self.image_processor, self.image_size,
+                             getattr(self, 'vision', 'qwen'))
 
     def render(self, messages, tools):
         from tinker_cookbook.renderers import ToolCall

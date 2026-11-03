@@ -2,7 +2,7 @@ PYTHON ?= .venv/bin/python
 EVAL_PYTHON ?= $(if $(wildcard .eval-venv/bin/python),.eval-venv/bin/python,$(PYTHON))
 ARGS ?=
 
-.PHONY: ui tts-setup serve render draw eval eval-base dataset grpo test test-eval check
+.PHONY: ui tts-setup serve render draw eval eval-base dataset grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
 ui:
 	$(PYTHON) -m ui.server $(ARGS)
 
@@ -34,5 +34,22 @@ test:
 test-eval:
 	$(EVAL_PYTHON) -m unittest discover -s evaluation -p 'test_*.py' -v $(ARGS)
 
-check:
-	$(PYTHON) -m compileall -q drawing inference evaluation training tests $(ARGS)
+test-ui:
+	$(PYTHON) -m unittest discover -s ui -p 'test_*.py' -v $(ARGS)
+
+test-js:
+	node --test ui/test_*.cjs
+
+requirements-sync:
+	$(PYTHON) scripts/sync_requirements.py
+
+requirements-check:
+	$(PYTHON) scripts/sync_requirements.py --check
+
+syntax:
+	$(PYTHON) -m compileall -q drawing inference evaluation runtime training ui tests scripts
+	@for file in ui/*.js ui/*.cjs; do node --check "$$file" || exit; done
+
+check: requirements-check syntax test test-ui test-eval test-js
+
+test-all: check

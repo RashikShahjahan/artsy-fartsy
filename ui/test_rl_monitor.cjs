@@ -185,7 +185,7 @@ test("unchanged poll data and tile selections keep thumbnail elements mounted", 
 });
 
 test("all prompts are searchable and paginated independently of the rollout cap", () => {
-  const {nodes, state, renderPrompts} = fixture();
+  const {nodes, state, renderPrompts} = fixture(undefined, "prompts", false, true);
   state.prompts = Array.from({length: 103}, (_, index) => ({
     index: index + 1,
     id: "prompt-" + index,

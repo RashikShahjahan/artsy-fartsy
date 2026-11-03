@@ -23,6 +23,7 @@ HELP = """Python dataset generation
   --drafts-from DIR     Reuse unmodified model drafts (repeatable)
   --candidates N        Programs per prompt (default: 2)
   --workers N           Independent prompts processed concurrently, 1–8
+  --renderer BACKEND    docker (default), or local for explicitly trusted code
   --max-tokens N        Optional teacher output-token limit (default: no limit)
   --prompt-model ID     Prompt-writing LLM (defaults to teacher model)
   --prompt-url URL      Prompt-writing endpoint (defaults to teacher URL)
@@ -45,7 +46,7 @@ Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY.
 Generation writes every candidate to candidates.jsonl without automated content filtering;
 manually inspect and export accepted.jsonl before SFT.
 Repeating the same command resumes checkpointed prompts and candidate records.
-Generated Python runs locally with your current permissions, as with the drawing CLI.
+Generated Python runs in isolated Docker containers unless --renderer local is selected.
 The prompt plan is saved before rendering and reused on resume."""
 
 
@@ -84,6 +85,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", default="42")
     parser.add_argument("--input")
     parser.add_argument("--workers")
+    parser.add_argument("--renderer", choices=("docker", "local"), default="docker")
     parser.add_argument("--drafts-from", action="append")
     parser.add_argument("--candidates")
     parser.add_argument("--max-tokens", default=MAX_RESPONSE_TOKENS)
@@ -112,7 +114,7 @@ def _read_specs(path: str) -> list[dict[str, Any]]:
     return rows
 
 
-async def main(argv: list[str] | None = None) -> int:
+async def _main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.help:
         print(HELP)
@@ -262,12 +264,23 @@ async def main(argv: list[str] | None = None) -> int:
         "draftsFrom": args.drafts_from, "teacher": teacher,
         "promptGenerator": prompt_generation,
         "onRecord": lambda record: print(f"{record['id']} {record['status']}: {record['reason']}", file=sys.stderr)}
+    from .renderer import LocalRenderer, DockerRenderer
+    options["renderer"] = LocalRenderer() if args.renderer == "local" else DockerRenderer()
+    options["executionBackend"] = args.renderer
     from .dataset import generate_dataset
     summary = await generate_dataset({**options, "specs": specs})
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if summary.get("complete") is False or summary.get("infrastructureErrors"):
         return 1
     return 0
+
+
+async def main(argv: list[str] | None = None) -> int:
+    from .dataset_client import close_chat_clients
+    try:
+        return await _main(argv)
+    finally:
+        await close_chat_clients()
 
 
 def cli() -> None:

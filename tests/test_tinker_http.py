@@ -3,6 +3,19 @@ import json
 import os
 import unittest
 from unittest.mock import patch
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def endpoint(client, response):
+    requests = []
+    def respond(request):
+        requests.append(request)
+        return response
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+        client.http_client = http
+        yield requests
+
 
 import httpx
 
@@ -18,9 +31,9 @@ class TinkerHTTPTests(unittest.IsolatedAsyncioTestCase):
         response = httpx.Response(200, json={"choices": [{
             "message": {"content": '{"score":1,"reason":"Matches"}'}, "finish_reason": "stop"}]})
         client = chat_client({"model": DEFAULT_DATA_MODEL, "baseUrl": TINKER_MODEL_URL, "apiKey": "test"})
-        with patch("httpx.post", return_value=response) as post:
+        async with endpoint(client, response) as requests:
             await client.complete(messages, 2048)
-        self.assertEqual(json.loads(post.call_args.kwargs["content"])["messages"], messages)
+        self.assertEqual(json.loads(requests[0].content)["messages"], messages)
 
     async def test_tinker_auth_reasoning_and_final_answer(self):
         response = httpx.Response(200, json={
@@ -28,16 +41,16 @@ class TinkerHTTPTests(unittest.IsolatedAsyncioTestCase):
                                      "reasoning_content": "private reasoning"},
                          "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 20}})
-        with patch.dict(os.environ, {"TINKER_API_KEY": "tinker-test"}), \
-             patch("httpx.post", return_value=response) as post:
+        with patch.dict(os.environ, {"TINKER_API_KEY": "tinker-test"}):
             client = chat_client({"model": DEFAULT_DATA_MODEL, "baseUrl": TINKER_MODEL_URL})
+        async with endpoint(client, response) as requests:
             result = await client.complete([{"role": "user", "content": "Check code"}], 8192)
         self.assertEqual(result["text"], '{"ok":true}')
         self.assertEqual(result["reasoning"], "private reasoning")
-        body = json.loads(post.call_args.kwargs["content"])
+        body = json.loads(requests[0].content)
         self.assertTrue(body["separate_reasoning"])
         self.assertEqual(body["reasoning_effort"], "low")
-        self.assertEqual(post.call_args.kwargs["headers"]["Authorization"], "Bearer tinker-test")
+        self.assertEqual(requests[0].headers["Authorization"], "Bearer tinker-test")
         self.assertNotIn("tinker-test", repr(client))
 
     async def test_truncation_and_provider_errors_are_sanitized(self):
@@ -48,14 +61,15 @@ class TinkerHTTPTests(unittest.IsolatedAsyncioTestCase):
                                                    "finish_reason": "length"}]}), "truncated"),
             (httpx.Response(401, text="echoed-secret"), "HTTP 401"),
         ):
-            with patch("httpx.post", return_value=response), self.assertRaisesRegex(RuntimeError, error) as raised:
-                await client.complete([], 10)
+            async with endpoint(client, response):
+                with self.assertRaisesRegex(RuntimeError, error) as raised:
+                    await client.complete([], 10)
             self.assertNotIn("echoed-secret", str(raised.exception))
 
     async def test_unsupported_images_fail_before_request(self):
         for model in ("zai-org/GLM-5.3-Flash:peft:262144", "deepseek-ai/DeepSeek-V4.1-Flash-1017:peft:262144"):
             client = chat_client({"model": model, "baseUrl": TINKER_MODEL_URL, "apiKey": "test"})
-            with patch("httpx.post") as post, self.assertRaisesRegex(ValueError, "does not support image"):
+            with patch("httpx.AsyncClient") as post, self.assertRaisesRegex(ValueError, "does not support image"):
                 await client.complete([{"role": "user", "content": [
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64,"}}]}], 100)
             post.assert_not_called()

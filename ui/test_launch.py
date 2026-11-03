@@ -13,8 +13,8 @@ from ui import launch, server
 
 class LauncherTests(unittest.TestCase):
     def test_eval_command_has_unique_output_and_rejects_injected_flags(self):
-        with tempfile.TemporaryDirectory() as folder, patch.object(launch, "ROOT", Path(folder)):
-            prompt = Path(folder) / "prompts.jsonl"
+        with tempfile.TemporaryDirectory() as folder, patch.object(launch, "ROOT", Path(folder).resolve()):
+            prompt = Path(folder).resolve() / "prompts.jsonl"
             prompt.write_text("{}\n")
             argv, output = launch.command("eval", {
                 "dataset": "prompts.jsonl", "model": "Qwen/Qwen3.6-35B3A",
@@ -24,7 +24,7 @@ class LauncherTests(unittest.TestCase):
             self.assertIn("--execution-only", argv)
             self.assertIn(str(prompt), argv)
             self.assertEqual(argv[-2:], ["--output", str(output)])
-            self.assertEqual(output, Path(folder) / ("eval-results/ui-eval-" + "a" * 32))
+            self.assertEqual(output, Path(folder).resolve() / ("eval-results/ui-eval-" + "a" * 32))
             for invalid in [
                 {"unsupported": "anything"},
                 {"model": "--help"},
@@ -36,7 +36,7 @@ class LauncherTests(unittest.TestCase):
                     launch.command("eval", invalid, "a" * 32)
 
     def test_training_command_rules(self):
-        with tempfile.TemporaryDirectory() as folder, patch.object(launch, "ROOT", Path(folder)):
+        with tempfile.TemporaryDirectory() as folder, patch.object(launch, "ROOT", Path(folder).resolve()):
             source = Path(folder) / "accepted.jsonl"
             source.write_text("{}\n")
             checkpoint = Path(folder) / "final.json"
@@ -72,7 +72,7 @@ class LauncherTests(unittest.TestCase):
                 launch.command("rl", {"group_size": 1}, "e" * 32)
 
     def test_existing_models_are_discovered_and_checkpoint_types_filtered(self):
-        with tempfile.TemporaryDirectory() as folder, patch.object(launch, "ROOT", Path(folder)):
+        with tempfile.TemporaryDirectory() as folder, patch.object(launch, "ROOT", Path(folder).resolve()):
             root = Path(folder)
             valid = root / "checkpoints" / "sft-good"
             valid.mkdir(parents=True)
@@ -198,3 +198,64 @@ class LauncherTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SupervisorLifecycleTests(unittest.TestCase):
+    def test_restart_reconciles_and_blocks_live_orphan_training(self):
+        import os
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            jobs = root / 'jobs'
+            directory = jobs / ('a' * 32)
+            directory.mkdir(parents=True)
+            record = {'id': 'a' * 32, 'kind': 'rl', 'state': 'running', 'pid': os.getpid()}
+            (directory / 'job.json').write_text(json.dumps(record))
+            with patch.object(launch, 'ROOT', root), patch.object(launch, 'RUNS', jobs):
+                self.assertEqual(launch.get_run(record['id'])['state'], 'interrupted')
+                self.assertEqual(json.loads((directory / 'job.json').read_text())['state'], 'interrupted')
+                with patch.object(launch, 'command', return_value=([sys.executable], root / 'out')):
+                    with self.assertRaisesRegex(RuntimeError, 'already active'):
+                        launch.start('sft', {})
+
+    def test_cancellation_escalates_when_child_ignores_sigterm(self):
+        import os
+        if os.name != 'posix':
+            self.skipTest('POSIX signal handling')
+        from ui.supervisor import Supervisor
+        supervisor = Supervisor(grace_seconds=0.1)
+        child = supervisor.spawn('test', [sys.executable, '-u', '-c',
+            'import signal,time;signal.signal(signal.SIGTERM, signal.SIG_IGN);print("ready",flush=True);time.sleep(30)'],
+            stdout=__import__('subprocess').PIPE)
+        try:
+            self.assertEqual(child.stdout.readline().strip(), b'ready')
+            supervisor.cancel('test')
+            self.assertNotEqual(child.wait(timeout=3), 0)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            child.stdout.close()
+            supervisor.release('test')
+
+    def test_drawing_handle_does_not_block_eval_or_training_launch(self):
+        from unittest.mock import Mock
+        from ui.supervisor import SUPERVISOR
+        drawing_id = 'd' * 32
+        drawing = Mock()
+        drawing.poll.return_value = None
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder).resolve()
+            with patch.object(launch, 'ROOT', root), patch.object(launch, 'RUNS', root / 'jobs'):
+                with SUPERVISOR.lock:
+                    SUPERVISOR.processes[drawing_id] = drawing
+                try:
+                    command = [sys.executable, '-c', 'pass']
+                    with patch.object(launch, 'command', return_value=(command, root / 'out')):
+                        ids = [launch.start(kind, {})['id'] for kind in ('eval', 'sft')]
+                        for ident in ids:
+                            for _ in range(100):
+                                if launch.get_run(ident)['state'] == 'completed':
+                                    break
+                                time.sleep(0.02)
+                            self.assertEqual(launch.get_run(ident)['state'], 'completed')
+                finally:
+                    SUPERVISOR.release(drawing_id)

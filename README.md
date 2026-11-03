@@ -40,9 +40,18 @@ and `.env` are Git-ignored. A fresh checkout does not include training data or
 trained checkpoints. Paths under `datasets/` and `checkpoints/` below refer to
 local artifacts you must generate or supply.
 
-Drawing through the UI, Inspect evaluation, and RL require Docker Engine 24.0.6+
-with Compose 2.22+. Start Docker before those workflows. Dataset generation and
-`drawing.run` execute Python locally and require system Cairo:
+Drawing through the UI, dataset generation, Inspect evaluation, and RL require
+Docker Engine 24.0.6+ with Compose 2.22+. Start Docker before those workflows.
+Build the isolated renderer image before dataset generation or `drawing.run`:
+
+```sh
+docker build -f evaluation/Dockerfile -t artsy-rl-runtime:latest .
+```
+
+Rebuild this image after changes to the runtime, renderer, or rendering contract.
+`ARTSY_RENDER_IMAGE` can select another locally built image; rendering never pulls
+an image automatically. For explicitly trusted programs, `--renderer local` on
+`drawing.run` or dataset generation uses host permissions and requires system Cairo:
 
 ```sh
 # macOS
@@ -247,7 +256,7 @@ Configure the prompt writer and vision-capable teacher using `.env.example`:
 # Prompt writing only: paid API calls and checkpoint writes, no rendering.
 make dataset ARGS="--prompts-only --count 20 --difficulty mixed --output datasets/my-prompts"
 
-# Collect two teacher candidates per ordinary prompt, with local rendering.
+# Collect two teacher candidates per ordinary prompt, with isolated Docker rendering.
 make dataset ARGS="--count 100 --harmful-count 10 --malicious-code-count 10 --output datasets/my-run"
 
 # Inspect all prompts and candidates, then export approved SFT records.
@@ -278,7 +287,9 @@ Provider-exposed reasoning is retained when available.
 
 Generation performs no automated content, safety, quality, or duplicate filtering.
 Parsing, execution budgets, PNG validity, and artifact integrity checks still apply.
-Generated Python runs locally with the CLI user's permissions. All outcomes remain
+Generated Python runs in disposable containers without host mounts, host credentials,
+or network access. `--renderer local` explicitly opts into host execution for
+trusted programs. All outcomes remain
 in `candidates.jsonl`; no train/validation/test splits are assigned automatically.
 
 The output includes prompt plans/checkpoints, `prompts.jsonl`, candidate records,
@@ -345,6 +356,12 @@ exports converted conversations, and `--max-steps 1` limits a hosted smoke run.
 Cosine resumes must retain the original schedule length; constant-rate runs can
 extend epochs/steps. Changing the loss policy or conversion version requires a
 new run.
+
+Training output directories have exclusive process locks. SFT resumes require the
+latest checkpoint in its original output directory; completed runs cannot be
+resumed in place. Interrupted final sampler export can be recovered by resuming
+the latest checkpoint even when all optimizer steps are complete. Manifests,
+checkpoint metadata, and final exports are published atomically.
 
 Outputs include `training-manifest.json`, `metrics.jsonl`, checkpoint JSON files
 with remote state paths, and `final.json` with training-state and sampler paths.
@@ -444,7 +461,9 @@ make render ARGS='examples/transforms.py --prompt "Draw twelve golden shapes" --
 20 operations, a ten-minute episode deadline, a 60-second render timeout,
 262,144 generated tokens, 64 KiB source, and an 8 MiB PNG. Adapters report token
 usage through `charge_tokens`; the environment does not tokenize responses.
-`ARTSY_PYTHON` overrides the local render interpreter.
+The default backend is the isolated Docker renderer. `--renderer local` selects
+trusted host execution; `ARTSY_PYTHON` overrides its interpreter. Source/PNG
+validation is shared by local execution, Docker execution, and evaluation.
 
 Each reset creates a new episode directory with configuration, ordered trajectory,
 and state. Successful submissions add source/image files and hashes; previews are
@@ -455,10 +474,10 @@ but Cairo and font differences can affect pixels across hosts.
 
 ```sh
 make check
-make test
-make test-eval
-.venv/bin/python -m unittest ui.test_server ui.test_launch ui.test_preferences ui.test_rl_monitor
-node --test ui/test_trace.cjs ui/test_rl_monitor.cjs
+# Individual suites: make test, make test-ui, make test-eval, make test-js
+
+# Optional local Docker boundary checks; no hosted calls.
+ARTSY_RENDERER_DOCKER_TEST=1 .venv/bin/python -m unittest tests.test_docker_renderer
 ```
 
 `make` uses `.venv/bin/python` by default. Evaluation targets prefer `.eval-venv`
@@ -466,7 +485,13 @@ when present; override with `PYTHON` or `EVAL_PYTHON`. Pass CLI options through
 `ARGS`. Tests exercise rendering, datasets, trajectory conversion, training plans,
 judge parsing, Inspect scoring, and UI behavior using fixtures/mocks; no paid
 model calls or running Docker daemon are required. Rendering tests need Cairo and
-Python dependencies for the modules under test.
+Python dependencies for the modules under test. The fake teacher CLI test binds
+a loopback socket. The Docker boundary suite is skipped unless explicitly enabled.
+
+`pyproject.toml` is the source of dependency pins and role membership. After
+editing it, run `make requirements-sync` and `uv lock`; `make check` verifies the
+generated requirements, compiles Python and JavaScript, and runs all four suites.
+Evaluation and TTS retain their separate Python 3.12 environments.
 
 Further reading: [pipeline diagrams](docs/pipeline-diagrams.md),
 [benchmark and review](docs/benchmark.md), [RL continuation](docs/grpo-continuation.md),

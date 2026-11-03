@@ -30,14 +30,15 @@ class ModelSelectionTests(unittest.TestCase):
                             self.assertEqual(request['max_turns'], 10)
                             folder = root / f'run-{index}-{parent or "new"}'
                             folder.mkdir()
-                            with patch.object(server.subprocess, 'run') as run:
-                                run.return_value.returncode = 0
+                            with patch.object(server.SUPERVISOR, 'spawn') as run:
+                                run.return_value.wait.return_value = 0
+                                run.return_value.pid = 12345
                                 server.run_job(folder, request)
                             environment = run.call_args.kwargs['env']
                             expected = (server.OPENROUTER_MODEL_URL if model.get('direct')
                                         else 'http://127.0.0.1:8080/v1')
                             self.assertEqual(environment['ARTSY_MODEL_URL'], expected)
-                            self.assertIn(model['id'], run.call_args.args[0])
+                            self.assertIn(model['id'], run.call_args.args[1])
 
     def test_unknown_and_unavailable_models_are_rejected(self):
         for model in ('other/model', 'Qwen/Qwen3.5-4B', '', None, []):

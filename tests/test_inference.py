@@ -279,6 +279,8 @@ class CompletionTest(unittest.TestCase):
                     **profile,
                 }
                 app.state.samplers = {}
+                from inference.model_catalog import ModelCatalogCache
+                app.state.model_catalog_cache = ModelCatalogCache()
                 with patch('inference.server.model_catalog', return_value=[entry]), \
                      patch('inference.tinker_backend.TinkerBackend') as backend_class:
                     sampler = backend_class.return_value
@@ -532,3 +534,40 @@ class CompletionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class VisionParityTest(unittest.TestCase):
+    def test_inference_training_and_judge_prepare_identical_pixels(self):
+        import tempfile
+        from pathlib import Path
+        from PIL import Image, ImageDraw
+        from drawing.tinker_client import TinkerChatClient
+        from inference.tinker_backend import TinkerBackend
+        from training.data import digest
+        from training.sft import DrawingEncoder
+
+        image = Image.new('RGBA', (113, 67), 'blue')
+        ImageDraw.Draw(image).rectangle((7, 9, 39, 40), fill='red')
+        stream = io.BytesIO()
+        image.save(stream, format='PNG')
+        data = stream.getvalue()
+        processor = SimpleNamespace(patch_size=14, merge_size=2)
+        backend = TinkerBackend.__new__(TinkerBackend)
+        backend.image_processor = processor
+        from drawing.config import IMAGE_SIZE
+        backend.image_size = IMAGE_SIZE
+        backend.native_tools = True
+        expected = backend.prepare_image(image)
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'preview.png'
+            path.write_bytes(data)
+            actual = DrawingEncoder(Mock(), image_processor=processor).preview(
+                {'image': str(path), 'imageHash': digest(data)})['image']
+        judge = TinkerChatClient(model=MODEL_ID)
+        judge.image_processor = processor
+        judge.renderer = Mock()
+        judge._prompt([{'role': 'user', 'content': [
+            {'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + base64.b64encode(data).decode()}}]}])
+        judge_image = judge.renderer.build_generation_prompt.call_args.args[0][0]['content'][0]['image']
+        for result in (actual, judge_image):
+            self.assertEqual(result.size, expected.size)
+            self.assertEqual(result.tobytes(), expected.tobytes())

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import LIMITS, MODEL_CONTEXT_WINDOW
-from .renderer import LocalRenderer, RUNTIME_VERSION, validate_png
+from .renderer import DockerRenderer, RenderBackend, RUNTIME_VERSION, validate_png
 
 ENVIRONMENT_CONFIG = {
     "version": 1,
@@ -40,14 +40,14 @@ def _sha256(value: bytes) -> str:
 class DrawingEnvironment:
     """Store episode state and enforce calls, previews, tokens, and deadlines."""
 
-    def __init__(self, directory: str | os.PathLike[str], renderer: Any | None = None,
+    def __init__(self, directory: str | os.PathLike[str], renderer: RenderBackend | None = None,
                  config: dict[str, Any] | None = None):
         self.artifact_root = Path(directory)
         self.config = dict(ENVIRONMENT_CONFIG if config is None else config)
         if any(not isinstance(self.config.get(key), int) or isinstance(self.config.get(key), bool)
                or not 1 <= self.config[key] <= 4096 for key in ("width", "height")):
             raise ValueError("Invalid configured canvas dimensions")
-        self.renderer = renderer if renderer is not None else LocalRenderer(seconds=self.config["renderSeconds"])
+        self.renderer = renderer if renderer is not None else DockerRenderer(seconds=self.config["renderSeconds"])
         self.source = ""
         self.seed = 0
         self.prompt = ""

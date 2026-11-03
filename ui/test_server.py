@@ -168,8 +168,9 @@ class JobTests(unittest.TestCase):
                         server.generation_request({**body, **changes})
             target = Path(folder) / 'run'
             target.mkdir()
-            with patch.object(server.subprocess, 'run') as run:
-                run.return_value.returncode = 0
+            with patch.object(server.SUPERVISOR, 'spawn') as run:
+                run.return_value.wait.return_value = 0
+                run.return_value.pid = 12345
                 server.run_job(target, request)
             environment = run.call_args.kwargs['env']
             self.assertEqual(environment['ARTSY_MODEL_URL'], 'http://127.0.0.1:8080/v1')
@@ -214,15 +215,14 @@ class JobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             request = {'prompt': "draw 'a'; $(anything)", 'seed': 42, 'model': 'Qwen/Qwen3.5-4B'}
-            with patch.object(server.subprocess, 'run') as run:
-                run.return_value.returncode = 0
-                server.ACTIVE = 'test'
+            with patch.object(server.SUPERVISOR, 'spawn') as run:
+                run.return_value.wait.return_value = 0
+                run.return_value.pid = 12345
                 server.run_job(directory, request)
-            args = run.call_args.args[0]
+            args = run.call_args.args[1]
             self.assertEqual(args[-3:], [request['prompt'], '42', request['model']])
             self.assertFalse(run.call_args.kwargs.get('shell', False))
             self.assertEqual(json.loads((directory / 'job.json').read_text())['state'], 'completed')
-            self.assertIsNone(server.ACTIVE)
 
     def test_studio_models_and_direct_routing(self):
         self.assertEqual([model['label'] for model in server.model_catalog()],
@@ -232,8 +232,9 @@ class JobTests(unittest.TestCase):
             self.assertEqual(server.generation_request({
                 'prompt': 'circle', 'seed': 42, 'model': base})['model'], base)
         for model in server.DIRECT_MODELS:
-            with tempfile.TemporaryDirectory() as temp, patch.object(server.subprocess, 'run') as run:
-                run.return_value.returncode = 0
+            with tempfile.TemporaryDirectory() as temp, patch.object(server.SUPERVISOR, 'spawn') as run:
+                run.return_value.wait.return_value = 0
+                run.return_value.pid = 12345
                 server.run_job(Path(temp), {'prompt': 'circle', 'seed': 42, 'model': model['id']})
                 env = run.call_args.kwargs['env']
                 self.assertEqual(env['ARTSY_MODEL_URL'], server.OPENROUTER_MODEL_URL)
@@ -280,14 +281,93 @@ class JobTests(unittest.TestCase):
     def test_failure_is_recorded(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
-            with patch.object(server.subprocess, 'run', side_effect=OSError('missing Python')):
-                server.ACTIVE = 'test'
+            with patch.object(server.SUPERVISOR, 'spawn', side_effect=OSError('missing Python')):
                 server.run_job(directory, {'prompt': 'circle', 'seed': 0, 'model': 'Qwen/Qwen3.5-4B'})
             status = json.loads((directory / 'job.json').read_text())
             self.assertEqual(status['state'], 'failed')
             self.assertEqual(status['error'], 'missing Python')
-            self.assertIsNone(server.ACTIVE)
 
 
 if __name__ == '__main__':
     unittest.main()
+
+class DrawingRecoveryTests(unittest.TestCase):
+    def test_restart_marks_interrupted_and_blocks_live_orphan(self):
+        import os
+        with tempfile.TemporaryDirectory() as temp, patch.object(server, 'JOBS', Path(temp)):
+            directory = Path(temp) / ('a' * 32)
+            directory.mkdir()
+            (directory / 'job.json').write_text(json.dumps({'state': 'running', 'pid': os.getpid()}))
+            self.assertEqual(server.drawing_status(directory)['state'], 'interrupted')
+            self.assertEqual(json.loads((directory / 'job.json').read_text())['state'], 'interrupted')
+            self.assertTrue(server.drawing_busy())
+            (directory / 'job.json').write_text(json.dumps({'state': 'running', 'pid': 99999999}))
+            self.assertEqual(server.drawing_status(directory)['state'], 'interrupted')
+            self.assertFalse(server.drawing_busy())
+
+    def test_cancel_marks_owned_drawing_stopping(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as temp, patch.object(server, 'JOBS', Path(temp)):
+            ident = 'b' * 32
+            directory = Path(temp) / ident
+            directory.mkdir()
+            (directory / 'job.json').write_text(json.dumps({'state': 'running', 'pid': 123}))
+            handler = object.__new__(server.Handler)
+            handler.path = f'/api/runs/{ident}/cancel'
+            handler.headers = {'Host': f'127.0.0.1:{server.PORT}'}
+            handler.send_json = Mock()
+            with patch.object(server.SUPERVISOR, 'active', return_value=True), \
+                 patch.object(server.SUPERVISOR, 'cancel') as cancel:
+                handler.do_POST()
+            cancel.assert_called_once_with(ident)
+            self.assertEqual(json.loads((directory / 'job.json').read_text())['state'], 'stopping')
+            self.assertEqual(handler.send_json.call_args.args[0]['state'], 'stopping')
+
+    def test_failed_terminal_status_write_releases_drawing_handle(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            request = {'prompt': 'circle', 'seed': 0, 'model': 'Qwen/Qwen3.5-4B'}
+            process = Mock(pid=123)
+            process.wait.return_value = 0
+            original = Path.write_text
+            def write(path, *args, **kwargs):
+                if path.name == 'job.tmp':
+                    raise OSError('disk full')
+                return original(path, *args, **kwargs)
+            with patch.object(server.SUPERVISOR, 'spawn', return_value=process), \
+                 patch.object(server.SUPERVISOR, 'release') as release, \
+                 patch.object(Path, 'write_text', write):
+                with self.assertRaisesRegex(OSError, 'disk full'):
+                    server.run_job(directory, request)
+            release.assert_called_once_with(directory.name)
+
+    def test_cancel_and_completion_preserve_cancelled_status(self):
+        import threading
+        from unittest.mock import Mock
+        finished = threading.Event()
+        with tempfile.TemporaryDirectory() as temp, patch.object(server, 'JOBS', Path(temp)):
+            ident = 'c' * 32
+            directory = Path(temp) / ident
+            directory.mkdir()
+            process = Mock(pid=123)
+            process.wait.side_effect = lambda: (finished.wait(3), -15)[1]
+            request = {'prompt': 'circle', 'seed': 0, 'model': 'Qwen/Qwen3.5-4B'}
+            handler = object.__new__(server.Handler)
+            handler.path = f'/api/runs/{ident}/cancel'
+            handler.headers = {'Host': f'127.0.0.1:{server.PORT}'}
+            handler.send_json = Mock()
+            with patch.object(server.SUPERVISOR, 'spawn', return_value=process), \
+                 patch.object(server.SUPERVISOR, 'active', return_value=True), \
+                 patch.object(server.SUPERVISOR, 'cancel', side_effect=lambda _: finished.set()), \
+                 patch.object(server.SUPERVISOR, 'release'):
+                worker = threading.Thread(target=server.run_job, args=(directory, request))
+                worker.start()
+                for _ in range(100):
+                    if (directory / 'job.json').exists():
+                        break
+                    threading.Event().wait(0.01)
+                handler.do_POST()
+                worker.join(3)
+                self.assertFalse(worker.is_alive())
+            self.assertEqual(json.loads((directory / 'job.json').read_text())['state'], 'cancelled')

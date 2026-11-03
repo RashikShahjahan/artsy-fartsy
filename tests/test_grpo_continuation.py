@@ -142,7 +142,7 @@ class ContinuationTests(unittest.TestCase):
             persisted = json.loads((args.output_dir / 'training-manifest.json').read_text())
             self.assertEqual(persisted['config'], config)
             self.assertEqual(persisted['total_steps'], total)
-            observed.append(json.loads((args.output_dir / 'checkpoints.jsonl').read_text()))
+            observed.append(json.loads((args.output_dir / 'checkpoints.jsonl').read_text().splitlines()[-1]))
 
         with patch.object(grpo, '_build_sandbox_image') as docker, patch.object(grpo, 'train', train):
             self.assertEqual(grpo.main(command), 0)
@@ -151,7 +151,8 @@ class ContinuationTests(unittest.TestCase):
             resumed = dict(name='000005', batch=5, state_path='tinker://interrupted-optimizer',
                            sampler_path='tinker://interrupted-sampler')
             checkpoint = self.args.output_dir / 'checkpoints.jsonl'
-            checkpoint.write_text(json.dumps(resumed) + '\n')
+            with checkpoint.open('a') as out:
+                out.write(json.dumps(resumed) + '\n')
             self.assertEqual(grpo.main(command), 0)
             self.assertEqual(observed[-1], resumed)
             self.assertEqual(docker.call_count, 2)
@@ -161,7 +162,7 @@ class ContinuationTests(unittest.TestCase):
                 grpo.main(altered)
             self.assertEqual(docker.call_count, 2)
             self.assertEqual(len(observed), 2)
-            self.assertEqual(json.loads(checkpoint.read_text()), resumed)
+            self.assertEqual(json.loads(checkpoint.read_text().splitlines()[-1]), resumed)
 
     def test_nested_output_and_abbreviated_options_rejected(self):
         self.args.output_dir = self.origin / 'nested'

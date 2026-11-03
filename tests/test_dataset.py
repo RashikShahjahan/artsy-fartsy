@@ -86,50 +86,49 @@ class DatasetSpecTests(unittest.TestCase):
 
 class DatasetClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_openrouter_preserves_reasoning_without_changing_json_answer(self):
+        import httpx
         from drawing.dataset_client import ChatClient, OPENROUTER_MODEL_URL
         details = [{"type": "reasoning.text", "text": "The circle needs to be larger."},
                    {"type": "reasoning.encrypted", "data": "opaque"}]
         for fields in ({"reasoning": "Review the preview.", "reasoning_details": details},
                        {"reasoning_details": details}, {}):
-            response = json.dumps({"choices": [{"message": {
-                "content": '{"submit":true}', **fields}}]}).encode()
-            with self.subTest(fields=fields), patch("urllib.request.urlopen") as post:
-                result_stream = io.BytesIO(response)
-                result_stream.status = 200
-                post.return_value = result_stream
-                result = await ChatClient("teacher", OPENROUTER_MODEL_URL).complete([], 100)
-                self.assertEqual(result["text"], '{"submit":true}')
-                self.assertEqual(json.loads(post.call_args.args[0].data)["reasoning"],
-                                 {"enabled": True, "exclude": False})
-                if fields:
-                    self.assertEqual(result["reasoning"], fields.get("reasoning", details[0]["text"]))
-                    self.assertEqual(result["reasoning_details"], details)
-                else:
-                    self.assertNotIn("reasoning", result)
+            requests = []
+            def respond(request):
+                requests.append(json.loads(request.content))
+                return httpx.Response(200, json={"choices": [{"message": {
+                    "content": '{"submit":true}', **fields}}]})
+            async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
+                result = await ChatClient("teacher", OPENROUTER_MODEL_URL, http_client=http).complete([], 100)
+            self.assertEqual(result["text"], '{"submit":true}')
+            self.assertEqual(requests[0]["reasoning"], {"enabled": True, "exclude": False})
+            if fields:
+                self.assertEqual(result["reasoning"], fields.get("reasoning", details[0]["text"]))
+                self.assertEqual(result["reasoning_details"], details)
+            else:
+                self.assertNotIn("reasoning", result)
 
-    async def test_openai_chat_protocol_and_credential_redaction(self) -> None:
-        calls: list[dict[str, Any]] = []
-        response = json.dumps({"model": "revision-1", "choices": [{"message": {"content": '{"code":"hello"}'}, "finish_reason": "stop"}],
-                               "usage": {"prompt_tokens": 10, "completion_tokens": 5}}).encode()
-
-        def mock_urlopen(request: Any, timeout: float) -> Any:
-            calls.append({"url": request.full_url, "headers": dict(request.header_items()), "body": json.loads(request.data), "timeout": timeout})
-            result = io.BytesIO(response)
-            result.status = 200
-            return result
-
-        with patch("urllib.request.urlopen", side_effect=mock_urlopen):
+    async def test_openai_chat_protocol_and_credential_redaction(self):
+        import httpx
+        calls = []
+        def respond(request):
+            calls.append(request)
+            return httpx.Response(200, json={"model": "revision-1", "choices": [{"message": {
+                "content": '{"code":"hello"}'}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as http:
             client = chat_client({"model": "teacher", "baseUrl": "http://localhost/v1/", "apiKey": "test-secret"})
+            client.http_client = http
             result = await client.complete([{"role": "user", "content": "draw"}], 100, temperature=0)
-            self.assertEqual(result["model"], "revision-1"); self.assertEqual(result["usage"]["completion_tokens"], 5)
-            self.assertEqual(calls[0]["url"], "http://localhost/v1/chat/completions")
-            self.assertEqual(calls[0]["body"]["max_tokens"], 100)
-            self.assertEqual(calls[0]["body"]["stream"], False)
-            self.assertEqual(calls[0]["body"]["temperature"], 0)
-            self.assertEqual(calls[0]["headers"]["Authorization"], "Bearer test-secret")
+            self.assertEqual(result["model"], "revision-1")
+            self.assertEqual(result["usage"]["completion_tokens"], 5)
+            self.assertEqual(str(calls[0].url), "http://localhost/v1/chat/completions")
+            body = json.loads(calls[0].content)
+            self.assertEqual((body["max_tokens"], body["stream"], body["temperature"]), (100, False, 0))
+            self.assertEqual(calls[0].headers["Authorization"], "Bearer test-secret")
             self.assertNotIn("test-secret", repr(client))
-        unauthorized = urllib.error.HTTPError("http://localhost", 401, "Unauthorized", {}, io.BytesIO(b"test-secret"))
-        with patch("urllib.request.urlopen", side_effect=unauthorized):
+        async with httpx.AsyncClient(transport=httpx.MockTransport(
+                lambda request: httpx.Response(401, text="test-secret"))) as http:
+            client.http_client = http
             with self.assertRaisesRegex(RuntimeError, "Chat endpoint returned HTTP 401") as raised:
                 await client.complete([], 100)
             self.assertNotIn("test-secret", str(raised.exception))

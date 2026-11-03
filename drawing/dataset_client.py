@@ -6,14 +6,22 @@ import asyncio
 import json
 import os
 import re
-import urllib.error
-import urllib.request
+import httpx
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 TINKER_MODEL_URL = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
 OPENROUTER_MODEL_URL = "https://openrouter.ai/api/v1"
 DEFAULT_DATA_MODEL = "thinkingmachines/Inkling:peft:262144"
+_OWNED_CLIENTS = weakref.WeakValueDictionary()
+
+
+async def close_chat_clients() -> None:
+    """Close pools owned by the current run before its event loop shuts down."""
+    loop = asyncio.get_running_loop()
+    await asyncio.gather(*(client.aclose() for client in list(_OWNED_CLIENTS.values())
+                           if client._loop is loop))
 
 
 def supports_image_input(model: str, base_url: str) -> bool:
@@ -59,13 +67,58 @@ class ChatClient:
     timeout_ms: int = 60_000
     max_tokens: int = 2048
 
-    async def complete(self, messages: list[Message], max_tokens: int | None = None, *, temperature: float | None = None) -> Completion:
-        try:
-            return await asyncio.wait_for(asyncio.to_thread(self._complete, messages, max_tokens, temperature), self.timeout_ms / 1000)
-        except asyncio.TimeoutError:
-            raise RuntimeError("Chat endpoint request timed out") from None
+    http_client: httpx.AsyncClient | None = field(default=None, repr=False)
+    _owns_client: bool = field(default=False, init=False, repr=False)
+    _loop: Any = field(default=None, init=False, repr=False)
 
-    def _complete(self, messages: list[Message], max_tokens: int | None, temperature: float | None = None) -> Completion:
+    async def aclose(self) -> None:
+        if self.http_client is not None and self._owns_client:
+            await self.http_client.aclose()
+            self.http_client = None
+            self._owns_client = False
+            _OWNED_CLIENTS.pop(id(self), None)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        await self.aclose()
+
+    async def complete(self, messages: list[Message], max_tokens: int | None = None, *, temperature: float | None = None) -> Completion:
+        payload = self._request_body(messages, max_tokens, temperature)
+        if self.http_client is None:
+            self.http_client = httpx.AsyncClient(
+                timeout=self.timeout_ms / 1000, follow_redirects=False,
+                limits=httpx.Limits(max_connections=16, max_keepalive_connections=8))
+            self._owns_client = True
+            self._loop = asyncio.get_running_loop()
+            _OWNED_CLIENTS[id(self)] = self
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        try:
+            # The deadline encloses connection pooling, headers and every body
+            # chunk. Cancellation closes the stream instead of abandoning a thread.
+            async with asyncio.timeout(self.timeout_ms / 1000):
+                async with self.http_client.stream(
+                    "POST", f"{self.baseUrl}/chat/completions", json=payload, headers=headers,
+                ) as response:
+                    if not 200 <= response.status_code < 300:
+                        raise RuntimeError(f"Chat endpoint returned HTTP {response.status_code}")
+                    chunks, size = [], 0
+                    async for chunk in response.aiter_bytes():
+                        size += len(chunk)
+                        if size > 16 * 1024 * 1024:
+                            raise RuntimeError("Chat endpoint response exceeds 16 MiB")
+                        chunks.append(chunk)
+        except (TimeoutError, httpx.TimeoutException):
+            raise RuntimeError("Chat endpoint request timed out") from None
+        except httpx.HTTPError:
+            # Transport errors can contain request URLs or provider text.
+            raise RuntimeError("Chat endpoint transport failed") from None
+        return self._parse_completion(b"".join(chunks))
+
+    def _request_body(self, messages: list[Message], max_tokens: int | None, temperature: float | None = None) -> dict[str, Any]:
         if not supports_image_input(self.model, self.baseUrl) and any(
                 part.get("type") == "image_url" for message in messages
                 if isinstance(message["content"], list) for part in message["content"]):
@@ -85,28 +138,9 @@ class ChatClient:
             request_body["separate_reasoning"] = True
             if self.model.startswith(("thinkingmachines/Inkling", "zai-org/GLM-5.3")):
                 request_body["reasoning_effort"] = "low"
-        payload = json.dumps(request_body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        request = urllib.request.Request(f"{self.baseUrl}/chat/completions", payload, headers)
-        if self.baseUrl == TINKER_MODEL_URL:
-            # Tinker's edge rejects urllib's default client. Match its SDK's
-            # HTTP transport, retaining the same sanitized error handling.
-            import httpx
-            response = httpx.post(request.full_url, content=payload, headers=headers,
-                                  timeout=self.timeout_ms / 1000)
-            status, body_bytes = response.status_code, response.content
-        else:
-            try:
-                with urllib.request.urlopen(request, timeout=self.timeout_ms / 1000) as response:
-                    status = getattr(response, "status", 200)
-                    body_bytes = response.read()
-            except urllib.error.HTTPError as error:
-                # Provider bodies can echo credentials; never include them in exceptions.
-                raise RuntimeError(f"Chat endpoint returned HTTP {error.code}") from None
-        if not 200 <= status < 300:
-            raise RuntimeError(f"Chat endpoint returned HTTP {status}")
+        return request_body
+
+    def _parse_completion(self, body_bytes: bytes) -> Completion:
         try:
             body = json.loads(body_bytes)
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -116,7 +150,7 @@ class ChatClient:
         if self.baseUrl == TINKER_MODEL_URL and isinstance(choice, dict) and choice.get("finish_reason") == "length":
             raise RuntimeError("Tinker reply truncated; increase max tokens")
         message = choice.get("message", {}) if isinstance(choice, dict) else {}
-        content = message.get("content")
+        content = message.get("content") if isinstance(message, dict) else None
         if not isinstance(content, str):
             raise RuntimeError("Chat endpoint returned no text completion")
         usage_value = body.get("usage")

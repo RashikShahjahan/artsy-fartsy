@@ -8,16 +8,15 @@ import math
 import os
 from pathlib import Path
 import re
-import signal
-import subprocess
 import threading
 from datetime import datetime, timezone
 from uuid import uuid4
+from ui.supervisor import SUPERVISOR, alive
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNS = ROOT / "episodes" / "ui-launches"
 LOCK = threading.RLock()
-PROCESSES = {}
+PROCESSES = SUPERVISOR.processes
 
 # Each job receives its own directory; the actual trainer writes to checkpoints/
 # or eval-results/ so existing tooling and the passive RL monitor still work.
@@ -163,7 +162,7 @@ def _value(name, kind, value):
     if kind in ("file", "directory"):
         return _path(value, directory=kind == "directory")
     if kind == "model":
-        if not isinstance(value, str) or not MODEL.fullmatch(value):
+        if not isinstance(value, str) or not MODEL.fullmatch(value) or value.startswith("-"):
             raise ValueError(f"Invalid {name} model ID.")
         return value
     if kind in ("positive", "group", "steps"):
@@ -230,37 +229,31 @@ def _load(run_id):
     return json.loads(file.read_text(encoding="utf-8"))
 
 
-def _alive(pid):
-    if not isinstance(pid, int) or pid < 1:
-        return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return False
-
-
 def _state(record):
-    # A new UI server can still display an orphaned run. It cannot cancel a
-    # child it no longer owns, so a vanished PID is marked interrupted.
-    if record["state"] in ("running", "stopping") and not _alive(record.get("pid")):
-        record = {**record, "state": "interrupted",
-                  "error": "The process exited without a recorded result (UI server may have restarted)."}
+    # An unowned process cannot safely be signalled after a server restart.
+    if record["state"] in ("queued", "running", "stopping") and not SUPERVISOR.active(record.get("id")):
+        return {**record, "state": "interrupted",
+                "error": "The UI server lost ownership of this process."}
     return record
 
 
-def list_runs():
+def _reconcile(record):
+    with LOCK:
+        updated = _state(record)
+        if updated is not record:
+            _write(RUNS / record['id'], updated)
+        return updated
+
+
+def list_runs(limit=80):
     if not RUNS.is_dir():
         return []
     files = sorted(RUNS.glob("*/job.json"), key=lambda f: f.stat().st_mtime, reverse=True)
     result = []
-    for file in files[:80]:
+    for file in files[:limit] if limit is not None else files:
         try:
-            record = _state(json.loads(file.read_text(encoding="utf-8")))
+            with LOCK:
+                record = _reconcile(json.loads(file.read_text(encoding="utf-8")))
             result.append({k: record.get(k) for k in
                            ("id", "kind", "state", "created_at", "finished_at", "output", "pid")})
         except (ValueError, OSError, KeyError, TypeError):
@@ -269,7 +262,8 @@ def list_runs():
 
 
 def get_run(run_id):
-    record = _state(_load(run_id))
+    with LOCK:
+        record = _reconcile(_load(run_id))
     console = RUNS / run_id / "console.txt"
     if console.exists():
         with console.open("rb") as stream:
@@ -279,7 +273,7 @@ def get_run(run_id):
     else:
         record["console"] = ""
     with LOCK:
-        process = PROCESSES.get(run_id)
+        process = SUPERVISOR.get(run_id)
         record["can_cancel"] = process is not None and process.poll() is None
     return record
 
@@ -296,7 +290,7 @@ def _finish(run_id, process):
             _write(RUNS / run_id, record)
     finally:
         with LOCK:
-            PROCESSES.pop(run_id, None)
+            SUPERVISOR.release(run_id)
 
 
 def start(kind, settings):
@@ -304,11 +298,11 @@ def start(kind, settings):
     argv, output = command(kind, settings, run_id)
     with LOCK:
         # Prevent overlapping optimizer jobs; eval may run alongside training.
-        if kind in ("sft", "rl") and (
-                any(p.poll() is None and _load(ident).get("kind") in ("sft", "rl")
-                    for ident, p in PROCESSES.items())
-                or any(row.get("kind") in ("sft", "rl")
-                       and row.get("state") in ("running", "stopping") for row in list_runs())):
+        if kind in ("sft", "rl") and any(
+                row.get("kind") in ("sft", "rl")
+                and (row.get("state") in ("queued", "running", "stopping") or
+                     (row.get("state") == "interrupted" and alive(row.get("pid"))))
+                for row in list_runs(limit=None)):
             raise RuntimeError("An SFT or RL training run is already active.")
         folder = RUNS / run_id
         folder.mkdir(parents=True, exist_ok=False)
@@ -317,17 +311,21 @@ def start(kind, settings):
             "created_at": datetime.now(timezone.utc).isoformat(),
             "command": argv, "output": str(output.relative_to(ROOT)),
         }
-        _write(folder, record)
+        SUPERVISOR.reserve(run_id)
+        process = None
         try:
+            _write(folder, record)
             with (folder / "console.txt").open("wb") as log:
-                process = subprocess.Popen(argv, cwd=ROOT, stdout=log,
-                                           stderr=subprocess.STDOUT, env=os.environ.copy(),
-                                           start_new_session=(os.name == "posix"))
+                process = SUPERVISOR.spawn(run_id, argv, cwd=ROOT, stdout=log,
+                                           stderr=log, env=os.environ.copy())
             record.update(state="running", pid=process.pid)
             _write(folder, record)
-            PROCESSES[run_id] = process
             threading.Thread(target=_finish, args=(run_id, process), daemon=True).start()
         except Exception as error:
+            if process is not None and process.poll() is None:
+                SUPERVISOR.cancel(run_id)
+                process.wait()
+            SUPERVISOR.release(run_id)
             record.update(state="failed", error=str(error),
                           finished_at=datetime.now(timezone.utc).isoformat())
             _write(folder, record)
@@ -337,14 +335,11 @@ def start(kind, settings):
 
 def cancel(run_id):
     with LOCK:
-        process = PROCESSES.get(run_id)
+        process = SUPERVISOR.get(run_id)
         if process is None or process.poll() is not None:
             raise ValueError("This run is no longer controlled by the current UI server.")
         record = _load(run_id)
         record["state"] = "stopping"
         _write(RUNS / run_id, record)
-        if os.name == "posix":
-            os.killpg(process.pid, signal.SIGTERM)
-        else:
-            process.terminate()
+        SUPERVISOR.cancel(run_id)
     return {"id": run_id, "state": "stopping"}

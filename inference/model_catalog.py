@@ -7,30 +7,11 @@ import re
 from drawing.config import MODEL_ID, MODEL_REVISION
 
 ROOT = Path(__file__).resolve().parents[1]
-LARGE_MODEL_ID = 'Qwen/Qwen3.8-27B'
-QWEN36_MODEL_ID = 'Qwen/Qwen3.6-35B-A3B'
-FRONTIER_MODEL_ID = 'moonshotai/Kimi-K2.6'
-# Verified against Tinker's sampling catalog; processors remain local, weights hosted.
-HOSTED_MODEL_PROFILES = {
-    LARGE_MODEL_ID: {
-        'revision': '1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0',
-        'renderer': 'qwen3_8_disable_thinking',
-        'sampling_model': LARGE_MODEL_ID + ':peft:262144',
-        'context_window': 262144,
-    },
-    QWEN36_MODEL_ID: {
-        'revision': '995ad96eacd98c81ed38be0c5b274b04031597b0',
-        'renderer': 'qwen3_5_disable_thinking',
-        'sampling_model': QWEN36_MODEL_ID + ':peft:262144',
-        'context_window': 262144,
-    },
-    FRONTIER_MODEL_ID: {
-        'revision': 'b5aabbfb20227ed42becbf5541dbffd213942c58',
-        'renderer': 'kimi_k26_disable_thinking',
-        'sampling_model': FRONTIER_MODEL_ID + ':peft:131072',
-        'context_window': 131072,
-    },
-}
+from drawing.model_profiles import (LARGE_MODEL_ID, QWEN36_MODEL_ID, FRONTIER_MODEL_ID,
+                                    MODEL_PROFILES, resolve_model)
+
+# Preserve the historical exported mapping of non-default hosted models.
+HOSTED_MODEL_PROFILES = {key: value for key, value in MODEL_PROFILES.items() if key != MODEL_ID}
 
 
 
@@ -41,15 +22,23 @@ def _compatible_checkpoint_model(config):
     model = config.get('model')
     if not isinstance(model, str):
         return None
-    base_model = model.split(':peft:', 1)[0]
-    profile = HOSTED_MODEL_PROFILES.get(base_model)
-    if base_model == MODEL_ID:
-        if config.get('tokenizer_revision') != MODEL_REVISION:
-            return None
-    elif (base_model not in (LARGE_MODEL_ID, QWEN36_MODEL_ID)
-          or config.get('renderer') != profile['renderer']
-          or config.get('tokenizer_revision') not in (None, profile['revision'])):
+    try:
+        resolved = resolve_model(model)
+    except ValueError:
         return None
+    base_model = resolved['base_model']
+    if not resolved['checkpoint']:
+        return None
+    revision = resolved['revision']
+    # Older large-model runs omitted the revision; retain discovery of those
+    # records, while rejecting explicit mismatches for either metadata component.
+    allowed = (revision,) if base_model == MODEL_ID else (None, revision)
+    if (config.get('tokenizer_revision') not in allowed
+            or config.get('processor_revision') not in (None, revision)
+            or (base_model != MODEL_ID and config.get('renderer') != resolved['renderer'])
+            or (config.get('renderer') is not None and config['renderer'] != resolved['renderer'])):
+        return None
+    profile = HOSTED_MODEL_PROFILES.get(base_model)
     return base_model, profile
 
 

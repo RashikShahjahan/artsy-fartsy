@@ -15,7 +15,10 @@ import subprocess
 import sys
 import tempfile
 
-from PIL import Image
+if __package__:
+    from drawing.render_contract import validate_png
+else:
+    from render_contract import validate_png
 
 SOURCE_BYTES = 64 * 1024
 PNG_BYTES = 8 * 1024 * 1024
@@ -69,11 +72,7 @@ def render(source: str, seed: int, output: Path, runtime: Path, seconds: int = 6
                 if not stat.S_ISREG(info.st_mode) or not 24 <= info.st_size <= PNG_BYTES:
                     raise ValueError("Expected a regular PNG of at most 8 MiB")
                 png = file.read(PNG_BYTES + 1)
-            import io
-            with Image.open(io.BytesIO(png)) as image:
-                if image.format != "PNG" or image.size != (1920, 1200):
-                    raise ValueError("Expected a 1920×1200 PNG")
-                image.verify()
+            validate_png(png, {"width": 1920, "height": 1200})
             (output / "image.png").write_bytes(png)
             return {**feedback, "ok": True, "width": 1920, "height": 1200}
         except (OSError, ValueError, SyntaxError) as error:
@@ -84,12 +83,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--seconds", type=int, default=60)
     parser.add_argument("--preview", action="store_true", help="Return the rendered PNG to Mini SWE as an image observation")
     args = parser.parse_args()
     if not 0 <= args.seed <= 2**53 - 1:
         parser.error("seed must be a nonnegative safe integer")
     source = sys.stdin.buffer.read(SOURCE_BYTES + 1).decode("utf-8")
-    result = render(source, args.seed, args.output, Path(__file__).parent / "runtime")
+    result = render(source, args.seed, args.output, Path(__file__).parent / "runtime", seconds=args.seconds)
     if args.preview:
         result["sourceHash"] = hashlib.sha256(source.encode("utf-8")).hexdigest()
     print(json.dumps(result))

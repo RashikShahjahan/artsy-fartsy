@@ -242,6 +242,8 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             "candidates": candidates, "maxTokens": max_tokens,
             "teacher": teacher,
             "config": config, "apiDocHash": sha256(api_doc), "runtimeHashes": runtime_hashes}
+        if options.get("executionBackend"):
+            manifest["executionBackend"] = options["executionBackend"]
         if options.get("promptGenerator"):
             manifest["promptVersion"] = options["promptGenerator"]["version"]
             manifest["promptGenerator"] = options["promptGenerator"]

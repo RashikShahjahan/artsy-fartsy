@@ -13,13 +13,14 @@ import uuid
 from pathlib import Path
 
 from .environment import DrawingEnvironment
+from .renderer import LocalRenderer
 
 
 async def _run(args: argparse.Namespace) -> int:
     try:
         source = Path(args.source).resolve().read_text(encoding="utf-8")
         episode_root = Path(args.episode) if args.episode else Path("episodes") / str(uuid.uuid4())
-        env = DrawingEnvironment(episode_root.resolve())
+        env = DrawingEnvironment(episode_root.resolve(), renderer=LocalRenderer() if args.renderer == "local" else None)
         episode = await env.reset(args.prompt, args.seed)
         written = await env.write_code(source)
         result = await env.submit() if written["ok"] else written
@@ -35,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("source", help="Python drawing source file")
     parser.add_argument("--prompt", required=True, help="Prompt describing the drawing")
     parser.add_argument("--episode", help="Artifact root for this episode")
+    parser.add_argument("--renderer", choices=("docker", "local"), default="docker",
+                        help="Use local only for trusted source; local code has host permissions")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args(argv)
     if not 0 <= args.seed <= 2**53 - 1:

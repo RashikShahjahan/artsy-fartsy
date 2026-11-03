@@ -534,6 +534,7 @@ class EvaluationTest(unittest.TestCase):
             root = Path(directory)
             shutil.copytree(ROOT / "runtime", root / "runtime")
             shutil.copyfile(ROOT / "evaluation/render.py", root / "render.py")
+            shutil.copyfile(ROOT / "drawing/render_contract.py", root / "render_contract.py")
             result = subprocess.run([sys.executable, str(root / "render.py"), "--seed", "42",
                                      "--output", str(root / "preview"), "--preview"],
                                     input=GOOD, text=True, capture_output=True, check=True)

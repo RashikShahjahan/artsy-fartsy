@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 
 from drawing.config import LIMITS, MODEL_CONTEXT_WINDOW
+from drawing.agent_contract import (TRAJECTORY_CONTRACT_VERSION, host_user_prompt,
+                                    turn_countdown, turn_limit_instruction)
 from drawing.dataset_client import parse_json_reply
 from drawing.dataset_specs import DIFFICULTIES
 
@@ -149,10 +151,10 @@ def native_prefix(spec: dict, config: dict) -> tuple[str, str]:
     if (limit is not None and (type(limit) is not int or limit < 1)) or kind not in ("output", "all"):
         raise ValueError("Invalid native trajectory token budget")
     system = yaml.safe_load((ROOT / "evaluation/mini.yaml").read_text())["agent"]["system_template"]
-    user = ("System instructions:\n" + drawing_system_prompt(limit, kind) + "\n\nTask:\n"
-            + spec["prompt"] + "\n\nPreview with: "
+    task = (spec["prompt"] + "\n\nPreview with: "
             + f"python /opt/artsy/render.py --seed {spec['seed']} "
               "--output /workspace/preview --preview < /workspace/program.py")
+    user = host_user_prompt(drawing_system_prompt(limit, kind), task, config.get("max_turns"))
     return system, user
 
 
@@ -169,11 +171,27 @@ def convert_native_record(record: dict, root: Path, loss_policy: str = LOSS_POLI
     messages = trajectory.get("messages")
     if not isinstance(messages, list) or len(messages) < 4:
         raise ValueError(f"{rid}: missing native conversation")
-    system, user = native_prefix(record["spec"], record.get("nativeTrajectoryConfig") or {})
+    config = record.get("nativeTrajectoryConfig") or {}
+    version = config.get("trajectory_contract_version", 1)
+    if type(version) is not int or version not in (1, TRAJECTORY_CONTRACT_VERSION):
+        raise ValueError(f"{rid}: unsupported native trajectory contract version")
+    if version == TRAJECTORY_CONTRACT_VERSION and "max_turns" not in config:
+        raise ValueError(f"{rid}: native trajectory contract requires max_turns")
+    # Early host recordings predate explicit metadata. Recover the limit only
+    # from its exact announced framing, then validate the entire prompt below.
+    if version == 1 and "max_turns" not in config:
+        text = messages[1].get("content", []) if isinstance(messages[1], dict) else []
+        if (isinstance(text, list) and len(text) == 1 and isinstance(text[0], dict)
+                and isinstance(text[0].get("text"), str)):
+            found = re.search(r"\n\nYou have ([1-9][0-9]*) model turns to complete this task\. "
+                              r"Each response uses one turn\. Submit your final output by the last turn\.",
+                              text[0].get("text", ""))
+            if found:
+                config = {**config, "max_turns": int(found.group(1))}
+    system, user = native_prefix(record["spec"], config)
     expected_prefix = [message("system", system), message("user", user)]
     # Validate historical framing before migrating its instructions. Recorded
     # artifacts and their hashes remain unchanged; exported prompts omit budgets.
-    config = record.get("nativeTrajectoryConfig") or {}
     limit, kind = config.get("token_limit"), config.get("token_limit_type", "output")
     description = "generated output" if kind == "output" else "total input and output"
     token_budget = f" and {limit} {description} tokens" if limit is not None else ""
@@ -205,6 +223,9 @@ def convert_native_record(record: dict, root: Path, loss_policy: str = LOSS_POLI
     result = copy.deepcopy(messages)
     result[:2] = expected_prefix
     pending, seen = [], set()
+    max_turns = config.get("max_turns")
+    turn = 0
+    awaiting_assistant = max_turns is None
     submitted = False
     preview_count = 0
     correction = 'Every response must contain a bash tool call with {"command":"..."}.'
@@ -234,6 +255,10 @@ def convert_native_record(record: dict, root: Path, loss_policy: str = LOSS_POLI
         if submitted:
             raise ValueError(f"{rid}: messages after terminal submission")
         if role == "assistant":
+            if not awaiting_assistant:
+                raise ValueError(f"{rid}: missing native turn countdown")
+            turn += 1
+            awaiting_assistant = False
             if pending:
                 raise ValueError(f"{rid}: native tool calls lack observations")
             calls = m.get("tool_calls") or []
@@ -263,8 +288,19 @@ def convert_native_record(record: dict, root: Path, loss_policy: str = LOSS_POLI
                     raise ValueError(f"{rid}: terminal submission did not succeed")
                 submitted = True
         else:
-            if pending or m != message("user", correction) or index == 2 or result[index - 1].get("role") != "assistant" or result[index - 1].get("tool_calls"):
+            previous = result[index - 1] if index > 2 else None
+            is_correction = (not pending and m == message("user", correction) and previous
+                             and previous.get("role") == "assistant" and not previous.get("tool_calls"))
+            is_countdown = (max_turns is not None and not pending and not awaiting_assistant
+                            and turn < max_turns and m == message("user", turn_countdown(turn + 1, max_turns))
+                            and (index == 2 or previous.get("role") == "tool" or
+                                 (previous.get("role") == "user" and previous == message("user", correction))))
+            if is_countdown:
+                awaiting_assistant = True
+            elif not is_correction:
                 raise ValueError(f"{rid}: unexpected native user intervention")
+        if max_turns is None and role != "assistant":
+            awaiting_assistant = True
     if pending or not submitted or not preview_count:
         raise ValueError(f"{rid}: native trajectory requires observed previews and terminal submission")
     if loss_policy == LOSS_POLICY:

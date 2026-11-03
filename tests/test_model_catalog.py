@@ -192,3 +192,20 @@ class ModelCatalogCacheTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class ProfileResolutionTests(unittest.TestCase):
+    def test_pinned_profiles_resolve_hosted_suffix_and_checkpoint_revisions(self):
+        from drawing.model_profiles import MODEL_PROFILES, resolve_model
+        from inference.model_catalog import _compatible_checkpoint_model
+        for model, profile in MODEL_PROFILES.items():
+            with self.subTest(model=model):
+                resolved = resolve_model(model + ':peft:262144')
+                self.assertEqual(resolved['base_model'], model)
+                self.assertEqual(resolved['revision'], profile['revision'])
+                config = {'model': model, 'renderer': profile['renderer'],
+                          'tokenizer_revision': profile['revision'], 'processor_revision': 'wrong'}
+                self.assertIsNone(_compatible_checkpoint_model(config))
+                config['processor_revision'] = profile['revision']
+                self.assertEqual(_compatible_checkpoint_model(config) is not None, profile['checkpoint'])
+        with self.assertRaises(ValueError):
+            resolve_model('unknown/model')

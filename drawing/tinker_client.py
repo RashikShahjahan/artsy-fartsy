@@ -29,12 +29,13 @@ class TinkerChatClient:
 
     def _initialize(self):
         import tinker
-        from transformers import AutoImageProcessor, AutoTokenizer
+        from drawing.model_profiles import load_metadata, resolve_model
         from tinker_cookbook import renderers
 
         # Only tokenizer and processor metadata are local. All weights stay hosted.
-        tokenizer = AutoTokenizer.from_pretrained(self.model, revision=self.revision)
-        self.image_processor = AutoImageProcessor.from_pretrained(self.model, revision=self.revision)
+        profile = resolve_model(self.model)
+        tokenizer, self.image_processor = load_metadata(self.model, self.revision)
+        self.vision = profile["vision"]
         self.renderer = renderers.get_renderer(
             self.renderer_name, tokenizer, image_processor=self.image_processor)
         self.service = tinker.ServiceClient()
@@ -42,7 +43,7 @@ class TinkerChatClient:
         self._ready = True
 
     def _prompt(self, messages: list[Message]):
-        from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
+        from drawing.vision import prepare_image
         from drawing.config import IMAGE_SIZE
 
         native = []
@@ -69,12 +70,8 @@ class TinkerChatClient:
                                 or not 1 <= image.width <= 4096
                                 or not 1 <= image.height <= 4096):
                             raise ValueError("Invalid judge PNG")
-                        height, width = smart_resize(
-                            image.height, image.width,
-                            factor=self.image_processor.patch_size * self.image_processor.merge_size,
-                            min_pixels=IMAGE_SIZE["shortest_edge"],
-                            max_pixels=IMAGE_SIZE["longest_edge"])
-                        rgb = image.convert("RGB").resize((width, height))
+                        rgb = prepare_image(image, self.image_processor, IMAGE_SIZE,
+                                            getattr(self, "vision", "qwen"))
                     parts.append({"type": "image", "image": rgb})
                 content = parts
             native.append({"role": message["role"], "content": content})

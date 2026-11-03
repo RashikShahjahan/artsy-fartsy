@@ -11,30 +11,30 @@ import math
 from pathlib import Path
 import random
 
+from training.run_store import atomic_json, contents, run_lock
 from training.data import LOSS_POLICIES, LOSS_POLICY, ROOT, digest, load_examples
 from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_REVISION, MODEL_CONTEXT_WINDOW
-from inference.model_catalog import QWEN36_MODEL_ID
+from drawing.model_profiles import QWEN36_MODEL_ID, resolve_model, load_metadata
+from drawing.vision import prepare_image
 
 RENDERER = "qwen3_5_disable_thinking"
 
 
 def renderer_for_model(model: str) -> str:
-    if model.split(":", 1)[0] == "Qwen/Qwen3.8-27B":
-        return "qwen3_8_disable_thinking"
-    return RENDERER
+    return resolve_model(model)['renderer']
 
 
 class DrawingEncoder:
     """Encode a complete trajectory once, supervising only selected assistant turns."""
 
-    def __init__(self, renderer, max_length: int = MODEL_CONTEXT_WINDOW, image_processor=None):
+    def __init__(self, renderer, max_length: int = MODEL_CONTEXT_WINDOW, image_processor=None, vision="qwen"):
         self.renderer = renderer
         self.max_length = max_length
         self.image_processor = image_processor
+        self.vision = vision
 
     def preview(self, part: dict):
         from PIL import Image
-        from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
 
         if self.image_processor is None:
             raise ValueError("Preview images require an image processor")
@@ -49,12 +49,7 @@ class DrawingEncoder:
                 1 <= image.width <= 4096 and 1 <= image.height <= 4096
             ):
                 raise ValueError(f"Invalid preview PNG: {path}")
-            # Match inference's RGB conversion and bounded Qwen image resolution.
-            height, width = smart_resize(
-                image.height, image.width,
-                factor=self.image_processor.patch_size * self.image_processor.merge_size,
-                min_pixels=IMAGE_SIZE["shortest_edge"], max_pixels=IMAGE_SIZE["longest_edge"])
-            return {"type": "image", "image": image.convert("RGB").resize((width, height))}
+            return {"type": "image", "image": prepare_image(image, self.image_processor, IMAGE_SIZE, self.vision)}
 
     def messages(self, example: dict) -> tuple[list[dict], list[int]]:
         from tinker_cookbook.renderers import ToolCall
@@ -116,17 +111,13 @@ class DrawingEncoder:
 
 def create_encoder(model: str, max_length: int, renderer_name: str | None = None,
                    revision: str | None = None) -> DrawingEncoder:
-    from transformers import AutoImageProcessor, AutoTokenizer
     from tinker_cookbook import renderers
 
-    # Only tokenizer/processor metadata is local; model weights stay on Tinker.
-    if revision is None and model == MODEL_ID:
-        revision = MODEL_REVISION
-    tokenizer = AutoTokenizer.from_pretrained(model, revision=revision)
-    image_processor = AutoImageProcessor.from_pretrained(model, revision=revision)
-    renderer = renderers.get_renderer(renderer_name or renderer_for_model(model), tokenizer,
+    profile = resolve_model(model)
+    tokenizer, image_processor = load_metadata(model, revision)
+    renderer = renderers.get_renderer(renderer_name or profile['renderer'], tokenizer,
                                       image_processor=image_processor)
-    return DrawingEncoder(renderer, max_length, image_processor=image_processor)
+    return DrawingEncoder(renderer, max_length, image_processor=image_processor, vision=profile['vision'])
 
 
 def batches(data: list, batch_size: int, epochs: int, seed: int):
@@ -142,11 +133,16 @@ def save_checkpoint(client, output_dir: Path, step: int, config: dict) -> dict:
     checkpoint = {"step": step, "config": config,
                   "state_path": client.save_state(f"step-{step:06d}").result().path}
     path = output_dir / f"checkpoint-{step:06d}.json"
-    path.write_text(json.dumps(checkpoint, indent=2) + "\n")
+    atomic_json(path, checkpoint)
     return checkpoint
 
 
 def train(args, data: list, manifest: dict):
+    with run_lock(args.output_dir):
+        return _train_locked(args, data, manifest)
+
+
+def _train_locked(args, data: list, manifest: dict):
     import tinker
     from tinker_cookbook.utils.lr_scheduling import compute_schedule_lr_multiplier
 
@@ -155,7 +151,8 @@ def train(args, data: list, manifest: dict):
         total_steps = min(total_steps, args.max_steps)
     config = {"dataset_sha256": manifest["dataset_sha256"], "api_doc_sha256": manifest["api_doc_sha256"],
               "conversion": manifest["conversion"], "renderer": renderer_for_model(args.model), "input_mode": manifest["input_mode"],
-              "model": args.model, "tokenizer_revision": MODEL_REVISION if args.model.split(":", 1)[0] == MODEL_ID else None,
+              "model": args.model, "tokenizer_revision": resolve_model(args.model)["revision"],
+              "processor_revision": resolve_model(args.model)["revision"],
               "lora_rank": args.lora_rank, "batch_size": args.batch_size,
               "batch_unit": "trajectory", "image_size": IMAGE_SIZE,
               "loss_policy": manifest["loss_policy"],
@@ -168,11 +165,41 @@ def train(args, data: list, manifest: dict):
     start_step = 0
     checkpoint = None
     if args.resume_from_checkpoint:
+        if args.resume_from_checkpoint.resolve().parent != args.output_dir.resolve():
+            raise ValueError("Resume checkpoint must belong to the output directory")
+        manifest_path = args.output_dir / "training-manifest.json"
+        if not manifest_path.is_file():
+            raise ValueError("Resume requires the original training manifest")
+        recorded = json.loads(manifest_path.read_text())
         checkpoint = json.loads(args.resume_from_checkpoint.read_text())
-        if checkpoint["config"] != config:
+        def normalize_config(value):
+            normalized = dict(value)
+            # Historical runs used one revision field for both metadata components.
+            if ("processor_revision" not in normalized
+                    and normalized.get("tokenizer_revision") == config["tokenizer_revision"]):
+                normalized["processor_revision"] = config["processor_revision"]
+            return normalized
+
+        old_config = normalize_config(checkpoint["config"])
+        if old_config != config:
             raise ValueError("Checkpoint dataset/model/training configuration does not match this run")
+        if normalize_config(recorded.get("config", {})) != old_config:
+            raise ValueError("Checkpoint does not belong to the recorded run")
+        # Finalization without further steps must publish the same configuration as
+        # the upgraded manifest, even when resuming a historical checkpoint.
+        checkpoint["config"] = config
+        checkpoint_paths = sorted(args.output_dir.glob("checkpoint-*.json"))
+        if not checkpoint_paths or args.resume_from_checkpoint.resolve() != checkpoint_paths[-1].resolve():
+            raise ValueError("Resume requires the latest checkpoint in the output directory")
+        if (args.output_dir / "final.json").exists():
+            raise ValueError("Run is already finalized")
         start_step = checkpoint["step"]
-    if not 0 <= start_step < total_steps:
+    elif contents(args.output_dir):
+        existing = contents(args.output_dir)
+        if (len(existing) != 1 or existing[0].name != "training-manifest.json"
+                or json.loads(existing[0].read_text()).get("config") != config):
+            raise ValueError("Output directory is not empty; choose a fresh directory or resume")
+    if not 0 <= start_step <= total_steps:
         raise ValueError("No remaining optimizer steps; increase --epochs or --max-steps")
 
     service = tinker.ServiceClient()
@@ -188,7 +215,7 @@ def train(args, data: list, manifest: dict):
     manifest.update(arguments={k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
                     packages={name: version(name) for name in ("tinker", "tinker-cookbook", "transformers")},
                     config=config, total_steps=total_steps)
-    (args.output_dir / "training-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    atomic_json(args.output_dir / "training-manifest.json", manifest)
     with (args.output_dir / "metrics.jsonl").open("a") as metrics:
         for step, batch in enumerate(batches(data, args.batch_size, args.epochs, args.seed), 1):
             if step <= start_step:
@@ -219,7 +246,7 @@ def train(args, data: list, manifest: dict):
                 checkpoint = save_checkpoint(client, args.output_dir, step, config)
     sampler_path = client.save_weights_for_sampler("final").result().path
     final = {**checkpoint, "sampler_path": sampler_path}
-    (args.output_dir / "final.json").write_text(json.dumps(final, indent=2) + "\n")
+    atomic_json(args.output_dir / "final.json", final)
     print(json.dumps(final, indent=2))
 
 
@@ -275,14 +302,14 @@ def main(argv=None):
     if manifest["unreviewed_records"] and not args.allow_unreviewed and not args.check_batch:
         p.error(f"{manifest['unreviewed_records']} selected records are pending visual review. "
                 "Review them or use --allow-unreviewed for an experimental run.")
-    if not args.check_batch and not args.resume_from_checkpoint and args.output_dir.exists() and any(args.output_dir.iterdir()):
-        p.error("Output directory is not empty; choose a fresh directory or --resume-from-checkpoint")
-    base_model = args.model.split(":", 1)[0]
-    if not (args.model.startswith("Qwen/Qwen3.5-")
-            or base_model in (QWEN36_MODEL_ID, "Qwen/Qwen3.8-27B")) or "Base" in args.model:
+    try:
+        profile = resolve_model(args.model)
+    except ValueError:
+        p.error("Use a supported Qwen3.5, Qwen3.6 or Qwen3.8 vision chat model with a disabled-thinking renderer")
+    if not profile['checkpoint']:
         p.error("Use a supported Qwen3.5, Qwen3.6 or Qwen3.8 vision chat model with a disabled-thinking renderer")
 
-    encoder = create_encoder(args.model.split(":", 1)[0], args.max_length)
+    encoder = create_encoder(profile['base_model'], args.max_length)
     data = [datum for example in examples for datum in encoder(example)]
     manifest.update(training_examples=len(data), max_tokens=max(d.model_input.length + 1 for d in data),
                     supervised_tokens=sum(sum(d.loss_fn_inputs["weights"].data) for d in data),

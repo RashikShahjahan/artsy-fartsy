@@ -16,6 +16,8 @@ from inspect_ai.util import sandbox
 import yaml
 
 from drawing.config import LIMITS
+from drawing.agent_contract import (TRAJECTORY_CONTRACT_VERSION, host_user_prompt,
+                                    turn_countdown, turn_limit_instruction)
 
 AGENT_NAME = "artsy-host"
 AGENT_VERSION = "2"
@@ -91,11 +93,7 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
     settings = yaml.safe_load(Path(__file__).with_name("mini.yaml").read_text())
     image_pattern = re.compile(settings["model"]["multimodal_regex"])
     timeout = settings["environment"]["timeout"]
-    if max_turns is not None:
-        if type(max_turns) is not int or max_turns < 1:
-            raise ValueError("max_turns must be positive or None")
-        system_prompt += (f"\n\nYou have {max_turns} model turns to complete this task. "
-                          "Each response uses one turn. Submit your final output by the last turn.")
+    turn_limit_instruction(max_turns)  # Validate before starting the agent.
 
     async def run(state: AgentState):
         began = monotonic()
@@ -106,6 +104,8 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
         if sample is not None:
             sample.metadata["harnessTiming"] = timing
             sample.metadata["submitted"] = False
+            sample.metadata["trajectoryContractVersion"] = TRAJECTORY_CONTRACT_VERSION
+            sample.metadata["maxTurns"] = max_turns
         submitted = False
         operations = 0
         actions = 0
@@ -177,8 +177,7 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
         # Match the previous Mini SWE system/instance framing for trained policies.
         state.messages = [
             ChatMessageSystem(content=settings["agent"]["system_template"]),
-            ChatMessageUser(content=f"System instructions:\n{system_prompt}\n\nTask:\n"
-                            + state.messages[-1].text),
+            ChatMessageUser(content=host_user_prompt(system_prompt, state.messages[-1].text, max_turns)),
         ]
         try:
             turns = 0
@@ -190,9 +189,7 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
                 report('thinking', step, turn=turns)
                 if max_turns is not None:
                     state.messages.append(ChatMessageUser(content=
-                        f"Turn {turns} of {max_turns}." +
-                        (" This is your final turn; submit your final output now."
-                         if turns == max_turns else "")))
+                        turn_countdown(turns, max_turns)))
                 started = monotonic()
                 try:
                     output = await model.generate(state.messages, tools=tools, config=config)

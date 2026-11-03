@@ -5,13 +5,13 @@ import json
 import os
 from pathlib import Path
 import re
-import subprocess
 import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 from urllib.parse import urlsplit, parse_qs
 from ui.shell import navigation, review_page, empty_page
 from ui import rl_monitor, launch, preferences, speech
+from ui.supervisor import SUPERVISOR, alive
 from urllib.request import urlopen
 
 from drawing.config import MODEL_ID
@@ -57,8 +57,7 @@ ROOT = Path(__file__).resolve().parents[1]
 JOBS = ROOT / 'episodes' / 'ui'
 RL_ROOT = Path(os.getenv('ARTSY_RL_ROOT', str(ROOT / 'checkpoints'))).expanduser().resolve()
 RL_DATASET = Path(os.environ['ARTSY_RL_DATASET']).expanduser().resolve() if os.getenv('ARTSY_RL_DATASET') else None
-LOCK = threading.Lock()
-ACTIVE = None
+LOCK = threading.RLock()
 PORT = int(os.getenv('ARTSY_UI_PORT', '4173'))
 DRAWING_DATASET = os.getenv('ARTSY_DRAWING_DATASET')
 CANDIDATE_DATASET = os.getenv('ARTSY_CANDIDATE_DATASET')
@@ -79,11 +78,35 @@ def drawing_dataset():
             'items': drawings}
 
 
+def drawing_status(directory):
+    with LOCK:
+        file = directory / 'job.json'
+        status = json.loads(file.read_text())
+        if status.get('state') in ('queued', 'running', 'stopping') and not SUPERVISOR.active(directory.name):
+            status.update(state='interrupted', error='The UI server lost ownership of this process.')
+            temporary = directory / 'job.reconcile.tmp'
+            temporary.write_text(json.dumps(status))
+            temporary.replace(file)
+        return status
+
+
+def drawing_busy():
+    for file in JOBS.glob('*/job.json'):
+        try:
+            status = drawing_status(file.parent)
+            if (SUPERVISOR.active(file.parent.name) or
+                    status.get('state') == 'interrupted' and alive(status.get('pid'))):
+                return True
+        except (OSError, ValueError, TypeError):
+            continue
+    return False
+
+
 def drawing_runs(dataset):
     result = []
     for file in sorted(JOBS.glob('*/job.json'), key=lambda file: file.stat().st_mtime, reverse=True):
         try:
-            run = json.loads(file.read_text())
+            run = drawing_status(file.parent)
             if run.get('dataset_sha256') == dataset['sha256']:
                 result.append({'id': file.parent.name, **{key: run.get(key) for key in
                                ('prompt_id', 'model', 'state', 'seed')}})
@@ -206,11 +229,8 @@ def interpreter():
 
 
 def run_job(directory, request):
-    global ACTIVE
-    status = {'state': 'running', **request}
-    initial = directory / 'starting.tmp'
-    initial.write_text(json.dumps(status))
-    initial.replace(directory / 'job.json')
+    status = {'state': 'queued', **request}
+    process = None
     try:
         with (directory / 'console.txt').open('w') as output:
             environment = os.environ.copy()
@@ -220,21 +240,34 @@ def run_job(directory, request):
                 environment.pop('ARTSY_MODEL_API_KEY', None)
             else:
                 environment['ARTSY_MODEL_API_KEY'] = 'local-no-auth'
-            process = subprocess.run(
-                [interpreter(), '-u', '-m', 'ui.worker', str(directory), request['prompt'],
-                 str(request['seed']), request['model']], cwd=ROOT, stdout=output,
-                stderr=subprocess.STDOUT, check=False, env=environment,
-            )
-        status['state'] = 'completed' if process.returncode == 0 else 'failed'
-        status['exit_code'] = process.returncode
+            with LOCK:
+                process = SUPERVISOR.spawn(
+                    directory.name, [interpreter(), '-u', '-m', 'ui.worker', str(directory), request['prompt'],
+                                     str(request['seed']), request['model']],
+                    cwd=ROOT, stdout=output, stderr=output, env=environment)
+                status.update(state='running', pid=process.pid)
+                temporary = directory / 'starting.tmp'
+                temporary.write_text(json.dumps(status))
+                temporary.replace(directory / 'job.json')
+            code = process.wait()
+        status['exit_code'] = code
     except Exception as error:
+        if process is not None and process.poll() is None:
+            SUPERVISOR.cancel(directory.name)
+            process.wait()
         status.update(state='failed', error=str(error))
     finally:
-        temp = directory / 'job.tmp'
-        temp.write_text(json.dumps(status))
-        temp.replace(directory / 'job.json')
         with LOCK:
-            ACTIVE = None
+            try:
+                if status.get('state') != 'failed':
+                    current = json.loads((directory / 'job.json').read_text())
+                    status['state'] = ('cancelled' if current.get('state') == 'stopping' else
+                                       'completed' if status.get('exit_code') == 0 else 'failed')
+                temporary = directory / 'job.tmp'
+                temporary.write_text(json.dumps(status))
+                temporary.replace(directory / 'job.json')
+            finally:
+                SUPERVISOR.release(directory.name)
 
 
 PREFERENCE_REVIEW = None
@@ -338,7 +371,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_POST(self):
-        global ACTIVE
         if not self.trusted():
             return self.send_json({'error': 'Local requests only.'}, 403)
         if self.serve_workspace():
@@ -407,6 +439,22 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(launch.cancel(cancel[1]))
             except (ValueError, OSError) as error:
                 return self.send_json({'error': str(error)}, 409)
+        drawing_cancel = re.fullmatch(r'/api/runs/([a-f0-9]{32})/cancel', self.path)
+        if drawing_cancel:
+            with LOCK:
+                directory = JOBS / drawing_cancel[1]
+                try:
+                    status = drawing_status(directory)
+                    if status.get('state') != 'running':
+                        raise ValueError('This run is no longer controlled by the current UI server.')
+                    SUPERVISOR.cancel(drawing_cancel[1])
+                    status['state'] = 'stopping'
+                    temp = directory / 'job.cancel.tmp'
+                    temp.write_text(json.dumps(status))
+                    temp.replace(directory / 'job.json')
+                except (ValueError, OSError) as error:
+                    return self.send_json({'error': str(error)}, 409)
+            return self.send_json({'id': drawing_cancel[1], 'state': 'stopping'})
         if self.path not in ('/api/runs', '/api/artsy/runs'):
             return self.send_json({'error': 'Not found.'}, 404)
         try:
@@ -418,13 +466,13 @@ class Handler(SimpleHTTPRequestHandler):
         except (OSError, ValueError, TypeError) as error:
             return self.send_json({'error': str(error)}, 400)
         with LOCK:
-            if ACTIVE:
+            if drawing_busy():
                 return self.send_json({'error': 'A generation is already running.'}, 409)
             run_id = uuid4().hex
             directory = JOBS / run_id
             directory.mkdir(parents=True)
             (directory / 'job.json').write_text(json.dumps({'state': 'queued', **request}))
-            ACTIVE = run_id
+            SUPERVISOR.reserve(run_id)
             threading.Thread(target=run_job, args=(directory, request), daemon=True).start()
         self.send_json({'id': run_id}, 202)
 
@@ -531,12 +579,12 @@ class Handler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            status = json.loads((directory / 'job.json').read_text())
+            status = drawing_status(directory)
             console = directory / 'console.txt'
             status['console'] = console.read_text(errors='replace') if console.exists() else ''
             for name in ('trace.json', 'result.json'):
                 file = directory / 'output' / name
-                if file.exists() and status['state'] not in ('queued', 'running'):
+                if file.exists() and status['state'] not in ('queued', 'running', 'stopping'):
                     status[name.split('.')[0]] = json.loads(file.read_text())
             status['artifacts'] = [name for name in ('image.png', 'program.py', 'trace.json', 'result.json') if (directory / 'output' / name).exists()]
             progress = directory / 'progress.json'

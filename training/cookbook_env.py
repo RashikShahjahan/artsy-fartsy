@@ -11,16 +11,20 @@ import base64
 import hashlib
 import io
 import json
+import logging
 from functools import lru_cache
 from pathlib import Path
 import re
 import subprocess
+import threading
 from uuid import uuid4
 
 from PIL import Image
 
-from drawing.config import IMAGE_SIZE, MODEL_ID, MODEL_CONTEXT_WINDOW
-from drawing.agent_contract import drawing_system_prompt
+from drawing.config import MODEL_ID, MODEL_CONTEXT_WINDOW
+from drawing.model_profiles import resolve_model
+from drawing.vision import prepare_image
+from drawing.agent_contract import drawing_system_prompt, host_user_prompt, turn_countdown
 from drawing.judges import (JUDGE_MAX_TOKENS, CODE_SAFETY_MAX_TOKENS, adherence_rubric_prompt,
     parse_adherence_rubric, code_safety_judge_prompt, parse_code_safety_judgment,
     safety_judge_prompt, parse_safety_judgment, RL_JUDGE_VERSION)
@@ -33,24 +37,86 @@ MAX_PNG = 8 * 1024 * 1024
 SOURCE_BYTES = 64 * 1024
 NO_TOOL_REMINDER = 'Every response must contain a bash tool call with {"command":"..."}.'
 
-_session_limit: asyncio.Semaphore | None = None
-_group_limit: asyncio.Semaphore | None = None
+# Leave room for a base64-encoded maximum-sized preview and scorer response.
+MAX_OUTPUT = 12 * 1024 * 1024
+
+
+class RolloutResources:
+    """Own capacity for whole groups and their long-lived workspaces."""
+
+    def __init__(self, max_samples: int, group_size: int):
+        if max_samples < 1 or group_size < 1 or max_samples < group_size:
+            raise ValueError("max_samples must be at least the positive group_size")
+        self.group_size = group_size
+        self.sessions = asyncio.Semaphore(max_samples)
+        self.groups = asyncio.Semaphore(max_samples // group_size)
+
+
+_resources: RolloutResources | None = None
 
 
 def configure_concurrency(max_samples: int, group_size: int = 4) -> None:
     """Limit concurrent long-lived Docker workspaces across all prompt groups."""
-    global _session_limit, _group_limit
-    _session_limit = asyncio.Semaphore(max_samples)
-    _group_limit = asyncio.Semaphore(max(1, max_samples // group_size))
+    global _resources
+    _resources = RolloutResources(max_samples, group_size)
 
 
 def _run(argv: list[str], *, stdin: bytes | None = None, timeout: float = 30) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, input=stdin, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, timeout=timeout, check=False)
+    """Drain both pipes continuously while retaining only bounded output."""
+    process = subprocess.Popen(argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    outputs = [bytearray(), bytearray()]
+    def drain(pipe, output):
+        while chunk := pipe.read(65536):
+            remaining = MAX_OUTPUT - len(output)
+            if remaining > 0:
+                output.extend(chunk[:remaining])
+        pipe.close()
+    readers = [threading.Thread(target=drain, args=(pipe, output), daemon=True)
+               for pipe, output in zip((process.stdout, process.stderr), outputs)]
+    for reader in readers:
+        reader.start()
+    def write_input():
+        try:
+            process.stdin.write(stdin)
+            process.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+    writer = None
+    if stdin is not None:
+        writer = threading.Thread(target=write_input, daemon=True)
+        writer.start()
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+        raise
+    finally:
+        for reader in readers:
+            reader.join()
+        if writer:
+            writer.join()
+    return subprocess.CompletedProcess(argv, process.returncode, bytes(outputs[0]), bytes(outputs[1]))
 
 
 async def _docker(argv: list[str], *, stdin: bytes | None = None, timeout: float = 30):
-    return await asyncio.to_thread(_run, ["docker", *argv], stdin=stdin, timeout=timeout)
+    # A cancelled to_thread keeps running. Wait for it before allowing its owner
+    # to remove the named container or release its capacity.
+    task = asyncio.create_task(asyncio.to_thread(_run, ["docker", *argv], stdin=stdin, timeout=timeout))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        while not task.done():
+            try:
+                await asyncio.shield(task)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if task.done() and not task.cancelled():
+            task.exception()  # consume any worker error
+        raise
 
 
 @lru_cache(maxsize=4)
@@ -77,11 +143,8 @@ def initial_messages(spec: dict, tool_specs: list[dict], model=MODEL_ID,
               f'python /opt/artsy/render.py --seed {spec["seed"]} '
               '--output /workspace/preview --preview < /workspace/program.py')
     max_turns = settings["agent"]["step_limit"]
-    instructions = drawing_system_prompt(token_limit=None) + (
-        f"\n\nYou have {max_turns} model turns to complete this task. "
-        "Each response uses one turn. Submit your final output by the last turn.")
-    return [*prefix, {"role": "user",
-                      "content": f"System instructions:\n{instructions}\n\nTask:\n{prompt}"}]
+    return [*prefix, {"role": "user", "content": host_user_prompt(
+        drawing_system_prompt(token_limit=None), prompt, max_turns)}]
 
 
 def _preview_observation(stdout: bytes, stderr: bytes, returncode: int, model=MODEL_ID,
@@ -104,15 +167,9 @@ def _preview_observation(stdout: bytes, stderr: bytes, returncode: int, model=MO
                     or not 1 <= image.height <= 4096):
                 raise ValueError("Preview must be PNG")
             rgb = image.convert("RGB")
-        # Match the native Qwen bridge's bounded image preprocessing.
-        from transformers.models.qwen2_vl.image_processing_qwen2_vl import smart_resize
         processor = encoder(model, renderer, max_length, revision).image_processor
-        height, width = smart_resize(
-            rgb.height, rgb.width,
-            factor=processor.patch_size * processor.merge_size,
-            min_pixels=IMAGE_SIZE["shortest_edge"],
-            max_pixels=IMAGE_SIZE["longest_edge"])
-        images.append({"type": "image", "image": rgb.resize((width, height))})
+        images.append({"type": "image", "image": prepare_image(
+            rgb, processor, vision=resolve_model(model)["vision"])})
     feedback = None
     for line in output.splitlines():
         try:
@@ -137,21 +194,33 @@ class DockerSession:
         self.model, self.renderer = model, renderer
         self.max_length, self.revision = max_length, revision
         self.container: str | None = None
+        self._lifecycle_lock = asyncio.Lock()
+        self._closed = False
         self.commands: list[str] = []
         self.previews: list[dict] = []
         self._owns_slot = False
+        self._resources: RolloutResources | None = None
         self.submitted = False
         self.result = None
         self.png = None
 
     async def start(self):
+        async with self._lifecycle_lock:
+            if self._closed:
+                raise RuntimeError("Docker episode already closed")
+            await self._start()
+
+    async def _start(self):
         if self.container:
             return
-        if _session_limit is None:
+        resources = self._resources or _resources
+        if resources is None:
             raise RuntimeError("Configure rollout concurrency before starting an episode")
-        await _session_limit.acquire()
+        await resources.sessions.acquire()
+        self._resources = resources
         self._owns_slot = True
         name = "artsy-rl-" + uuid4().hex
+        self.container = name
         try:
             result = await _docker(["run", "-d", "--name", name, "--init",
                                     "--network", "none", "--memory", "2g", "--cpus", "2",
@@ -160,10 +229,8 @@ class DockerSession:
             if result.returncode:
                 raise RuntimeError("Could not start Docker episode: " +
                                    result.stderr.decode(errors="replace")[-2048:])
-            self.container = name
         except BaseException:
-            _session_limit.release()
-            self._owns_slot = False
+            await self._close()
             raise
 
     async def execute(self, command: str):
@@ -255,11 +322,21 @@ class DockerSession:
         if (not result["unsafe"] and refusal is None and source.strip()
                 and len(source.encode()) <= SOURCE_BYTES):
             (self.directory / "program.py").write_text(source)
-            scored = await _docker(
-                ["run", "--rm", "-i", "--network", "none", "--memory", "2g",
-                 "--cpus", "2", IMAGE, "python", "/opt/artsy/score_rl.py",
-                 "--seed", str(self.spec["seed"])],
-                stdin=source.encode(), timeout=90)
+            scorer_name = "artsy-score-" + uuid4().hex
+            try:
+                scored = await _docker(
+                    ["run", "--rm", "-i", "--name", scorer_name, "--network", "none", "--memory", "2g",
+                     "--cpus", "2", IMAGE, "python", "/opt/artsy/score_rl.py",
+                     "--seed", str(self.spec["seed"])],
+                    stdin=source.encode(), timeout=90)
+            finally:
+                try:
+                    removal = await _docker(["rm", "-f", scorer_name], timeout=20)
+                    if removal.returncode and b"No such container" not in removal.stderr:
+                        logging.error("Failed to remove scorer container %s: %s", scorer_name,
+                                      removal.stderr.decode(errors="replace")[-2048:])
+                except Exception as error:
+                    logging.error("Failed to remove scorer container %s: %s", scorer_name, error)
             if scored.returncode:
                 raise RuntimeError("Trusted Docker scorer failed: " +
                                    scored.stderr.decode(errors="replace")[-2048:])
@@ -297,14 +374,21 @@ class DockerSession:
         }
 
     async def close(self):
+        async with self._lifecycle_lock:
+            self._closed = True
+            await self._close()
+
+    async def _close(self):
         try:
             if self.container:
-                await _docker(["rm", "-f", self.container], timeout=20)
+                result = await _docker(["rm", "-f", self.container], timeout=20)
+                if result.returncode and b"No such container" not in result.stderr:
+                    raise RuntimeError("Could not remove Docker episode: " + result.stderr.decode(errors="replace")[-2048:])
                 self.container = None
         finally:
             if self._owns_slot:
-                assert _session_limit is not None
-                _session_limit.release()
+                assert self._resources is not None
+                self._resources.sessions.release()
                 self._owns_slot = False
 
 
@@ -348,6 +432,7 @@ class ArtsyGroupBuilder:
         self.model, self.renderer, self.revision = model, renderer, revision
         self.sessions: list[DockerSession] = []
         self._owns_group_slot = False
+        self._resources: RolloutResources | None = None
 
     async def make_envs(self):
         from tinker_cookbook.rl.message_env import EnvFromMessageEnv, MessageStepResult
@@ -358,9 +443,7 @@ class ArtsyGroupBuilder:
             def _countdown(self):
                 turn = self._turn_count + 1
                 self.history.append({"role": "user", "content":
-                    f"Turn {turn} of {self.max_turns}." +
-                    (" This is your final turn; submit your final output now."
-                     if turn == self.max_turns else "")})
+                    turn_countdown(turn, self.max_turns)})
 
             async def initial_observation(self):
                 if not self.history:
@@ -383,14 +466,27 @@ class ArtsyGroupBuilder:
 
         # Admit whole groups so partially started groups cannot exhaust slots
         # while waiting for trajectories needed before group cleanup.
-        if _group_limit is not None:
-            await _group_limit.acquire()
-            self._owns_group_slot = True
+        resources = _resources
+        if resources is None:
+            raise RuntimeError("Configure rollout concurrency before creating a group")
+        if self.group_size != resources.group_size:
+            raise ValueError("Group size does not match configured concurrency")
+        await resources.groups.acquire()
+        self._resources = resources
+        self._owns_group_slot = True
+        try:
+            return self._make_environments(DrawingMessageEnv, EnvFromMessageEnv, RolloutLimits)
+        except BaseException:
+            await self.cleanup()
+            raise
+
+    def _make_environments(self, DrawingMessageEnv, EnvFromMessageEnv, RolloutLimits):
         environments = []
         for _ in range(self.group_size):
             session = DockerSession(self.spec,
                 self.root / f"step-{self.step:06d}" / self.spec["id"] / uuid4().hex,
                 self.judge, self.model, self.renderer, self.max_length, self.revision)
+            session._resources = self._resources
             self.sessions.append(session)
 
             tool_obj = BashTool(session)
@@ -420,11 +516,15 @@ class ArtsyGroupBuilder:
 
     async def cleanup(self):
         try:
-            await asyncio.gather(*(session.close() for session in self.sessions))
+            results = await asyncio.gather(*(session.close() for session in self.sessions), return_exceptions=True)
+            for result in results:
+                if isinstance(result, BaseException):
+                    logging.error("Failed to clean up Docker episode: %s", result)
         finally:
             self.sessions.clear()
             if self._owns_group_slot:
-                _group_limit.release()
+                assert self._resources is not None
+                self._resources.groups.release()
                 self._owns_group_slot = False
 
     async def compute_group_rewards(self, trajectories, envs):

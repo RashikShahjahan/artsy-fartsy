@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -588,6 +589,7 @@ class TinkerAPITests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "configuration does not match"):
                     train(args, data, {**manifest, "loss_policy": "assistant-only"})
                 service.create_training_client_from_state_with_optimizer.assert_not_called()
+                (output / "final.json").unlink()  # Simulate interruption before final export.
                 train(args, data, dict(manifest))
                 service.create_training_client_from_state_with_optimizer.assert_called_once_with("tinker://run/weights/state")
                 self.assertEqual(client.optim_step.call_count, 2)
@@ -598,6 +600,52 @@ class TinkerAPITests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "configuration does not match"):
                     train(args, data, dict(manifest))
                 self.assertEqual(client.optim_step.call_count, 2)
+
+    def test_legacy_resume_survives_manifest_upgrade_and_finalizes_at_last_step(self):
+        import contextlib
+        import io
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
+        import tinker
+        from training.sft import MODEL_ID, parser, train
+
+        datum = tinker.Datum(model_input=tinker.ModelInput.from_ints([1, 2]),
+            loss_fn_inputs={"target_tokens": tinker.TensorData(data=[1, 2], dtype="int64", shape=[2]),
+                            "weights": tinker.TensorData(data=[0., 1.], dtype="float32", shape=[2])})
+        manifest = {"dataset_sha256": "dataset", "api_doc_sha256": "docs",
+                    "conversion": CONVERSION, "input_mode": INPUT_MODE, "loss_policy": LOSS_POLICY}
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp)
+            args = parser().parse_args(["--dataset", "accepted.jsonl", "--output-dir", temp,
+                                        "--batch-size", "1", "--lr-schedule", "constant"])
+            client = MagicMock()
+            client.forward_backward.return_value.result.return_value = SimpleNamespace(metrics={})
+            client.save_state.return_value.result.return_value = SimpleNamespace(path="tinker://state")
+            client.save_weights_for_sampler.return_value.result.return_value = SimpleNamespace(path="tinker://sampler")
+            service = MagicMock()
+            service.get_server_capabilities.return_value = SimpleNamespace(supported_models=[SimpleNamespace(model_name=MODEL_ID)])
+            service.create_lora_training_client.return_value = client
+            service.create_training_client_from_state_with_optimizer.return_value = client
+            with patch("tinker.ServiceClient", return_value=service), contextlib.redirect_stdout(io.StringIO()):
+                train(args, [datum], dict(manifest))
+                checkpoint = output / "checkpoint-000001.json"
+                recorded = output / "training-manifest.json"
+                for path in (checkpoint, recorded):
+                    value = json.loads(path.read_text())
+                    del value["config"]["processor_revision"]
+                    path.write_text(json.dumps(value))
+                (output / "final.json").unlink()
+                args.resume_from_checkpoint = checkpoint
+                # Simulate an interruption after the manifest has been upgraded.
+                client.save_weights_for_sampler.side_effect = RuntimeError("interrupted")
+                with self.assertRaisesRegex(RuntimeError, "interrupted"):
+                    train(args, [datum], dict(manifest))
+                client.save_weights_for_sampler.side_effect = None
+                train(args, [datum], dict(manifest))
+                final = json.loads((output / "final.json").read_text())
+                self.assertEqual(final["config"], json.loads(recorded.read_text())["config"])
+                self.assertIn("processor_revision", final["config"])
+                self.assertEqual(client.optim_step.call_count, 1)
 
     def test_cosine_decay_resumes_at_same_rate_and_pins_schedule_horizon(self):
         import contextlib
@@ -729,3 +777,17 @@ class TrainingCLITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class MetadataProfileTests(unittest.TestCase):
+    def test_encoder_loads_pinned_metadata_for_hosted_suffix(self):
+        from drawing.model_profiles import QWEN36_MODEL_ID, resolve_model
+        from training.sft import create_encoder
+        profile = resolve_model(QWEN36_MODEL_ID)
+        with patch('transformers.AutoTokenizer.from_pretrained') as tokenizer, \
+             patch('transformers.AutoImageProcessor.from_pretrained') as processor, \
+             patch('tinker_cookbook.renderers.get_renderer') as renderer:
+            create_encoder(QWEN36_MODEL_ID + ':peft:262144', 100)
+            tokenizer.assert_called_once_with(QWEN36_MODEL_ID, revision=profile['revision'])
+            processor.assert_called_once_with(QWEN36_MODEL_ID, revision=profile['revision'])
+            renderer.assert_called_once_with(profile['renderer'], tokenizer.return_value,
+                                             image_processor=processor.return_value)
