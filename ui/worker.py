@@ -2,6 +2,7 @@
 import asyncio
 import base64
 import json
+import shutil
 from pathlib import Path
 import sys
 
@@ -59,7 +60,23 @@ def main():
 
     try:
         from evaluation.draw import main as draw
-        return draw(progress=progress, **({'approval': approve} if job.get('execution_mode') == 'approval' else {}))
+        status = draw(progress=progress, **({'approval': approve} if job.get('execution_mode') == 'approval' else {}))
+        result_file = output / 'result.json'
+        if job.get('experience') == 'artsy' and result_file.is_file():
+            result = json.loads(result_file.read_text())
+            if result.get('outcome') == 'incomplete' and result.get('turnLimitReached'):
+                from ui.server import content_hash
+                # Keep the latest successful preview and current source for the next prompt.
+                preview = next((output / name for step in reversed(list(steps.values()))
+                                for name in reversed(step.get('previews', []))
+                                if (output / name).is_file()), None)
+                if preview:
+                    shutil.copyfile(preview, output / 'image.png')
+                result.update(sourceHash=content_hash(output / 'program.py'),
+                              imageHash=content_hash(output / 'image.png'))
+                result_file.write_text(json.dumps(result))
+                return 0
+        return status
     finally:
         logs = sorted((output / 'logs').glob('*.eval'))
         if logs:

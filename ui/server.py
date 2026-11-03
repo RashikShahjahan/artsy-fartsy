@@ -185,8 +185,9 @@ def artsy_request(body):
             result = json.loads((directory / 'output/result.json').read_text())
             source = directory / 'output/program.py'
             image = directory / 'output/image.png'
-            if (parent.get('state') != 'completed' or result.get('outcome') != 'submitted'
-                    or not source.is_file() or not image.is_file() or source.stat().st_size > 64 * 1024
+            paused = result.get('outcome') == 'incomplete' and result.get('turnLimitReached') is True
+            if (parent.get('state') != 'completed' or not (result.get('outcome') == 'submitted' or paused)
+                    or not source.is_file() or (not paused and not image.is_file()) or source.stat().st_size > 64 * 1024
                     or content_hash(source) != result.get('sourceHash')
                     or content_hash(image) != result.get('imageHash')):
                 raise ValueError('The original drawing is incomplete or has changed. Start a new drawing.')

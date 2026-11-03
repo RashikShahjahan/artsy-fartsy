@@ -158,6 +158,37 @@ class ArtsyTests(unittest.TestCase):
                  patch('evaluation.draw.main', side_effect=draw):
                 self.assertEqual(worker.main(), 0)
 
+    def test_turn_limit_keeps_latest_preview_and_source_for_follow_up(self):
+        for with_preview in (True, False):
+            with self.subTest(with_preview=with_preview), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                folder = root / ('a' * 32)
+                output = folder / 'output'
+                output.mkdir(parents=True)
+                (folder / 'job.json').write_text(json.dumps({'experience': 'artsy', 'state': 'completed'}))
+
+                def draw(*, progress):
+                    (output / 'program.py').write_text('# latest source')
+                    (output / 'result.json').write_text(json.dumps({'outcome': 'incomplete', 'turnLimitReached': True}))
+                    if with_preview:
+                        for number in range(2):
+                            progress({'step': {'id': str(number), 'status': 'completed',
+                                'previews': ['data:image/png;base64,' + base64.b64encode(f'preview {number}'.encode()).decode()]}})
+                    return 1
+
+                with patch.object(server, 'JOBS', root), \
+                     patch('sys.argv', ['ui.worker', str(folder), 'Fox', '42', 'openai/gpt-6-luna']), \
+                     patch('evaluation.draw.main', side_effect=draw):
+                    self.assertEqual(worker.main(), 0)
+                    self.assertEqual(server.artsy_request({'prompt': 'Keep going', 'parent_id': folder.name})['parent_id'], folder.name)
+                    result = json.loads((output / 'result.json').read_text())
+                    self.assertEqual(result['outcome'], 'incomplete')
+                    if with_preview:
+                        self.assertEqual((output / 'image.png').read_bytes(), b'preview 1')
+                    (output / 'program.py').write_text('changed')
+                    with self.assertRaisesRegex(ValueError, 'changed'):
+                        server.artsy_request({'prompt': 'Keep going', 'parent_id': folder.name})
+
     def test_status_and_preview_routes_preserve_live_steps(self):
         from io import BytesIO
         with tempfile.TemporaryDirectory() as temporary, patch.object(server, 'JOBS', Path(temporary)):

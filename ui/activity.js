@@ -86,7 +86,8 @@
     const ready = run.state === 'completed' && run.result?.outcome === 'submitted' && run.artifacts?.includes('image.png');
     const refused = run.result?.outcome === 'refused';
     if (!steps.length && !terminal) steps = [{id: 'starting', title: 'Getting ready to draw', status: 'running'}];
-    if (run.progress?.phase === 'rendering' || terminal) steps.push({
+    const paused = run.result?.outcome === 'incomplete' && run.result?.turnLimitReached === true;
+    if (!paused && (run.progress?.phase === 'rendering' || terminal)) steps.push({
       id: 'outcome', kind: 'result', title: terminal ? ready ? 'Drawing ready' : refused ? 'Request declined' : 'Drawing stopped' : 'Checking the final drawing',
       status: terminal ? ready ? 'completed' : refused ? 'refused' : 'failed' : 'running',
       output: terminal && !ready ? run.result?.refusalReason || run.result?.reason || 'The drawing could not be completed.' : '',
@@ -118,6 +119,7 @@
       const steps = stepsFor(run, root.ArtsyTrace);
       this.panel.hidden = false;
       const active = ['queued', 'running'].includes(run.state);
+      const becameTerminal = this.active !== false && !active;
       if (this.active !== active) {
         this.rows.clear(); this.list.replaceChildren(); this.list.scrollTop = 0;
         this.active = active;
@@ -129,6 +131,8 @@
       const current = [...visibleSteps].reverse().find(step => ['running', 'pending'].includes(step.status))
         || visibleSteps.at(-1) || steps.at(-1);
       const history = steps.filter(step => step.kind !== 'model' || step.output || step.previews?.length);
+      if (becameTerminal && run.result?.outcome === 'incomplete' && run.result?.turnLimitReached === true)
+        this.selected = history.length - 1;
       this.selected = Math.max(0, Math.min(this.selected, history.length - 1));
       const displayed = active ? current ? [current] : [] : history.length ? [history[this.selected]] : [];
       const turn = run.progress?.turn;

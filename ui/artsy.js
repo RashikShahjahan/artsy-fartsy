@@ -105,9 +105,9 @@
     current.selectedId = version.id;
     ui.drawingImage.src = `/api/runs/${version.id}/image.png`;
     ui.drawingImage.alt = version.prompt;
-    ui.drawingImage.hidden = false; ui.workingPlaceholder.hidden = true;
+    ui.drawingImage.hidden = version.hasImage === false; ui.workingPlaceholder.hidden = true;
     ui.drawingProcess.hidden = false;
-    ui.download.href = ui.drawingImage.src; ui.download.hidden = false;
+    ui.download.href = ui.drawingImage.src; ui.download.hidden = version.hasImage === false;
     renderVersions(version.id); updateVoiceLabel();
     if (loadSteps) { loadActivity(version.id); }
   }
@@ -199,7 +199,8 @@
     stopListening(true); showError(''); setBusy(true);
     let accepted = false;
     try {
-      const parentId = current?.selectedId || current?.versions.at(-1)?.id;
+      const selected = current?.versions.find(version => version.id === current.selectedId) || current?.versions.at(-1);
+      const parentId = selected?.editable === false ? null : selected?.id;
       const response = await fetch('/api/artsy/runs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({prompt, model: ui.model.value, execution_mode: ui.modeApproval.checked ? 'approval' : 'auto', ...(parentId ? {parent_id: parentId} : {})})});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'I couldn’t start this drawing. Please try again.');
@@ -242,14 +243,19 @@
   }
   function finishRun(run,id) {
     if(activeRun!==id)return;
-    if(run.state==='completed' && run.result?.outcome==='submitted' && run.artifacts?.includes('image.png')) {
-      if(!current.versions.some(version=>version.id===id))current.versions.push({id,prompt:run.prompt});
+    const paused=run.result?.outcome==='incomplete' && run.result?.turnLimitReached===true;
+    if(run.state==='completed' && (paused || run.result?.outcome==='submitted' && run.artifacts?.includes('image.png'))) {
+      if(!current.versions.some(version=>version.id===id))current.versions.push({id,prompt:run.prompt,hasImage:run.artifacts?.includes('image.png'),editable:!paused || run.artifacts?.includes('program.py')});
       current.selectedId=id;
       drawings=[current,...drawings.filter(drawing=>drawing.id!==current.id)].slice(0,50);persist();
       showVersion(current.versions.find(version=>version.id===id),false);
       activeRun=null;rememberActive(null);setBusy(false);
       if(!Recognition)setTypedInput(true,false);
-      speak('Your drawing is ready. Anything you’d like to change?');
+      if(paused) {
+        ui.prompt.value='';
+        ui.voiceTitle.textContent='Here’s the latest step. What would you like to do next?';
+        speak(ui.voiceTitle.textContent);
+      } else speak('Your drawing is ready. Anything you’d like to change?');
     } else if(run.result?.outcome==='refused') {
       finishFailed(run.result.refusalReason||run.result.reason||'Let’s try a different idea.');
     } else if(['cancelled','canceled','stopped'].includes(run.state)) {

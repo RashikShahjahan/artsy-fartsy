@@ -104,3 +104,27 @@ test('live drawing advances from recorded steps to a downloadable validated rend
   assert.equal(ui.download.hidden, false);
   assert.equal(ui['drawing-process'].hidden, false);
 });
+
+test('the ten-turn limit shows the latest drawing and continues from it on follow-up', async () => {
+  const id = 'b'.repeat(32);
+  const run = {state: 'completed', prompt: 'A cat', result: {outcome: 'incomplete', turnLimitReached: true},
+    artifacts: ['image.png', 'program.py'], progress: {turn: 10, steps: [
+      {id: 'first', kind: 'model', title: 'First step', status: 'completed', output: 'Starting'},
+      {id: 'last', kind: 'tool', tool: 'preview_drawing', title: 'Latest preview', status: 'completed', previews: ['preview-9-0.png']},
+    ]}};
+  const {elements: ui, requests} = setup([], url => url === '/api/artsy/runs' ? {id} : run);
+  ui.prompt.value = run.prompt;
+  ui['prompt-form'].onsubmit({preventDefault() {}});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui['drawing-image'].src, `/api/runs/${id}/image.png`);
+  assert.equal(ui['drawing-image'].hidden, false);
+  assert.equal(ui['input-error'].hidden, true);
+  assert.equal(ui.prompt.value, '');
+  assert.equal(ui.send.disabled, false);
+  assert.equal(ui['activity-steps'].children[0].children[1].src, `/api/runs/${id}/preview-9-0.png`);
+  ui.prompt.value = 'Add a blue hat';
+  ui['prompt-form'].onsubmit({preventDefault() {}});
+  const followUp = JSON.parse(requests.filter(request => request.url === '/api/artsy/runs').at(-1).options.body);
+  assert.equal(followUp.parent_id, id);
+  assert.equal(followUp.prompt, 'Add a blue hat');
+});
