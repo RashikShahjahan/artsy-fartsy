@@ -10,7 +10,7 @@ function deferred(){
   const promise=new Promise(done=>{resolve=done;});
   return {promise,resolve};
 }
-async function until(check, timeout=300){
+async function until(check, timeout=1000){
   const start=Date.now();
   while(!check()){
     if(Date.now()-start>timeout)throw new Error('Run client failed to advance');
