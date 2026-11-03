@@ -32,6 +32,7 @@ HELP = """Python dataset generation
   --prompt-retries N    Attempts per individual prompt, 1–5 (default: 5)
   --teacher-model ID    Required for rendering, or set ARTSY_TEACHER_MODEL
   --teacher-url URL     Chat base URL (default: http://127.0.0.1:8080/v1)
+  --teacher-thinking MODE  OpenRouter teacher reasoning: enabled (default) or disabled
   --timeout-ms N        Per-request deadline (default: 300000)
   --prompts-only        Generate/save prompts with resumable audit; no rendering
   --dry-run             Alias for --prompts-only (calls LLMs and saves files)
@@ -97,6 +98,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--prompt-retries", default="5")
     parser.add_argument("--teacher-model")
     parser.add_argument("--teacher-url")
+    parser.add_argument("--teacher-thinking", choices=("enabled", "disabled"), default="enabled")
     parser.add_argument("--timeout-ms", default=str(MODEL_REQUEST_SECONDS * 1000))
     parser.add_argument("--dry-run", "--prompts-only", dest="prompts_only", action="store_true")
     parser.add_argument("--retry-errors", action="store_true")
@@ -257,7 +259,8 @@ async def _main(argv: list[str] | None = None) -> int:
     timeout_ms = int(args.timeout_ms)
     if timeout_ms < 1 or timeout_ms > 300_000:
         raise ValueError("timeout-ms must be an integer from 1 to 300000")
-    teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms}) if model else None
+    teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms,
+                           "reasoningEnabled": args.teacher_thinking == "enabled"}) if model else None
     options = {"output": output, "candidates": int(args.candidates or 2),
         "maxTokens": int(args.max_tokens) if args.max_tokens is not None else None,
         "workers": int(args.workers or 1),

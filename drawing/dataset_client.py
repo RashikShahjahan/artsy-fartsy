@@ -67,6 +67,7 @@ class ChatClient:
     api_key: str | None = field(default=None, repr=False)
     timeout_ms: int = 60_000
     max_tokens: int = 2048
+    reasoning_enabled: bool = True
 
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
     _owns_client: bool = field(default=False, init=False, repr=False)
@@ -137,7 +138,7 @@ class ChatClient:
         if temperature is not None:
             request_body["temperature"] = temperature
         if self.baseUrl == OPENROUTER_MODEL_URL:
-            request_body["reasoning"] = {"enabled": True, "exclude": False}
+            request_body["reasoning"] = {"enabled": self.reasoning_enabled, "exclude": False}
         if self.baseUrl == TINKER_MODEL_URL:
             request_body["separate_reasoning"] = True
             if self.model.startswith(("thinkingmachines/Inkling", "zai-org/GLM-5.3")):
@@ -235,7 +236,8 @@ def chat_client(options: dict[str, Any]):
         raise ValueError("maxTokens must be a positive integer")
     key = options.get("apiKey")
     return ChatClient(model=model, baseUrl=base, api_key=endpoint_api_key(base, key if isinstance(key, str) else None),
-                      timeout_ms=timeout, max_tokens=budget)
+                      timeout_ms=timeout, max_tokens=budget,
+                      reasoning_enabled=options.get("reasoningEnabled", True))
 
 
 def parse_json_reply(text: str) -> Any:

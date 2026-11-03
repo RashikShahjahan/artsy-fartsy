@@ -1,4 +1,4 @@
-"""Prepare disjoint PartiPrompts inputs for Artsy SFT generation, evaluation and RL.
+"""Prepare disjoint PartiPrompts inputs for SFT, evaluation, RL and preferences.
 
 Uses only the standard library. Download the pinned TSV first; see the generated
 dataset README for commands. This does not generate SFT answers or call models.
@@ -51,7 +51,7 @@ def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def prepare(source: Path, output: Path, seed: int) -> dict:
+def prepare(source: Path, output: Path, seed: int, preference_count: int | None = None) -> dict:
     if digest(source.read_bytes()) != SOURCE_SHA256:
         raise ValueError("Source TSV does not match the pinned Hugging Face revision")
     with source.open(encoding="utf-8-sig", newline="") as stream:
@@ -104,6 +104,28 @@ def prepare(source: Path, output: Path, seed: int) -> dict:
         for name, subset in zip(SPLITS, (rows[:sft_end], rows[sft_end:eval_end], rows[eval_end:])):
             splits[name].extend(subset)
 
+    # Carve only from the original SFT pool, preserving evaluation/RL assignments.
+    original_sft_count = targets["sft"]
+    if preference_count is None:
+        preference_count = (original_sft_count * 20 + 50) // 100
+    if not 1 <= preference_count < original_sft_count:
+        raise ValueError("Preference count must reserve at least one prompt and leave SFT nonempty")
+    sft_strata = defaultdict(list)
+    for row in splits["sft"]:
+        sft_strata[(row["source"]["category"], row["source"]["challenge"])].append(row)
+    preference_counts = apportion({key: len(rows) for key, rows in sft_strata.items()},
+                                  preference_count)
+    splits["sft"] = []
+    splits["preference"] = []
+    for key in sorted(sft_strata):
+        rows = sorted(sft_strata[key],
+                      key=lambda row: digest(f"{seed}:preference:{row['id']}".encode()))
+        boundary = preference_counts[key]
+        splits["preference"].extend(rows[:boundary])
+        splits["sft"].extend(rows[boundary:])
+    targets["sft"] -= preference_count
+    targets["preference"] = preference_count
+
     # Keep the source order out of the training order as well as the assignment.
     for rows in splits.values():
         rows.sort(key=lambda row: digest(f"{seed}:order:{row['id']}".encode()))
@@ -121,18 +143,22 @@ def prepare(source: Path, output: Path, seed: int) -> dict:
     assert len(seen) == len(groups)
 
     manifest = {
-        "format_version": 1,
+        "format_version": 2,
         "source": {"url": SOURCE, "revision": REVISION, "license": "Apache-2.0",
                    "file": "raw/PartiPrompts.tsv", "sha256": digest(source.read_bytes()),
                    "records": len(raw)},
         "unique_prompts": len(groups), "duplicates_collapsed": len(raw) - len(groups),
-        "split_seed": seed, "requested_percentages": dict(zip(SPLITS, (70, 10, 20))),
-        "method": "Largest-remainder SFT allocation per (Category, Challenge), then evaluation allocation from remainder; RL receives remainder. SHA-256 ordering with split seed.",
+        "split_seed": seed, "original_requested_percentages": dict(zip(SPLITS, (70, 10, 20))),
+        "preference_reservation": {"from_split": "sft", "original_sft_records": original_sft_count,
+                                   "records": preference_count,
+                                   "percent_of_original_sft": 100 * preference_count / original_sft_count},
+        "method": "Original 70/10/20 allocation: largest-remainder SFT allocation per (Category, Challenge), then evaluation from remainder; RL receives remainder. Preference is carved from original SFT using largest-remainder allocation per (Category, Challenge) and SHA-256 seed:preference:id ordering. Evaluation and RL are unchanged. Final ordering uses SHA-256 with split seed.",
         "normalization": "Unicode NFKC, casefold, collapse whitespace; first source occurrence retained, all source row indices preserved (one-based data rows).",
         "leakage_checks": {"disjoint_ids": True, "disjoint_normalized_prompts": True,
                            "all_unique_prompts_assigned_once": True,
                            "near_duplicate_or_semantic_overlap_checked": False},
         "readiness": {"sft": "Prompt inputs only; generate teacher trajectories and review/export accepted.jsonl before SFT.",
+                      "preference": "Reserved prompt inputs only; collect candidate outputs and preference labels before preference tuning. Exclude from SFT teacher generation and training.",
                       "evaluation": "Compatible with evaluation.evaluate --dataset.",
                       "rl": "Compatible with training.grpo --dataset; requires an SFT checkpoint and configured judges."},
         "splits": {},
@@ -161,8 +187,10 @@ def main() -> None:
     parser.add_argument("--source", type=Path, default=ROOT / "datasets/parti-prompts/raw/PartiPrompts.tsv")
     parser.add_argument("--output", type=Path, default=ROOT / "datasets/parti-prompts")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--preference-count", type=int,
+                        help="Prompts to reserve from original SFT (default: 20%% of SFT, rounded)")
     args = parser.parse_args()
-    manifest = prepare(args.source, args.output, args.seed)
+    manifest = prepare(args.source, args.output, args.seed, args.preference_count)
     print(json.dumps({name: entry["records"] for name, entry in manifest["splits"].items()}, indent=2))
 
 

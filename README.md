@@ -308,6 +308,16 @@ or network access. `--renderer local` explicitly opts into host execution for
 trusted programs. All outcomes remain
 in `candidates.jsonl`; no train/validation/test splits are assigned automatically.
 
+For the local PartiPrompts dataset, reproduce the prompt assignments with
+`python3 scripts/prepare_parti_prompts.py --preference-count 228`. This reserves
+228 of the original 1,142 SFT prompts in
+`datasets/parti-prompts/preference/prompts.jsonl`, leaving 914 in SFT and keeping
+the 163 evaluation and 327 RL prompts unchanged. The reserve is deterministic
+and stratified by upstream Category and Challenge. Keep these reserved prompts
+out of SFT generation and training; preference tuning still requires candidate
+outputs and preference labels. Dataset files and their manifest are local,
+Git-ignored artifacts; the preparation script reproduces them from the pinned TSV.
+
 The output includes prompt plans/checkpoints, `prompts.jsonl`, candidate records,
 rendered artifacts, `manifest.json`, and `summary.json`. In **SFT candidates**,
 review full trajectories and images, set Approve/Reject/Pending, and save your

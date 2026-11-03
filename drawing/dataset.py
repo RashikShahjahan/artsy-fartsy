@@ -35,8 +35,11 @@ def _write_jsonl_atomic(path: Path, rows: list[dict[str, Any]]) -> None:
     os.replace(tmp, path)
 
 
-def _provenance(client: Any) -> dict[str, str]:
-    return {"model": client.model, "baseUrl": client.baseUrl}
+def _provenance(client: Any) -> dict[str, Any]:
+    result = {"model": client.model, "baseUrl": client.baseUrl}
+    if hasattr(client, "reasoning_enabled"):
+        result["reasoningEnabled"] = client.reasoning_enabled
+    return result
 
 
 def _pixel_hash(png: bytes) -> str:
