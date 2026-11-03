@@ -219,12 +219,13 @@ async function save() {
   const submittedRevision=revision;
   const body={dataset_sha256:data.sha256,reviewer,decisions:JSON.parse(JSON.stringify(reviews))};
   saving=true;status('Saving review decisions…');
+  let notice='';
   await post(data.basePath+'/api/review',body);
   acknowledgedRevision=Math.max(acknowledgedRevision,submittedRevision);
   changed=revision>acknowledgedRevision;
-  status(changed?'Submitted revision saved; newer edits are still unsaved.':'Review decisions saved');
- }catch(error){status(error.message);}
- finally{saving=false;status();}
+  notice=changed?'Submitted revision saved; newer edits are still unsaved.':'Review decisions saved';
+ }catch(error){notice=error.message;}
+ finally{saving=false;status(notice);}
 }
 $('save').onclick=save;
 $('export').onclick=async()=>{
