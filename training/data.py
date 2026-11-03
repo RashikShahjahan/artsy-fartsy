@@ -1,4 +1,4 @@
-"""Convert recorded Python attempts into bash-tool demonstrations.
+"""Validate drawing-tool conversations and import historical bash demonstrations.
 
 The shell wrapper is synthesized; the Python source and execution feedback are
 recorded evidence. Each record produces one complete conversation. By default,
@@ -28,7 +28,7 @@ TOOLS = [{"type": "function", "function": {
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 INPUT_MODE = "multimodal-previews"
-CONVERSION = "bash-trajectory-summary-text-loss-policy-v15-final-preview-no-budget-prompts"
+CONVERSION = "drawing-tools-v16-max-12-turns"
 LOSS_POLICY = "final-write-final-preview-submit"
 LOSS_POLICIES = (LOSS_POLICY, "assistant-only")
 
@@ -309,6 +309,22 @@ def convert_native_record(record: dict, root: Path, loss_policy: str = LOSS_POLI
 
 
 def convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) -> dict:
+    from drawing.agent_contract import SFT_MAX_TURNS
+    # Historical JSON collection can contain extra malformed teacher replies
+    # that are omitted during conversion. They still consumed model turns.
+    if not record.get('trajectoryFormat'):
+        collected_turns = sum('completion' in step for step in record.get('trace', []))
+        collected_turns += bool(record.get('submission', {}).get('completion'))
+        if collected_turns > SFT_MAX_TURNS:
+            raise ValueError(f"{record['id']}: trajectory exceeds {SFT_MAX_TURNS} teacher turns ({collected_turns})")
+    example = _convert_record(record, root, loss_policy)
+    turns = sum(m['role'] == 'assistant' for m in example['messages'])
+    if turns > SFT_MAX_TURNS:
+        raise ValueError(f"{record['id']}: trajectory exceeds {SFT_MAX_TURNS} assistant turns ({turns})")
+    return example
+
+
+def _convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) -> dict:
     if loss_policy not in LOSS_POLICIES:
         raise ValueError(f"Unknown loss policy: {loss_policy}")
     rid = record["id"]
@@ -316,6 +332,9 @@ def convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) -> 
         raise ValueError(f"{rid}: incompatible drawing runtime")
     if record.get("apiDocHash") != digest((ROOT / "docs/artcanvas.md").read_bytes()):
         raise ValueError(f"{rid}: API documentation changed since generation")
+    if record.get('trajectoryFormat') == 'drawing-tools-v1':
+        from training.tool_data import convert_drawing_record
+        return convert_drawing_record(record, root, loss_policy)
     if record.get("trajectoryFormat") == "inspect-bash-v1":
         return convert_native_record(record, root, loss_policy)
     spec = record["spec"]
@@ -429,6 +448,15 @@ def convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) -> 
 
 def is_observed_repair(record: dict) -> bool:
     """A revised source recovered from a recorded execution or visual failure."""
+    if record.get('trajectoryFormat') == 'drawing-tools-v1':
+        source, failed_sources = None, set()
+        for step in record.get('trace', []):
+            source = step.get('executedCode', source)
+            for operation in step.get('operations', []):
+                if (operation['tool'] == 'preview_drawing'
+                        and operation['feedback'].get('failureKind') == 'invalid_code'):
+                    failed_sources.add(source)
+        return bool(record.get('submission') and any(s != record.get('code') for s in failed_sources))
     trace = record.get("trace") or []
     if len(trace) < 2 or not (trace[-1].get("feedback") or {}).get("ok"):
         return False
@@ -465,10 +493,14 @@ def load_examples(path: Path, loss_policy: str = LOSS_POLICY) -> tuple[list[dict
         "masked_actions": sum(masked),
         "trajectories_with_masked_actions": sum(n > 0 for n in masked),
         "supervised_actions": sum(len(e["trainable_message_indices"]) for e in examples),
-        "omitted_unexecuted_replies": sum(t.get("feedback") is None for r in records for t in r.get("trace", [])),
-        "trajectories_with_omitted_replies": sum(any(t.get("feedback") is None for t in r.get("trace", [])) for r in records),
+        "omitted_unexecuted_replies": sum(t.get("feedback") is None for r in records
+                                         if r.get('trajectoryFormat') != 'drawing-tools-v1' for t in r.get("trace", [])),
+        "trajectories_with_omitted_replies": sum(any(t.get("feedback") is None for t in r.get("trace", []))
+                                               for r in records if r.get('trajectoryFormat') != 'drawing-tools-v1'),
         "one_shot": sum(r["spec"].get("kind") != "refusal"
-                        and sum(t.get("feedback") is not None for t in r.get("trace", [])) == 1
+                        and (sum(op['tool'] == 'preview_drawing' for t in r.get('trace', []) for op in t.get('operations', []))
+                             if r.get('trajectoryFormat') == 'drawing-tools-v1' else
+                             sum(t.get("feedback") is not None for t in r.get("trace", []))) == 1
                         for r in records),
         "repairs": sum(is_observed_repair(r) for r in records),
         "refusal_pairs": sum(r["spec"].get("kind") == "refusal" for r in records),

@@ -98,10 +98,10 @@ class ManualInspectorTests(unittest.TestCase):
         self.assertEqual(image_paths(record, self.root), [])
 
     def test_native_rollout_inspector_explains_real_conversation(self):
-        from ui.candidate_review import PAGE
-        self.assertIn("record.trajectoryFormat==='inspect-bash-v1'", PAGE)
-        self.assertIn('Native rollout recorded; inspect Conversation for actual actions and observations.', PAGE)
-        self.assertIn("image.label.startsWith('Native preview ')", PAGE)
+        script = (Path(__file__).resolve().parents[1] / 'ui/candidate-review.js').read_text()
+        self.assertIn("['inspect-bash-v1','drawing-tools-v1'].includes(record.trajectoryFormat)", script)
+        self.assertIn('Native rollout recorded; inspect Conversation for actual actions and observations.', script)
+        self.assertIn("image.label.startsWith('Native preview ')", script)
 
     def test_only_dataset_local_png_artifacts_are_served(self):
         nested = self.root / "artifacts" / "episode"

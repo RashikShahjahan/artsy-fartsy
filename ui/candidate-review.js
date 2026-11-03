@@ -124,7 +124,7 @@ function appendReason(parent, heading, value) {
 function attemptTimeline(record, images) {
  const trace=Array.isArray(record.trace)?record.trace:[];
  const wrap=node('section');wrap.append(node('h3','Generation trace','trace-heading'));
- if(record.trajectoryFormat==='inspect-bash-v1'){
+ if(['inspect-bash-v1','drawing-tools-v1'].includes(record.trajectoryFormat)){
   wrap.append(node('p','Native rollout recorded; inspect Conversation for actual actions and observations.','trace-summary'));
   const previews=images.filter(image=>image.label.startsWith('Native preview '));
   if(previews.length)wrap.append(imageSection(previews));

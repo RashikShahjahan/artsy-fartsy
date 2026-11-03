@@ -14,6 +14,16 @@ from training.data import CONVERSION, INPUT_MODE, LOSS_POLICY, ROOT, SUBMIT, con
 
 
 class ConversionTests(unittest.TestCase):
+    def test_legacy_over_twelve_collected_turns_cannot_hide_malformed_replies(self):
+        self.record['trace'] = [{'completion': {'text': 'malformed'}}] * 11 + self.record['trace']
+        with self.assertRaisesRegex(ValueError, 'exceeds 12 teacher turns'):
+            convert_record(self.record, self.root)
+
+    def test_legacy_over_twelve_exported_turns_are_rejected(self):
+        self.record['trace'] = self.record['trace'][:1] * 5 + self.record['trace'][-1:]
+        with self.assertRaisesRegex(ValueError, 'exceeds 12 assistant turns'):
+            convert_record(self.record, self.root)
+
     def test_legacy_automated_verdicts_do_not_override_selected_records(self):
         expected = convert_record(self.record, self.root)
         self.record['trace'][-1]['codeSafety'] = {

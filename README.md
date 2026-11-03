@@ -123,8 +123,9 @@ removes any earlier source, records the reason, and ends the request. A stale
 preview or textual completion claim cannot pass.
 
 This is harness/trajectory contract v3. Historical bash traces remain readable.
-Existing SFT/GRPO datasets and the training environment keep their original bash
-contract; saved checkpoints have not been retrained for the new tool schema.
+New SFT generation and exports use the named drawing tools. Historical SFT datasets
+and the GRPO training environment retain their bash contract; saved checkpoints
+have not been retrained for the new tool schema.
 
 Episodes retain Inspect logs, scored artifacts, and final `program.py`,
 `image.png`, and `result.json` with hashes. Completed matching requests can be
@@ -202,7 +203,7 @@ Evaluation and checkpoint comparisons use these defaults from
 | Docker sandbox cap | Same as concurrent samples |
 | Episode and model-request deadline | Disabled |
 | Aggregate output-token budget | Disabled |
-| Per-response output-token cap | Provider capacity |
+| Per-response output-token cap | 32,768 tokens |
 | Render / preview tool timeout | 60 / 65 seconds |
 | Source / PNG size limit | 64 KiB / 8 MiB |
 
@@ -212,7 +213,7 @@ workspace sets no additional CPU or memory quota. `--time-limit 600` adds an
 episode/model-request deadline. `--max-tokens N` caps each response;
 `--token-limit N` sets a cumulative output budget, or add `--token-limit-type all`
 to count input and output. Zero disables those optional caps. Qwen bridge profiles
-use 262,144-token contexts and clip responses to remaining context capacity;
+use 262,144-token contexts and cap responses at 32,768 tokens or remaining context capacity, whichever is smaller;
 `/health` reports the selected profile and limits.
 
 Full scoring makes independent adherence, image-safety, and code-safety calls.
@@ -286,14 +287,22 @@ seed alone does not reproduce it. Repeat the original command to resume missing
 work; `--retry-errors` retries candidate infrastructure failures. Changed settings
 or incompatible generator formats require a fresh output directory.
 
-For ordinary drawings, the teacher writes Python, sees runtime feedback and actual
-PNG previews, and may revise within the episode budgets. It explicitly returns
-`{"submit":true}` before a fresh final render. Refusal prompts produce one authored
-refusal target each without asking the teacher to render the unsafe request.
+For ordinary drawings, the teacher uses `update_drawing`, `read_drawing`,
+`preview_drawing`, `submit_drawing`, and `refuse_drawing`. It writes Python, sees
+runtime feedback and actual PNG previews, and revises before submission triggers
+a fresh final render. Writes and previews must occur on separate model turns.
+Every teacher response counts toward a hard 12-turn limit, including malformed
+replies. Submission on turn 12 is allowed; unfinished episodes are rejected
+without requesting turn 13. Export and SFT loading also reject conversations
+longer than 12 assistant turns, including historical imports. Refusal prompts
+produce one authored `refuse_drawing` target each without rendering the unsafe request.
 Provider-exposed reasoning is retained when available.
 
 Generation performs no automated content, safety, quality, or duplicate filtering.
 Parsing, execution budgets, PNG validity, and artifact integrity checks still apply.
+The 12-turn limit is an additional structural acceptance requirement. Generation
+requires an HTTP endpoint supporting native tool calls and image input. Use a new
+output directory for the new format; old JSON drafts cannot be reused with it.
 Generated Python runs in disposable containers without host mounts, host credentials,
 or network access. `--renderer local` explicitly opts into host execution for
 trusted programs. All outcomes remain

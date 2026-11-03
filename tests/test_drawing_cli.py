@@ -36,9 +36,14 @@ class FakeTeacher:
             def do_POST(self):
                 size = int(self.headers.get("Content-Length", "0"))
                 owner.calls.append(json.loads(self.rfile.read(size)))
+                name, arguments = [('update_drawing', {'source': CODE}),
+                                   ('preview_drawing', {}), ('submit_drawing', {})][len(owner.calls) - 1]
                 payload = json.dumps({
                     "model": "fake",
-                    "choices": [{"message": {"content": json.dumps({"code": CODE} if len(owner.calls) == 1 else {"submit": True})}, "finish_reason": "stop"}],
+                    "choices": [{"message": {"content": None, "tool_calls": [{
+                        'id': f'call_{len(owner.calls)}', 'type': 'function',
+                        'function': {'name': name, 'arguments': json.dumps(arguments)}}]},
+                        "finish_reason": "tool_calls"}],
                     "usage": {"prompt_tokens": 100, "completion_tokens": 20},
                 }).encode()
                 self.send_response(200)
@@ -104,8 +109,11 @@ class DrawingCliTests(unittest.TestCase):
             summary = json.loads(first.stdout)
             self.assertEqual(summary["review"], 1)
             self.assertEqual(summary["accepted"], 0)
-            self.assertEqual(summary["requests"], 2)
-            self.assertEqual(len(teacher.calls), 2)
+            self.assertEqual(summary["requests"], 3)
+            self.assertEqual(len(teacher.calls), 3)
+            self.assertEqual(teacher.calls[0]['tools'][0]['function']['name'], 'update_drawing')
+            self.assertEqual(teacher.calls[0]['max_tokens'], 32768)
+            self.assertEqual(teacher.calls[2]['messages'][-1]['content'][1]['type'], 'image_url')
 
             rows = [json.loads(line) for line in (output / "candidates.jsonl").read_text().splitlines()]
             self.assertEqual(len(rows), 1)
@@ -123,8 +131,8 @@ class DrawingCliTests(unittest.TestCase):
             self.assertEqual(second.returncode, 0, second.stderr + second.stdout)
             resumed = json.loads(second.stdout)
             self.assertEqual(resumed["review"], 1)
-            self.assertEqual(resumed["requests"], 2)
-            self.assertEqual(len(teacher.calls), 2, "completed candidate should resume without another teacher call")
+            self.assertEqual(resumed["requests"], 3)
+            self.assertEqual(len(teacher.calls), 3, "completed candidate should resume without another teacher call")
 
     def test_help_and_input_dry_run(self):
         help_result = subprocess.run(

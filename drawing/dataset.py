@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import json
 import os
-import re
 from pathlib import Path
 from typing import Any
 
-from .dataset_client import Message, parse_json_reply, supports_image_input
+from .dataset_client import supports_image_input
 from .dataset_specs import compact_json, sha256, validate_specs
+from .agent_contract import SFT_MAX_TURNS
+from .config import MAX_RESPONSE_TOKENS
+from .tool_dataset import candidate as _candidate, FORMAT
 
-DATASET_VERSION = "artsy-dataset-v7"
+DATASET_VERSION = "artsy-dataset-v8-drawing-tools"
 
 
 def _default_config() -> dict[str, Any]:
@@ -38,20 +39,6 @@ def _provenance(client: Any) -> dict[str, str]:
     return {"model": client.model, "baseUrl": client.baseUrl}
 
 
-def _parse_target(text: str) -> dict[str, Any]:
-    target = parse_json_reply(text)
-    if isinstance(target, dict) and set(target) == {"submit"} and target["submit"] is True:
-        return target
-    if not isinstance(target, dict):
-        raise ValueError("Return one JSON object with code or refusal")
-    if len(target) != 1:
-        raise ValueError("Return exactly one nonempty string field: code or refusal")
-    field, value = next(iter(target.items()))
-    if field not in ("code", "refusal") or not isinstance(value, str) or not value.strip():
-        raise ValueError("Return exactly one nonempty string field: code or refusal")
-    return target
-
-
 def _pixel_hash(png: bytes) -> str:
     """Hash decoded RGBA pixels, matching PNG.sync.read + width/height in TS."""
     import io
@@ -72,6 +59,7 @@ def _refusal_candidate(spec: dict[str, Any], api_doc: str, config: dict[str, Any
         "refusal": spec["refusal"],
         "generation": {"initialDraft": "authored_refusal"},
         "refusalSource": "prompt_plan",
+        "trajectoryFormat": FORMAT,
         "trace": [],
         "evaluations": [],
         "artifacts": {},
@@ -81,142 +69,19 @@ def _refusal_candidate(spec: dict[str, Any], api_doc: str, config: dict[str, Any
     }
 
 
-async def _candidate(options: dict[str, Any], spec: dict[str, Any], index: int, api_doc: str) -> dict[str, Any]:
-    from .environment import DrawingEnvironment
-    output = Path(options["output"]).resolve()
-    config = options.get("config") or _default_config()
-    env = DrawingEnvironment(str(output / "artifacts"), renderer=options.get("renderer"), config=config)
-    episode = await env.reset(spec["prompt"], spec["seed"])
-    episode_dir = Path(episode["directory"])
-    rel = lambda p: os.path.relpath(str(p), str(output))
-    record: dict[str, Any] = {
-        "version": DATASET_VERSION, "id": f"{spec['id']}-c{index}", "spec": spec, "candidate": index,
-        "status": "rejected", "reason": "Model turn budget exhausted",
-        "artifacts": {"directory": rel(episode_dir), "trajectory": rel(episode_dir / "trajectory.jsonl")},
-        "trace": [], "evaluations": [], "teacher": _provenance(options["teacher"]),
-        "runtimeVersion": config["runtimeVersion"], "apiDocHash": sha256(api_doc), "humanReviewed": False,
-    }
-    record["generation"] = {"initialDraft": "natural", "executionFailures": 0, "imagePreviews": True}
-
-    messages: list[Message] = [
-        {"role": "system", "content": ("Write an editable Python/ArtCanvas program for the drawing request. Return ONLY JSON with exactly one string field: "
-          "{\"code\":\"complete Python source\"}, or {\"refusal\":\"concise reason\"} for a request you cannot fulfill. "
-          "After each successful render you will receive the actual PNG preview. Inspect it against the original request. "
-          "Return complete revised code to fix visible mistakes, or {\"submit\":true} only after inspecting a satisfactory preview. "
-          "Import ArtCanvas from artcanvas, use only its documented drawing API plus math/random, and save output.png in the working directory. "
-          "Do not load files, use external images, access the network, or execute commands. Canvas size must be "
-          f"{config['width']}x{config['height']}. The renderer seeds random with {spec['seed']}. "
-          f"\n\n{api_doc}")},
-        {"role": "user", "content": compact_json({"prompt": spec["prompt"], "candidate": index})},
-    ]
-    reused = None
-    for directory in options.get("draftsFrom") or []:
-        path = Path(directory) / "records" / f"{spec['id']}-c{index}.json"
-        try:
-            saved = json.loads(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            continue
-        saved_spec = {k: v for k, v in (saved.get("spec") or {}).items() if k not in ("requirements", "expectedOutcome")}
-        if (saved.get("generation", {}).get("initialDraft") != "natural" or saved_spec != spec
-                or saved.get("teacher") != _provenance(options["teacher"])):
-            raise ValueError("Draft source is not a matching natural teacher trajectory")
-        first = next((t for t in saved.get("trace", []) if "executedCode" in t), None)
-        if first:
-            parsed = parse_json_reply(first["completion"]["text"])
-            if parsed.get("code") != first["executedCode"]:
-                raise ValueError(f"Draft was modified: {saved['id']}")
-            reused = {"completion": first["completion"], "dataset": os.path.relpath(Path(directory).resolve(), output), "attempt": first["attempt"]}
-            break
-
-    last_preview = None
-    try:
-        # Bound malformed replies too; code repairs have no separate attempt cap.
-        for attempt in range(config["maxCalls"]):
-            completion = reused["completion"] if attempt == 0 and reused else await options["teacher"].complete(messages, options.get("maxTokens", 4096))
-            trace: dict[str, Any] = {"attempt": attempt, "completion": completion}
-            if attempt == 0 and reused:
-                trace["reusedDraft"] = {"dataset": reused["dataset"], "recordId": f"{spec['id']}-c{index}", "attempt": reused["attempt"]}
-            record["trace"].append(trace)
-            messages.append({"role": "assistant", "content": completion["text"]})
-            if not completion.get("usage"):
-                trace["error"] = "Token usage unavailable; completion tokens could not be charged"
-            charged = await env.charge_tokens(completion.get("usage", {}).get("completion_tokens", 0))
-            if not charged.get("ok"):
-                record["reason"] = "Episode token budget exhausted"; break
-            try:
-                if completion.get("finishReason") == "length": raise ValueError("Teacher completion was truncated")
-                target = _parse_target(completion["text"])
-            except Exception as exc:
-                trace["error"] = str(exc); record["reason"] = str(exc)
-                messages.append({"role": "user", "content": f"{exc}. Return the complete corrected JSON object."})
-                continue
-            if "submit" in target:
-                if last_preview is None:
-                    trace["error"] = "Render and inspect a successful preview before submitting"
-                    messages.append({"role": "user", "content": trace["error"] + ". Return complete code as JSON."})
-                    continue
-                record["trace"].pop()
-                feedback = await env.submit()
-                record["submission"] = {"completion": completion, "feedback": feedback,
-                                        "preview": last_preview}
-                if not feedback.get("ok"):
-                    record["reason"] = feedback.get("error") or "Fresh submission failed"
-                    if feedback.get("failureKind") == "infrastructure":
-                        record["status"] = "infrastructure_error"
-                    break
-                record["artifacts"].update({"image": rel(feedback["artifact"]), "source": rel(episode_dir / "program.py")})
-                image = Path(feedback["artifact"]).read_bytes()
-                record["sourceHash"] = sha256(re.sub(r"\r\n", "\n", record["code"]).strip())
-                record["imageHash"] = sha256(image)
-                record["pixelHash"] = _pixel_hash(image)
-                record.update(status="review", reason="Preview inspected by teacher; human review pending")
-                break
-            if "refusal" in target:
-                record["refusal"] = target["refusal"]
-                feedback = await env.refuse(target["refusal"]); trace["feedback"] = feedback
-                if not feedback.get("ok"):
-                    record["reason"] = feedback.get("error") or feedback.get("outcome"); break
-                record.update(status="review", reason="Teacher refusal; human review pending")
-                break
-            last_preview = None
-            record["code"] = target["code"]
-            trace["executedCode"] = target["code"]
-            feedback = await env.write_code(target["code"])
-            if feedback.get("ok"): feedback = await env.run_code()
-            trace["feedback"] = feedback
-            if feedback.get("failureKind") == "infrastructure":
-                record.update(status="infrastructure_error", reason=feedback.get("error") or "Renderer infrastructure failure"); break
-            if not feedback.get("ok"):
-                if feedback.get("failureKind") == "invalid_code":
-                    record["generation"]["executionFailures"] += 1
-                record["reason"] = feedback.get("error") or feedback.get("stderr") or feedback.get("outcome")
-                messages.append({"role": "user", "content": f"Execution feedback: {compact_json(feedback)}. Return a complete corrected program as JSON."})
-                if feedback.get("outcome") != "active": break
-                continue
-            image = Path(feedback["artifact"]).read_bytes()
-            last_preview = {"image": rel(feedback["artifact"]), "imageHash": sha256(image)}
-            trace["previewObservation"] = last_preview
-            record["reason"] = "Preview review budget exhausted without teacher submission"
-            messages.append({"role": "user", "content": [
-                {"type": "text", "text": "Inspect your rendered preview against the original request. "
-                 "Return {\"submit\":true} if it is ready, or complete corrected code as JSON. "
-                 f"Execution feedback: {compact_json(feedback)}"},
-                {"type": "image_url", "image_url": {"url": "data:image/png;base64," + base64.b64encode(image).decode("ascii")}},
-            ]})
-    except Exception as exc:
-        record.update(status="infrastructure_error", reason=str(exc))
-    return record
-
-
 async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     specs = validate_specs(options["specs"])
     teacher_client = options.get("teacher")
     if (teacher_client and any(s.get("kind") != "refusal" for s in specs)
             and not supports_image_input(teacher_client.model, teacher_client.baseUrl)):
         raise ValueError("SFT generation requires a teacher model with image input support")
+    if teacher_client and teacher_client.baseUrl == "tinker://native":
+        raise ValueError("SFT drawing tools require an HTTP chat endpoint; use the native inference bridge")
+    if options.get("draftsFrom"):
+        raise ValueError("Legacy JSON drafts cannot be reused in drawing-tool trajectories")
     output = Path(options["output"]).resolve()
     candidates = options.get("candidates", 2)
-    max_tokens, workers = options.get("maxTokens", 4096), options.get("workers", 1)
+    max_tokens, workers = options.get("maxTokens", MAX_RESPONSE_TOKENS), options.get("workers", 1)
     if type(workers) is not int or not 1 <= workers <= 8: raise ValueError("workers must be an integer from 1 to 8")
     if type(candidates) is not int or candidates < 1: raise ValueError("candidates must be a positive integer")
     if max_tokens is not None and (type(max_tokens) is not int or max_tokens < 1): raise ValueError("maxTokens must be positive when supplied")
@@ -231,15 +96,11 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         root = Path(__file__).resolve().parent.parent
         api_doc = (root / "docs" / "artcanvas.md").read_text(encoding="utf-8")
         runtime_hashes = {name: sha256((root / "runtime" / name).read_bytes()) for name in ("artcanvas.py", "cairo.py", "requirements.txt")}
-        draft_sources = []
-        for directory in options.get("draftsFrom") or []:
-            names = sorted(p.name for p in (Path(directory) / "records").iterdir() if p.name.endswith(".json"))
-            hashes = [[name, sha256((Path(directory) / "records" / name).read_bytes())] for name in names]
-            draft_sources.append({"directory": os.path.relpath(Path(directory).resolve(), output), "recordsHash": sha256(compact_json(hashes))})
         config = options.get("config") or _default_config()
         teacher = _provenance(options["teacher"]) if options.get("teacher") else None
         manifest: dict[str, Any] = {"version": DATASET_VERSION, "promptVersion": "artsy-specs-v1", "specs": specs,
-            "candidates": candidates, "maxTokens": max_tokens,
+            "candidates": candidates, "maxTokens": max_tokens, "maxTurns": SFT_MAX_TURNS,
+            "trajectoryFormat": FORMAT,
             "teacher": teacher,
             "config": config, "apiDocHash": sha256(api_doc), "runtimeHashes": runtime_hashes}
         if options.get("executionBackend"):
@@ -247,7 +108,6 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         if options.get("promptGenerator"):
             manifest["promptVersion"] = options["promptGenerator"]["version"]
             manifest["promptGenerator"] = options["promptGenerator"]
-        if draft_sources: manifest["draftSources"] = draft_sources
         manifest_path = output / "manifest.json"
         if manifest_path.exists():
             previous = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -274,7 +134,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
                 retry = saved and saved.get("status") == "infrastructure_error" and options.get("retryErrors")
                 record = saved if saved and not retry else (
                     _refusal_candidate(spec, api_doc, config) if spec.get("kind") == "refusal"
-                    else await _candidate({**options, "output": str(output)}, spec, index, api_doc)
+                    else await _candidate({**options, "output": str(output), "maxTokens": max_tokens}, spec, index, api_doc)
                 )
                 if retry:
                     record["previousAttempts"] = [*(saved.get("previousAttempts", [])), {k: v for k, v in saved.items() if k != "previousAttempts"}]
@@ -301,7 +161,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         for record in records:
             for row in [record, *record.get("previousAttempts", [])]:
                 completions.extend(t["completion"] for t in row.get("trace", []) if not t.get("reusedDraft"))
-                if row.get("submission"):
+                if row.get("submission", {}).get("completion"):
                     completions.append(row["submission"]["completion"])
         count = len(records)
         summary = {"version": DATASET_VERSION, "prompts": len(specs), "candidates": count,

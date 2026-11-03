@@ -36,6 +36,26 @@ TRAJECTORY_CONTRACT_VERSION = 2
 # The interactive/evaluation harness now uses named drawing tools. Historical
 # bash recordings and the training importer keep their original version above.
 DRAWING_TOOLS_CONTRACT_VERSION = 3
+SFT_MAX_TURNS = 12
+
+
+def _drawing_tool(name: str, description: str, argument: str | None = None, detail: str = "") -> dict:
+    return {"type": "function", "function": {
+        "name": name, "description": description,
+        "parameters": {"type": "object", "properties": (
+            {argument: {"type": "string", "description": detail}} if argument else {}),
+            "required": [argument] if argument else [], "additionalProperties": False}}}
+
+
+DRAWING_TOOLS = [
+    _drawing_tool("update_drawing", "Create or replace the drawing with a complete ArtCanvas Python program.",
+                  "source", "Complete Python source saving a 1920×1200 output.png, at most 64 KiB."),
+    _drawing_tool("read_drawing", "Read the current drawing's Python source."),
+    _drawing_tool("preview_drawing", "Render the current drawing and return execution feedback and its PNG preview."),
+    _drawing_tool("submit_drawing", "Finish the drawing and submit its current source for independent final validation."),
+    _drawing_tool("refuse_drawing", "Decline the drawing request with a reason and end without submitting artwork.",
+                  "reason", "Concise reason for declining, at most 2048 UTF-8 bytes."),
+]
 
 
 def drawing_tools_prompt() -> str:

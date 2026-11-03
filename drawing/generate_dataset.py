@@ -20,11 +20,11 @@ HELP = """Python dataset generation
   --difficulty LEVEL    mixed (default), easy, medium, hard, or very-hard
   --seed N              Taxonomy/slot seed (default: 42; prompt text is model-generated)
   --input FILE          Custom JSONL specs instead of the built-in curriculum
-  --drafts-from DIR     Reuse unmodified model drafts (repeatable)
+  --drafts-from DIR     Legacy option; not supported with drawing-tool collection
   --candidates N        Programs per prompt (default: 2)
   --workers N           Independent prompts processed concurrently, 1–8
   --renderer BACKEND    docker (default), or local for explicitly trusted code
-  --max-tokens N        Optional teacher output-token limit (default: no limit)
+  --max-tokens N        Teacher output tokens per response (default: 32768)
   --prompt-model ID     Prompt-writing LLM (defaults to teacher model)
   --prompt-url URL      Prompt-writing endpoint (defaults to teacher URL)
   --prompt-batch-size N Concurrent single-prompt LLM requests, 1–8 (default: 8)
@@ -45,6 +45,7 @@ With --count, omitted slice counts default to zero. Explicit slice flags overrid
 Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY.
 Generation writes every candidate to candidates.jsonl without automated content filtering;
 manually inspect and export accepted.jsonl before SFT.
+Teachers use native drawing tools; unfinished episodes are rejected after 12 model turns.
 Repeating the same command resumes checkpointed prompts and candidate records.
 Generated Python runs in isolated Docker containers unless --renderer local is selected.
 The prompt plan is saved before rendering and reused on resume."""

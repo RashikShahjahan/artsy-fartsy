@@ -57,6 +57,7 @@ class Completion(TypedDict, total=False):
     model: str
     usage: dict[str, int]
     finishReason: str
+    tool_calls: list[dict[str, Any]]
 
 
 @dataclass
@@ -84,8 +85,11 @@ class ChatClient:
     async def __aexit__(self, *_):
         await self.aclose()
 
-    async def complete(self, messages: list[Message], max_tokens: int | None = None, *, temperature: float | None = None) -> Completion:
+    async def complete(self, messages: list[Message], max_tokens: int | None = None, *, temperature: float | None = None,
+                       tools: list[dict] | None = None) -> Completion:
         payload = self._request_body(messages, max_tokens, temperature)
+        if tools is not None:
+            payload.update(tools=tools, tool_choice="required", parallel_tool_calls=False)
         if self.http_client is None:
             self.http_client = httpx.AsyncClient(
                 timeout=self.timeout_ms / 1000, follow_redirects=False,
@@ -151,8 +155,18 @@ class ChatClient:
             raise RuntimeError("Tinker reply truncated; increase max tokens")
         message = choice.get("message", {}) if isinstance(choice, dict) else {}
         content = message.get("content") if isinstance(message, dict) else None
+        tool_calls = message.get("tool_calls") if isinstance(message, dict) else None
+        if content is None and isinstance(tool_calls, list) and tool_calls:
+            content = ""
         if not isinstance(content, str):
             raise RuntimeError("Chat endpoint returned no text completion")
+        if tool_calls is not None and (not isinstance(tool_calls, list) or any(
+                not isinstance(call, dict) or not isinstance(call.get("id"), str)
+                or not call["id"] or call.get("type") != "function"
+                or not isinstance(call.get("function"), dict)
+                or not isinstance(call["function"].get("name"), str)
+                or not isinstance(call["function"].get("arguments"), str) for call in tool_calls)):
+            raise RuntimeError("Chat endpoint returned invalid tool calls")
         usage_value = body.get("usage")
         usage: dict[str, int] | None = None
         if usage_value is not None:
@@ -174,6 +188,7 @@ class ChatClient:
                                   and isinstance(part.get("text"), str))
         return {
             "text": content,
+            **({"tool_calls": tool_calls} if tool_calls else {}),
             **({"reasoning": reasoning} if isinstance(reasoning, str) and reasoning.strip() else {}),
             **({"reasoning_details": details} if isinstance(details, list) and details else {}),
             "model": body.get("model") if isinstance(body.get("model"), str) else self.model,

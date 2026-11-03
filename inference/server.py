@@ -18,13 +18,13 @@ from pydantic import ValidationError
 from .schemas import CompletionRequest
 
 from drawing.config import (IMAGE_SIZE, MODEL_CONTEXT_WINDOW, MODEL_ID, MODEL_REVISION,
-                            TINKER_SAMPLING_MODEL_ID)
+                            TINKER_SAMPLING_MODEL_ID, MAX_RESPONSE_TOKENS)
 from .model_catalog import HOSTED_MODEL_PROFILES, ModelCatalogCache, model_catalog
 
 SAMPLER_LOCK = threading.Lock()
 
 CONTEXT_WINDOW = MODEL_CONTEXT_WINDOW
-MAX_TOKENS = MODEL_CONTEXT_WINDOW
+MAX_TOKENS = MAX_RESPONSE_TOKENS
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 
 
@@ -228,7 +228,7 @@ def complete(body: CompletionRequest):
             if profile:
                 context_window = profile['context_window']
     requested_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
-    budget = max(1, min(int(requested_tokens or context_window), context_window))
+    budget = max(1, min(int(requested_tokens or MAX_TOKENS), MAX_TOKENS, context_window))
     try:
         messages = template_messages(body["messages"], backend.prepare_image)
         raw, count, generated = backend.generate(

@@ -23,6 +23,33 @@ from drawing.dataset_client import DEFAULT_DATA_MODEL, TINKER_MODEL_URL, chat_cl
 
 
 class TinkerHTTPTests(unittest.IsolatedAsyncioTestCase):
+    async def test_native_drawing_calls_accept_null_content_and_send_tools(self):
+        from drawing.agent_contract import DRAWING_TOOLS
+        call = {'id': 'draw_1', 'type': 'function', 'function': {
+            'name': 'update_drawing', 'arguments': '{"source":"draw()"}'}}
+        response = httpx.Response(200, json={'choices': [{'message': {
+            'content': None, 'tool_calls': [call], 'reasoning': 'Plan the drawing'},
+            'finish_reason': 'tool_calls'}]})
+        client = chat_client({'model': 'vision-teacher', 'baseUrl': 'http://localhost/v1'})
+        async with endpoint(client, response) as requests:
+            result = await client.complete([{'role': 'user', 'content': 'Draw a circle'}],
+                                           tools=DRAWING_TOOLS)
+        body = json.loads(requests[0].content)
+        self.assertEqual(body['tools'], DRAWING_TOOLS)
+        self.assertEqual(body['tool_choice'], 'required')
+        self.assertFalse(body['parallel_tool_calls'])
+        self.assertEqual(result['text'], '')
+        self.assertEqual(result['tool_calls'], [call])
+        self.assertEqual(result['reasoning'], 'Plan the drawing')
+
+    async def test_malformed_tool_call_envelope_rejected(self):
+        response = httpx.Response(200, json={'choices': [{'message': {
+            'content': None, 'tool_calls': [{'id': 'bad', 'function': {'arguments': None}}]}}]})
+        client = chat_client({'model': 'teacher', 'baseUrl': 'http://localhost/v1'})
+        async with endpoint(client, response):
+            with self.assertRaisesRegex(RuntimeError, 'invalid tool calls'):
+                await client.complete([])
+
     async def test_inkling_preserves_image_parts(self):
         messages = [{"role": "user", "content": [
             {"type": "text", "text": "Grade this drawing"},

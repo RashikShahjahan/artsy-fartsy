@@ -377,11 +377,14 @@ class CompletionTest(unittest.TestCase):
                 complete({**self.body, **limits})
                 self.assertEqual(app.state.tinker.generate.call_args.args[2], expected)
 
-    def test_completion_does_not_clip_long_responses_at_the_old_bridge_cap(self):
+    def test_completion_caps_responses_at_32k_without_reducing_context(self):
         complete({**self.body, "max_tokens": 48000})
-        self.assertEqual(app.state.tinker.generate.call_args.args[2], 48000)
+        self.assertEqual(app.state.tinker.generate.call_args.args[2:], (32768, 262144))
+        complete({**self.body, "max_completion_tokens": 48000})
+        self.assertEqual(app.state.tinker.generate.call_args.args[2:], (32768, 262144))
         complete(self.body)
-        self.assertEqual(app.state.tinker.generate.call_args.args[2], CONTEXT_WINDOW)
+        self.assertEqual(app.state.tinker.generate.call_args.args[2:], (32768, 262144))
+        self.assertEqual(health()['max_output_tokens'], 32768)
 
     def test_temperature_reaches_sampler_and_invalid_values_fail_before_sampling(self):
         complete({**self.body, "temperature": 0.8})

@@ -113,9 +113,9 @@ def image_paths(record: dict, root: Path) -> list[tuple[str, Path]]:
             add(f"Attempt {i + 1} preview", str(Path(artifacts["directory"]) / Path(feedback["artifact"]).name))
         observation = trace.get("observation") or {}
         add(f"Attempt {i + 1} observation", observation.get("image"))
-    if record.get('trajectoryFormat') == 'inspect-bash-v1':
+    if record.get('trajectoryFormat') in ('inspect-bash-v1', 'drawing-tools-v1'):
         count = 0
-        for message in (record.get('nativeTrajectory') or {}).get('messages') or []:
+        for message in (record.get('drawingTrajectory') or record.get('nativeTrajectory') or {}).get('messages') or []:
             if not isinstance(message, dict) or message.get('role') != 'tool':
                 continue
             for part in message.get('content') or []:

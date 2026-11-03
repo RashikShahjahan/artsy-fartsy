@@ -202,269 +202,215 @@ class SplitMigrationTests(unittest.TestCase):
         self.assertFalse((self.root / ".generation.lock").exists())
 
 
+class ToolTeacher:
+    model, baseUrl = 'scripted-vision', 'http://localhost/v1'
+
+    def __init__(self, actions):
+        self.actions, self.messages, self.schemas = list(actions), [], []
+
+    async def complete(self, messages, max_tokens=None, *, tools):
+        self.messages.append(json.loads(json.dumps(messages)))
+        self.schemas.append(tools)
+        action = self.actions.pop(0) if self.actions else None
+        if isinstance(action, Exception):
+            raise action
+        result = completion('')
+        result['reasoning'] = f'Thought {len(self.messages)}'
+        if action is not None:
+            name, args = action
+            result['tool_calls'] = [{'id': f'call_{len(self.messages)}', 'type': 'function',
+                                     'function': {'name': name, 'arguments': json.dumps(args)}}]
+        return result
+
+
+def update(source='draw()'):
+    return ('update_drawing', {'source': source})
+
+
+def preview():
+    return ('preview_drawing', {})
+
+
+def submit():
+    return ('submit_drawing', {})
+
+
 class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self) -> None:
-        self.temp = tempfile.TemporaryDirectory(prefix="artsy-dataset-test-")
-        self.output = Path(self.temp.name) / "dataset"
-
-    async def asyncTearDown(self) -> None:
-        self.temp.cleanup()
-
-    @staticmethod
-    def image_bytes() -> bytes:
-        import io
-        buffer = io.BytesIO()
-        Image.new("RGBA", (32, 32), (0, 0, 0, 0)).save(buffer, format="PNG")
-        return buffer.getvalue()
-
-    def config(self) -> dict[str, Any]:
+    async def asyncSetUp(self):
         from drawing.environment import ENVIRONMENT_CONFIG
-        return {**ENVIRONMENT_CONFIG, "width": 32, "height": 32}
-
-    def renderer(self, png: bytes | None = None) -> Any:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.output = Path(self.temp.name) / 'dataset'
+        self.config = {**ENVIRONMENT_CONFIG, 'width': 32, 'height': 32}
+        self.render_calls = []
+        owner = self
         class Renderer:
-            async def render(inner, code: str, seed: int) -> dict[str, Any]:
-                if code == "broken python":
-                    return {"ok": False, "stdout": "", "stderr": "SyntaxError", "failureKind": "invalid_code"}
-                return {"ok": True, "stdout": "", "stderr": "", "png": png or self.image_bytes(), "width": 32, "height": 32}
-        return Renderer()
+            async def render(self, code, seed):
+                owner.render_calls.append((code, seed))
+                if code == 'broken':
+                    return {'ok': False, 'stderr': 'SyntaxError', 'failureKind': 'invalid_code'}
+                buf = io.BytesIO()
+                Image.new('RGB', (32, 32), 'red' if code == 'first' else 'blue').save(buf, format='PNG')
+                return {'ok': True, 'png': buf.getvalue()}
+        self.renderer = Renderer()
 
-    @staticmethod
-    def correctness(score: float = 1, reason: str = "One circle is visible") -> str:
-        return json.dumps({"score": score, "reason": reason})
+    def options(self, teacher):
+        return {'output': str(self.output), 'specs': [example_spec()], 'teacher': teacher,
+                'candidates': 1, 'renderer': self.renderer, 'config': self.config}
 
-    @staticmethod
-    def safety(harmful: bool = False, reason: str = "Benign drawing") -> str:
-        return json.dumps({"harmful": harmful, "reason": reason})
+    def record(self):
+        return json.loads((self.output / 'candidates.jsonl').read_text())
 
+    async def test_native_tools_preview_pixels_export_and_loss_mask(self):
+        from training.data import convert_record
+        from drawing.agent_contract import DRAWING_TOOLS
+        from ui.candidate_review import export_approved, image_paths
+        teacher = ToolTeacher([update('first'), preview(), update('fixed'), preview(), submit()])
+        summary = await generate_dataset(self.options(teacher))
+        self.assertEqual((summary['review'], summary['accepted'], summary['requests']), (1, 0, 5))
+        self.assertTrue(all(schema == DRAWING_TOOLS for schema in teacher.schemas))
+        self.assertEqual(len(self.render_calls), 3)  # two previews plus fresh final render
+        row = self.record()
+        self.assertNotIn('data:image', json.dumps(row))
+        self.assertEqual(row['code'], 'fixed')
+        self.assertEqual(row['generation']['modelTurns'], 5)
+        for call_index, color in ((2, (255, 0, 0)), (4, (0, 0, 255))):
+            part = teacher.messages[call_index][-1]['content'][1]
+            png = base64.b64decode(part['image_url']['url'].split(',', 1)[1])
+            self.assertEqual(Image.open(io.BytesIO(png)).getpixel((0, 0)), color)
+        converted = convert_record(row, self.output)
+        names = [converted['messages'][i]['tool_calls'][0]['function']['name']
+                 for i in converted['trainable_message_indices']]
+        self.assertEqual(names, ['update_drawing', 'preview_drawing', 'submit_drawing'])
+        self.assertEqual(converted['messages'][converted['trainable_message_indices'][0]]['tool_calls'][0]['function']['arguments'], {'source': 'fixed'})
+        self.assertEqual(sum(m['role'] == 'assistant' for m in converted['messages']), 5)
+        self.assertEqual(len(convert_record(row, self.output, 'assistant-only')['trainable_message_indices']), 5)
+        self.assertEqual(len(image_paths(row, self.output)), 3)
+        review = {'reviewer': 'Human', 'decisions': {row['id']: {'decision': 'approved'}}}
+        self.assertEqual(export_approved([row], review, self.output, self.output/'accepted.jsonl'), 1)
 
-    async def test_execution_repairs_and_resume_preserve_unfiltered_trajectory(self):
-        teacher = ScriptedClient(['{"code":"broken python"}', '{"code":"draw()"}'])
-        options = {'output': str(self.output), 'specs': [example_spec()], 'teacher': teacher,
-                   'candidates': 1, 'renderer': self.renderer(), 'config': self.config()}
+    async def test_repairs_resume_and_no_automatic_judges(self):
+        from training.data import is_observed_repair, load_examples
+        teacher = ToolTeacher([update('broken'), preview(), update(), preview(), submit()])
+        judges = {name: ToolTeacher([]) for name in ('correctnessJudge', 'safetyJudge', 'codeSafetyJudge')}
+        options = {**self.options(teacher), **judges}
         summary = await generate_dataset(options)
         self.assertEqual(summary['review'], 1)
-        self.assertEqual(summary['requests'], 3)
-        record = json.loads((self.output/'candidates.jsonl').read_text())
-        self.assertEqual(record['trace'][0]['feedback']['failureKind'], 'invalid_code')
-        self.assertEqual(record['trace'][1]['executedCode'], 'draw()')
-        self.assertEqual(record['evaluations'], [])
-        self.assertTrue(record['sourceHash'])
+        self.assertEqual(self.record()['generation']['executionFailures'], 1)
+        self.assertTrue(is_observed_repair(self.record()))
+        examples, manifest = load_examples(self.output / 'candidates.jsonl')
+        self.assertEqual((len(examples), manifest['repairs'], manifest['one_shot'],
+                          manifest['omitted_unexecuted_replies']), (1, 1, 0, 0))
+        self.assertTrue(all(not j.messages for j in judges.values()))
         self.assertEqual(await generate_dataset(options), summary)
-        self.assertEqual(len(teacher.messages), 3)
+        self.assertEqual(len(teacher.messages), 5)
         with self.assertRaisesRegex(ValueError, 'configuration changed'):
             await generate_dataset({**options, 'candidates': 2})
-
-    async def test_more_than_two_repairs_can_be_reviewed_and_submitted(self):
-        teacher = ScriptedClient(['{"code":"broken python"}'] * 4 + ['{"code":"draw()"}'])
-        summary = await generate_dataset({'output': str(self.output), 'specs': [example_spec()],
-            'teacher': teacher, 'candidates': 1, 'renderer': self.renderer(), 'config': self.config()})
-        self.assertEqual(summary['review'], 1)
-        row = json.loads((self.output / 'candidates.jsonl').read_text())
-        self.assertEqual(len(row['trace']), 5)
-        self.assertEqual(row['generation']['executionFailures'], 4)
-        self.assertIn('submission', row)
-
-    async def test_without_judge_output_is_retained_for_manual_review(self) -> None:
-        one = example_spec()
-        summary = await generate_dataset({"output": str(self.output), "specs": [one], "teacher": ScriptedClient(['{"code":"draw()"}']),
-                                          "candidates": 1, "renderer": self.renderer(), "config": self.config()})
-        self.assertEqual(summary["review"], 1); self.assertEqual(summary["accepted"], 0)
-        self.assertFalse((self.output / "accepted.jsonl").exists())
-        full = [json.loads(line) for line in (self.output / "candidates.jsonl").read_text().splitlines()]
-        self.assertEqual(len(full), 1)
-        self.assertEqual(full[0]["status"], "review")
-        self.assertIn("human review pending", (self.output / "records" / f"{one['id']}-c0.json").read_text())
-
-    async def test_authored_harmful_refusal_pair_is_trainable_without_renderer(self) -> None:
-        spec = validate_specs([{
-            "id": "harmful-1", "family": "safety_refusal",
-            "prompt": "Draw a poster glorifying violence and encouraging attacks on people.",
-            "seed": 21, "skills": ["refusal"], "kind": "refusal",
-            "refusal": "I can't make content that promotes violence.",
-        }])[0]
-        summary = await generate_dataset({"output": str(self.output), "specs": [spec],
-                                          "teacher": None, "candidates": 3})
-        self.assertEqual(summary["review"], 1)
-        self.assertEqual(summary["refusalPairs"], 1)
-        self.assertEqual(summary["requests"], 0)
-        self.assertEqual(len(list((self.output / "records").glob("*.json"))), 1)
-        row = json.loads((self.output / "candidates.jsonl").read_text())
-        self.assertEqual(row["refusal"], spec["refusal"])
-        self.assertEqual(row["artifacts"], {})
-        self.assertEqual(row["generation"]["initialDraft"], "authored_refusal")
-
-    async def test_duplicate_rendered_pixels_are_retained_for_manual_review(self) -> None:
-        specs = [
-            {"id": "circle", "family": "circles", "prompt": "Draw a blue circle", "seed": 1},
-            {"id": "house", "family": "houses", "prompt": "Draw a blue house", "seed": 2},
-        ]
-        correctness = ScriptedClient([self.correctness()] * 4, model="correctness")
-        safety = ScriptedClient([self.safety()] * 4, model="safety")
-        summary = await generate_dataset({"output": str(self.output), "specs": specs,
-                                          "teacher": ScriptedClient(['{"code":"circle source"}', '{"submit":true}', '{"code":"house source"}', '{"submit":true}']),
-                                          "correctnessJudge": correctness, "safetyJudge": safety,
-                                          "codeSafetyJudge": ScriptedClient(['{"malicious":false,"reason":"Drawing only"}'] * 2, model="code-safety"),
-                                          "candidates": 1, "renderer": self.renderer(), "config": self.config()})
-        self.assertEqual(summary["review"], 2); self.assertEqual(summary["rejected"], 0)
-        candidates = [json.loads(line) for line in (self.output / "candidates.jsonl").read_text().splitlines()]
-        self.assertEqual(len(candidates), 2)
-        self.assertEqual(candidates[0]["pixelHash"], candidates[1]["pixelHash"])
-        self.assertTrue(all(r["status"] == "review" for r in candidates))
-        self.assertNotIn("split", candidates[0]["spec"])
-        for name in ("accepted", "review", "rejected", "train", "validation", "test"):
-            self.assertFalse((self.output / f"{name}.jsonl").exists())
-
-    async def test_malformed_teacher_reply_uses_turn_budget_and_lock_is_enforced(self) -> None:
-        one = example_spec()
-        options = {"output": str(self.output), "specs": [one], "teacher": ScriptedClient(["not json", '{"code":"a","refusal":"b"}', 'not json']),
-                   "candidates": 1, "renderer": self.renderer(), "config": {**self.config(), "maxCalls": 3}}
-        summary = await generate_dataset(options)
-        self.assertEqual(summary["requests"], 3); self.assertEqual(summary["rejected"], 1)
-        (self.output / ".generation.lock").write_text("active")
-        with self.assertRaisesRegex(RuntimeError, "Dataset is locked"):
+        (self.output/'.generation.lock').write_text('active')
+        with self.assertRaisesRegex(RuntimeError, 'locked'):
             await generate_dataset(options)
 
-
-    async def test_teacher_refusals_are_retained_for_human_review(self) -> None:
-        spec = {"id": "refusal", "family": "circles", "split": "train",
-                "prompt": "Draw a blue circle", "seed": 4}
-        teacher = ScriptedClient(['{"refusal":"I cannot draw circles."}'])
-        correctness = ScriptedClient([], model="correctness")
-        safety = ScriptedClient([], model="safety")
-        summary = await generate_dataset({"output": str(self.output), "specs": [spec],
-                                          "teacher": teacher, "correctnessJudge": correctness,
-                                          "safetyJudge": safety, "candidates": 1,
-                                          "renderer": self.renderer(), "config": self.config()})
-        self.assertEqual(summary["review"], 1)
-        self.assertEqual(summary["requests"], 1)
-        row = json.loads((self.output / "records/refusal-c0.json").read_text())
-        self.assertNotIn("code", row)
-        self.assertEqual(row["evaluations"], [])
-        self.assertIn('"operation":"refuse"',
-                      Path(self.output / row["artifacts"]["trajectory"]).read_text())
-
-    async def test_configured_judges_are_never_called_or_used_as_gates(self):
-        judges = {key: ScriptedClient([], model=key) for key in
-                  ('correctnessJudge', 'safetyJudge', 'codeSafetyJudge')}
-        summary = await generate_dataset({'output': str(self.output), 'specs': [example_spec()],
-            'teacher': ScriptedClient(['{"code":"draw()"}']), 'candidates': 1,
-            'renderer': self.renderer(), 'config': self.config(), **judges,
-            'threshold': 1, 'imageObservations': True})
-        self.assertEqual(summary['review'], 1)
-        self.assertEqual(summary['requests'], 2)
-        self.assertTrue(all(not j.messages for j in judges.values()))
-        row = json.loads((self.output/'candidates.jsonl').read_text())
-        self.assertEqual(row['evaluations'], [])
-        self.assertNotIn('evaluator', row)
-
-
-    async def test_infrastructure_retry_retains_previous_attempt_and_usage(self) -> None:
-        spec = example_spec()
-
-        class FlakyTeacher:
-            model, baseUrl = "flaky", "http://teacher/v1"
-            calls = 0
-            async def complete(inner, messages: list[dict[str, Any]], max_tokens: int) -> dict[str, Any]:
-                inner.calls += 1
-                if inner.calls == 1:
-                    raise RuntimeError("Temporary provider outage")
-                if isinstance(messages[-1]['content'], list):
-                    return completion('{"submit":true}')
-                return completion('{"code":"draw()"}')
-
-        teacher = FlakyTeacher()
-        options = {"output": str(self.output), "specs": [spec], "teacher": teacher, "candidates": 1,
-                   "renderer": self.renderer(), "config": self.config()}
-        self.assertEqual((await generate_dataset(options))["infrastructureErrors"], 1)
-        self.assertEqual((await generate_dataset(options))["infrastructureErrors"], 1)
-        summary = await generate_dataset({**options, "retryErrors": True})
-        self.assertEqual(summary["review"], 1); self.assertEqual(summary["requests"], 2); self.assertEqual(teacher.calls, 3)
-        row = json.loads((self.output / "records" / f"{spec['id']}-c0.json").read_text())
-        self.assertEqual(len(row["previousAttempts"]), 1)
-        self.assertEqual(row["previousAttempts"][0]["status"], "infrastructure_error")
-
-    async def test_one_shot_success_is_valid_training_data(self) -> None:
-        spec = {"id": "one-shot", "family": "circles", "prompt": "Draw a blue circle", "seed": 20}
-        summary = await generate_dataset({"output": str(self.output), "specs": [spec], "candidates": 1,
-                                          "teacher": ScriptedClient(['{"code":"draw()"}']),
-                                          "correctnessJudge": ScriptedClient([self.correctness()] * 2, model="correctness"),
-                                          "codeSafetyJudge": ScriptedClient(['{"malicious":false,"reason":"Drawing only"}'], model="code-safety"),
-                                          "safetyJudge": ScriptedClient([self.safety()] * 2, model="safety"),
-                                          "renderer": self.renderer(), "config": self.config()})
-        self.assertEqual(summary["review"], 1)
-        row = json.loads((self.output / "records/one-shot-c0.json").read_text())
-        self.assertEqual(row["generation"]["executionFailures"], 0)
-
-    async def test_teacher_receives_each_actual_preview_and_can_fix_visible_errors(self):
-        class ReasoningTeacher(ScriptedClient):
-            async def complete(inner, *args, **kwargs):
-                result = await super().complete(*args, **kwargs)
-                result['reasoning'] = ['Plan the drawing.', 'Fix the visible mistake.', 'The preview is ready.'][len(inner.messages) - 1]
-                return result
-        teacher = ReasoningTeacher(['{"code":"first draft"}', '{"code":"fixed draft"}', '{"submit":true}'])
-        first, second = io.BytesIO(), io.BytesIO()
-        Image.new('RGB', (32, 32), 'red').save(first, format='PNG')
-        Image.new('RGB', (32, 32), 'blue').save(second, format='PNG')
-        class Renderer:
-            async def render(inner, code, seed):
-                return {'ok': True, 'png': first.getvalue() if code == 'first draft' else second.getvalue()}
-        summary = await generate_dataset({'output': str(self.output), 'specs': [example_spec()],
-            'teacher': teacher, 'candidates': 1, 'renderer': Renderer(), 'config': self.config()})
-        self.assertEqual(summary['requests'], 3)
-        self.assertEqual(summary['review'], 1)
-        for call, png in ((teacher.messages[1], first.getvalue()), (teacher.messages[2], second.getvalue())):
-            parts = call[-1]['content']
-            self.assertEqual(parts[1]['type'], 'image_url')
-            self.assertEqual(base64.b64decode(parts[1]['image_url']['url'].split(',', 1)[1]), png)
-            self.assertEqual(call[1]['content'], teacher.messages[0][1]['content'])
-        row = json.loads((self.output/'candidates.jsonl').read_text())
-        self.assertEqual(row['code'], 'fixed draft')
-        self.assertEqual(len(row['trace']), 2)
-        self.assertEqual(row['submission']['preview'], row['trace'][-1]['previewObservation'])
+    async def test_submission_on_twelfth_turn_accepted_and_thirteenth_not_requested(self):
         from training.data import convert_record
-        example = convert_record(row, self.output)
-        self.assertEqual(row['trace'][1]['completion']['reasoning'], 'Fix the visible mistake.')
-        self.assertEqual(row['submission']['completion']['reasoning'], 'The preview is ready.')
-        thoughts = [p['text'] for m in example['messages'] if m['role'] == 'assistant'
-                    for p in m['content'] if p['type'] == 'text' and p['text']]
-        self.assertEqual(thoughts, ['Plan the drawing.', 'Fix the visible mistake.', 'The preview is ready.'])
-        images = [p for m in example['messages'] for p in m['content'] if p['type'] == 'image']
-        self.assertEqual([Path(p['image']).read_bytes() for p in images], [first.getvalue(), second.getvalue()])
-        row['submission']['preview'] = row['trace'][0]['previewObservation']
-        with self.assertRaisesRegex(ValueError, 'confirmation'):
+        teacher = ToolTeacher([update(), preview()] + [('read_drawing', {})]*9 + [submit()])
+        summary = await generate_dataset(self.options(teacher))
+        self.assertEqual(summary['review'], 1)
+        self.assertEqual(self.record()['generation']['modelTurns'], 12)
+        self.assertEqual(sum(m['role'] == 'assistant' for m in convert_record(self.record(), self.output)['messages']), 12)
+        other = self.output.parent/'over-budget'
+        late = ToolTeacher([update(), preview()] + [('read_drawing', {})]*10 + [submit()])
+        summary = await generate_dataset({**self.options(late), 'output': str(other)})
+        self.assertEqual((summary['rejected'], summary['review'], len(late.messages)), (1, 0, 12))
+        row = json.loads((other/'candidates.jsonl').read_text())
+        self.assertIn('12 model turns', row['reason'])
+        self.assertNotIn('submission', row)
+        with self.assertRaisesRegex(ValueError, 'no completed submission'):
+            convert_record(row, other)
+
+    async def test_export_cannot_override_thirteen_turn_rejection(self):
+        from drawing.tool_dataset import trajectory_hash, text_message
+        from ui.candidate_review import export_approved
+        teacher = ToolTeacher([update(), preview(), submit()])
+        await generate_dataset(self.options(teacher))
+        row = self.record()
+        messages = row['drawingTrajectory']['messages']
+        for _ in range(10):
+            messages.insert(2, text_message('assistant', 'invalid reply'))
+        row['generation']['modelTurns'] = 13
+        row['trace'] = row['trace'] * 4 + row['trace'][:1]
+        row['drawingTrajectoryHash'] = trajectory_hash(row['drawingTrajectory'])
+        review = {'reviewer': 'Human', 'decisions': {row['id']: {'decision': 'approved'}}}
+        with self.assertRaisesRegex(ValueError, 'exceeds 12'):
+            export_approved([row], review, self.output, self.output/'accepted.jsonl')
+        self.assertFalse((self.output/'accepted.jsonl').exists())
+
+    async def test_invalid_and_empty_replies_count_toward_turn_limit(self):
+        teacher = ToolTeacher([None, ('unknown_tool', {}), ('update_drawing', {'bad': 'arg'})] * 4)
+        summary = await generate_dataset(self.options(teacher))
+        self.assertEqual((summary['requests'], summary['rejected'], summary['infrastructureErrors']), (12, 1, 0))
+        self.assertEqual(self.record()['generation']['modelTurns'], 12)
+        self.assertEqual(self.render_calls, [])
+
+    async def test_submit_requires_current_preview(self):
+        teacher = ToolTeacher([submit(), update(), preview(), update('fixed'), submit(), preview(), submit()])
+        summary = await generate_dataset(self.options(teacher))
+        self.assertEqual(summary['review'], 1)
+        self.assertIn('before submitting', teacher.messages[1][-1]['content'][0]['text'])
+        self.assertIn('before submitting', teacher.messages[5][-1]['content'][0]['text'])
+
+    async def test_refusals_are_single_terminal_named_tool(self):
+        from training.data import convert_record
+        teacher = ToolTeacher([('refuse_drawing', {'reason': 'Cannot fulfill this request.'})])
+        summary = await generate_dataset(self.options(teacher))
+        self.assertEqual((summary['review'], summary['requests']), (1, 1))
+        example = convert_record(self.record(), self.output)
+        self.assertEqual(example['trainable_message_indices'], [2])
+        self.assertEqual(example['messages'][2]['tool_calls'][0]['function']['name'], 'refuse_drawing')
+        self.assertFalse(self.render_calls)
+        spec = validate_specs([{'id': 'refusal', 'family': 'safety_refusal', 'prompt': 'Unsafe request',
+                               'seed': 1, 'kind': 'refusal', 'refusal': 'Cannot fulfill.'}])[0]
+        output = self.output.parent/'authored'
+        summary = await generate_dataset({'output': str(output), 'specs': [spec], 'teacher': None})
+        row = json.loads((output/'candidates.jsonl').read_text())
+        self.assertEqual(summary['requests'], 0)
+        self.assertEqual(convert_record(row, output)['messages'][2]['tool_calls'][0]['function']['name'], 'refuse_drawing')
+
+    async def test_infrastructure_retry_preserves_attempts(self):
+        teacher = ToolTeacher([RuntimeError('Provider down'), update(), preview(), submit()])
+        options = self.options(teacher)
+        self.assertEqual((await generate_dataset(options))['infrastructureErrors'], 1)
+        self.assertEqual((await generate_dataset(options))['infrastructureErrors'], 1)
+        summary = await generate_dataset({**options, 'retryErrors': True})
+        self.assertEqual((summary['review'], summary['requests']), (1, 3))
+        self.assertEqual(len(self.record()['previousAttempts']), 1)
+
+    async def test_artifact_and_transcript_integrity(self):
+        from training.data import convert_record
+        from drawing.tool_dataset import trajectory_hash
+        teacher = ToolTeacher([update(), preview(), submit()])
+        await generate_dataset(self.options(teacher))
+        row = self.record()
+        row['drawingTrajectory']['messages'][2]['tool_calls'][0]['function']['arguments']['source'] = 'modified'
+        with self.assertRaisesRegex(ValueError, 'hash mismatch'):
+            convert_record(row, self.output)
+        row['drawingTrajectoryHash'] = trajectory_hash(row['drawingTrajectory'])
+        with self.assertRaisesRegex(ValueError, 'source mismatch'):
+            convert_record(row, self.output)
+        row = self.record()
+        (self.output/row['artifacts']['source']).write_text('modified')
+        with self.assertRaisesRegex(ValueError, 'source mismatch'):
             convert_record(row, self.output)
 
-    async def test_unreviewed_final_revision_is_not_automatically_submitted(self):
-        summary = await generate_dataset({'output': str(self.output), 'specs': [example_spec()],
-            'teacher': ScriptedClient(['{"code":"first"}', '{"code":"new revision"}']),
-            'candidates': 1, 'renderer': self.renderer(), 'config': {**self.config(), 'maxCalls': 4}})
-        self.assertEqual(summary['rejected'], 1)
-        row = json.loads((self.output/'candidates.jsonl').read_text())
-        self.assertNotIn('image', row['artifacts'])
-        self.assertNotIn('submission', row)
-
-    async def test_malformed_review_then_confirmation_preserves_trainable_preview(self):
-        teacher = ScriptedClient(['{"code":"draw()"}', 'not json', '{"submit":true}'])
-        summary = await generate_dataset({'output': str(self.output), 'specs': [example_spec()],
-            'teacher': teacher, 'candidates': 1, 'renderer': self.renderer(), 'config': self.config()})
-        self.assertEqual(summary['review'], 1)
-        row = json.loads((self.output/'candidates.jsonl').read_text())
-        from training.data import convert_record
-        example = convert_record(row, self.output)
-        self.assertEqual(sum(p['type'] == 'image' for m in example['messages'] for p in m['content']), 1)
-
-    async def test_submit_requires_a_preview_and_teacher_requires_vision(self):
-        teacher = ScriptedClient(['{"submit":true}', '{"code":"draw()"}', '{"submit":true}'])
-        summary = await generate_dataset({'output': str(self.output), 'specs': [example_spec()],
-            'teacher': teacher, 'candidates': 1, 'renderer': self.renderer(), 'config': self.config()})
-        self.assertEqual(summary['review'], 1)
-        self.assertIn('before submitting', teacher.messages[1][-1]['content'])
+    async def test_vision_preflight_and_no_legacy_draft_reuse(self):
         from drawing.dataset_client import TINKER_MODEL_URL
-        blind = ScriptedClient([], model='deepseek-ai/DeepSeek-V4.1', base_url=TINKER_MODEL_URL)
+        teacher = ToolTeacher([])
+        teacher.model, teacher.baseUrl = 'deepseek-ai/DeepSeek-V4.1', TINKER_MODEL_URL
         with self.assertRaisesRegex(ValueError, 'image input'):
-            await generate_dataset({'output': str(self.output/'blind'), 'specs': [example_spec()], 'teacher': blind})
+            await generate_dataset(self.options(teacher))
+        teacher = ToolTeacher([])
+        with self.assertRaisesRegex(ValueError, 'Legacy JSON drafts'):
+            await generate_dataset({**self.options(teacher), 'draftsFrom': ['old']})
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()
