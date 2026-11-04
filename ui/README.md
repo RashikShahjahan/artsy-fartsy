@@ -82,6 +82,7 @@ The developer workspaces retain their shared navigation and styling:
 - **Prompt review** searches and reviews drawing and safety prompts, saves notes and decisions, and records named dataset approval. Choose Safety prompts to retain the separate safety-only approval workflow.
 - **SFT candidates** inspects full trajectories and images, saves manual decisions, and exports approved, structurally trainable examples.
 - **Runs** (`/runs`) launches evaluations, supervised fine-tuning, and GRPO jobs from validated CLI settings, with status, console output, history, and Stop controls.
+- **Eval comparison** (`/comparisons`) shows saved paired Luna judgments with final images, individual 0–4 adherence and visual-quality scores, comments, and preferences. Search prompts/comments, filter by preferred model or missing outputs, sort by adherence gain, and click images to enlarge. Summary averages use only matched, scored images. It discovers paired-judge manifests under `eval-results/`; browsing makes no model calls.
 - **RL prompts** (`/rl/prompts`) browses the complete manifest-selected training prompt set, with search and category filters.
 - **RL rollouts** (`/rl/rollouts`) passively inspects completed RL episode artifacts and rewards, without launching or modifying training. The legacy `/rl` URL opens this workspace.
 

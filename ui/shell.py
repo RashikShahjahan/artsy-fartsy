@@ -6,6 +6,7 @@ def navigation(current):
     links = [('studio', '/studio', 'Studio'), ('review', '/review', 'Prompt review'),
              ('candidates', '/candidates', 'SFT candidates'),
              ('runs', '/runs', 'Runs'),
+             ('comparisons', '/comparisons', 'Eval comparison'),
              ('preferences', '/preferences', 'Blind ranking'),
              ('rl-prompts', '/rl/prompts', 'RL prompts'),
              ('rl-rollouts', '/rl/rollouts', 'RL rollouts')]

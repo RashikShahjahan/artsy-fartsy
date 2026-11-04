@@ -68,6 +68,7 @@ class ChatClient:
     timeout_ms: int = 60_000
     max_tokens: int = 2048
     reasoning_enabled: bool = True
+    max_connections: int = 16
 
     http_client: httpx.AsyncClient | None = field(default=None, repr=False)
     _owns_client: bool = field(default=False, init=False, repr=False)
@@ -94,7 +95,8 @@ class ChatClient:
         if self.http_client is None:
             self.http_client = httpx.AsyncClient(
                 timeout=self.timeout_ms / 1000, follow_redirects=False,
-                limits=httpx.Limits(max_connections=16, max_keepalive_connections=8))
+                limits=httpx.Limits(max_connections=self.max_connections,
+                                   max_keepalive_connections=self.max_connections))
             self._owns_client = True
             self._loop = asyncio.get_running_loop()
             _OWNED_CLIENTS[id(self)] = self
@@ -235,8 +237,12 @@ def chat_client(options: dict[str, Any]):
     if type(budget) is not int or budget < 1:
         raise ValueError("maxTokens must be a positive integer")
     key = options.get("apiKey")
+    connections = options.get("maxConnections", 16)
+    if type(connections) is not int or connections < 1:
+        raise ValueError("maxConnections must be a positive integer")
     return ChatClient(model=model, baseUrl=base, api_key=endpoint_api_key(base, key if isinstance(key, str) else None),
                       timeout_ms=timeout, max_tokens=budget,
+                      max_connections=connections,
                       reasoning_enabled=options.get("reasoningEnabled", True))
 
 

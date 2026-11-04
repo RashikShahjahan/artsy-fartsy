@@ -74,6 +74,8 @@ class DrawingEncoder:
             msg["content"] = parts
             if "tool_calls" in msg:
                 for call in msg["tool_calls"]:
+                    # Provider streaming indices are transport metadata, not ToolCall fields.
+                    call.pop("index", None)
                     arguments = call["function"]["arguments"]
                     if not isinstance(arguments, str):
                         call["function"]["arguments"] = json.dumps(arguments, ensure_ascii=False)

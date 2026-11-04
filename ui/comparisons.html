@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Artsy · Eval comparison</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/comparisons.css">
+  <script src="/dom.js" defer></script>
+  <script src="/comparisons.js" defer></script>
+</head>
+<body>__NAVIGATION__
+<main class="comparison-main">
+  <div class="page-heading"><div><p class="eyebrow">FINAL IMAGE EVALUATION</p><h1>Compare the drawings.</h1></div><p class="page-description">Two outputs, one prompt. Explore Luna’s scores and the details behind each judgment.</p></div>
+  <section class="comparison-toolbar ui-panel" aria-label="Comparison controls">
+    <label>Evaluation pair<select id="comparison-run" class="ui-control"></select></label>
+    <button id="comparison-refresh" type="button">Refresh results</button>
+    <p id="comparison-status" class="ui-status" role="status" aria-live="polite">Loading comparisons…</p>
+  </section>
+  <section id="comparison-summary" class="comparison-summary" aria-label="Comparison summary"></section>
+  <p id="comparison-method" class="comparison-method" hidden>Scores run from 0 to 4. Averages below use only prompts with both final images and completed judgments. Luna received both images in one request, with model identities hidden and A/B order shuffled. Missing outputs have no visual score.</p>
+  <section id="comparison-browser" hidden>
+    <div class="comparison-filters">
+      <label>Search prompts and comments<input id="comparison-search" class="ui-control" type="search" placeholder="Try a prompt, subject, or comment…"></label>
+      <label>Show<select id="comparison-filter" class="ui-control"><option value="all">All prompts</option><option value="both">Both final images</option><option value="sft">SFT preferred</option><option value="base">Base preferred</option><option value="tie">Ties</option><option value="missing">Missing outputs</option></select></label>
+      <label>Sort by<select id="comparison-sort" class="ui-control"><option value="original">Prompt order</option><option value="gain">Largest SFT adherence gain</option><option value="loss">Largest base adherence gain</option></select></label>
+    </div>
+    <div class="comparison-pager"><span id="comparison-count" aria-live="polite"></span><div><button id="comparison-prev" type="button">Previous</button><span id="comparison-page"></span><button id="comparison-next" type="button">Next</button></div></div>
+    <div id="comparison-pairs"></div>
+  </section>
+</main>
+</body></html>

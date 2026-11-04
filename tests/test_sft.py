@@ -331,6 +331,21 @@ class TinkerTests(unittest.TestCase):
         return self.tokenizer.decode([token for token, weight in zip(
             datum.loss_fn_inputs["target_tokens"].data, datum.loss_fn_inputs["weights"].data) if weight])
 
+    def test_provider_tool_call_index_does_not_change_encoding(self):
+        from training.sft import DrawingEncoder
+
+        example = self.example()
+        indexed = copy.deepcopy(example)
+        for msg in indexed['messages']:
+            for index, call in enumerate(msg.get('tool_calls', [])):
+                call['index'] = index
+        encoder = DrawingEncoder(self.renderer)
+        actual, expected = encoder(indexed)[0], encoder(example)[0]
+        self.assertEqual(actual.model_input.to_ints(), expected.model_input.to_ints())
+        for key in expected.loss_fn_inputs:
+            self.assertEqual(actual.loss_fn_inputs[key].data, expected.loss_fn_inputs[key].data)
+        self.assertEqual(indexed['messages'][2]['tool_calls'][0]['index'], 0)
+
     def test_rendering_preserves_native_tool_schema_and_chat_text(self):
         from tinker_cookbook.renderers import TrainOnWhat
         from training.sft import DrawingEncoder

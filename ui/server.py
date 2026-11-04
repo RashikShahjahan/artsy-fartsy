@@ -10,7 +10,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from uuid import uuid4
 from urllib.parse import urlsplit, parse_qs
 from ui.shell import navigation, review_page, empty_page
-from ui import rl_monitor, launch, preferences, speech
+from ui import rl_monitor, launch, preferences, speech, comparisons
 from ui.supervisor import SUPERVISOR, alive
 from urllib.request import urlopen
 
@@ -474,6 +474,29 @@ class Handler(SimpleHTTPRequestHandler):
         if self.serve_workspace():
             return
         target = urlsplit(self.path).path
+        if target in ('/comparisons', '/comparisons/'):
+            return self.send_page((ROOT / 'ui/comparisons.html').read_text().replace(
+                '__NAVIGATION__', navigation('comparisons')))
+        if target == '/api/comparisons':
+            return self.send_json({'comparisons': comparisons.list_comparisons(ROOT / 'eval-results')})
+        if target.startswith('/api/comparisons/'):
+            try:
+                match = re.fullmatch(r'/api/comparisons/([^/]+)/images/([^/]+)/(base|sft)', target)
+                if match:
+                    content = comparisons.image(ROOT / 'eval-results', *match.groups())
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'image/png')
+                    self.send_header('Cache-Control', 'no-store')
+                    self.send_header('Content-Length', str(len(content)))
+                    self.end_headers()
+                    self.wfile.write(content)
+                    return
+                match = re.fullmatch(r'/api/comparisons/([^/]+)', target)
+                if match:
+                    return self.send_json(comparisons.packet(ROOT / 'eval-results', match[1]))
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+            return self.send_json({'error': 'Comparison or image unavailable.'}, 404)
         if target in ('/preferences', '/preferences/'):
             return self.send_page((ROOT/'ui/preferences.html').read_text().replace(
                 '__NAVIGATION__', navigation('preferences')))
@@ -613,7 +636,7 @@ class Handler(SimpleHTTPRequestHandler):
         if target in ('/studio', '/studio/', '/drawings', '/drawings.html'):
             page = (ROOT / 'ui/index.html').read_text().replace('__NAVIGATION__', navigation('studio'))
             return self.send_page(page)
-        if target not in ('/speech.js', '/artsy.js', '/activity.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css', '/run-client.js', '/dom.js'):
+        if target not in ('/speech.js', '/artsy.js', '/activity.js', '/artsy.css', '/app.js', '/trace.js', '/style.css', '/rl-monitor.js', '/rl-monitor.css', '/runs.js', '/runs.css', '/preferences.js', '/preferences.css', '/run-client.js', '/dom.js', '/comparisons.js', '/comparisons.css'):
             return self.send_json({'error': 'Not found.'}, 404)
         # Local UI assets must follow the running checkout rather than a browser
         # cache that can keep an older client alive after a server restart.

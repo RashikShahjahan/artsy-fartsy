@@ -85,7 +85,7 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     output = Path(options["output"]).resolve()
     candidates = options.get("candidates", 2)
     max_tokens, workers = options.get("maxTokens", MAX_RESPONSE_TOKENS), options.get("workers", 1)
-    if type(workers) is not int or not 1 <= workers <= 8: raise ValueError("workers must be an integer from 1 to 8")
+    if type(workers) is not int or not 1 <= workers <= 128: raise ValueError("workers must be an integer from 1 to 128")
     if type(candidates) is not int or candidates < 1: raise ValueError("candidates must be a positive integer")
     if max_tokens is not None and (type(max_tokens) is not int or max_tokens < 1): raise ValueError("maxTokens must be positive when supplied")
     output.mkdir(parents=True, exist_ok=True)
@@ -149,12 +149,23 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
                 if callback: callback(record)
             return out
 
-        for offset in range(0, len(specs), workers):
-            # Parallelism is bounded by independent specifications, matching TS batching.
-            batch = await asyncio.gather(*(process_spec(s) for s in specs[offset:offset + workers]), return_exceptions=True)
-            error = next((result for result in batch if isinstance(result, BaseException)), None)
-            if error: raise error
-            for group in batch: records.extend(group)
+        pending_specs = iter(specs)
+
+        async def worker() -> None:
+            # Each worker claims its next prompt immediately, without waiting
+            # for slower trajectories assigned to other workers.
+            for spec in pending_specs:
+                records.extend(await process_spec(spec))
+
+        tasks = [asyncio.create_task(worker()) for _ in range(min(workers, len(specs)))]
+        try:
+            await asyncio.gather(*tasks)
+        except BaseException:
+            # Drain workers before releasing the dataset lock on failure/cancel.
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
         order = {s["id"]: i for i, s in enumerate(specs)}
         records.sort(key=lambda r: (order[r["spec"]["id"]], r["candidate"]))
         # Keep every candidate, including failed runs and teacher refusals.

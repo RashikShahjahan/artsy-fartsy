@@ -261,6 +261,58 @@ class DatasetGenerationTests(unittest.IsolatedAsyncioTestCase):
     def record(self):
         return json.loads((self.output / 'candidates.jsonl').read_text())
 
+    async def test_worker_replenishes_before_slow_prompt_finishes(self):
+        specs = [{**example_spec(), 'id': f'prompt-{i}'} for i in range(5)]
+        replenished = asyncio.Event()
+        active = peak = 0
+        started = []
+
+        async def candidate(options, spec, index, api_doc):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            started.append(spec['id'])
+            try:
+                if spec['id'] == 'prompt-0':
+                    await replenished.wait()
+                elif spec['id'] == 'prompt-2':
+                    replenished.set()
+                await asyncio.sleep(0)
+                return {'id': f"{spec['id']}-c{index}", 'spec': spec,
+                        'candidate': index, 'status': 'review', 'trace': []}
+            finally:
+                active -= 1
+
+        options = {**self.options(None), 'specs': specs, 'workers': 2}
+        with patch('drawing.dataset._candidate', candidate):
+            summary = await asyncio.wait_for(generate_dataset(options), timeout=2)
+        self.assertEqual(peak, 2)
+        self.assertEqual(len(started), 5)
+        self.assertEqual(summary['review'], 5)
+        records = [json.loads(line) for line in (self.output / 'candidates.jsonl').read_text().splitlines()]
+        self.assertEqual([r['spec']['id'] for r in records], [s['id'] for s in specs])
+
+    async def test_failed_worker_cancels_peers_before_releasing_lock(self):
+        started, cancelled = asyncio.Event(), asyncio.Event()
+        specs = [{**example_spec(), 'id': f'prompt-{i}'} for i in range(2)]
+
+        async def candidate(options, spec, index, api_doc):
+            if spec['id'] == 'prompt-0':
+                await started.wait()
+                raise ValueError('worker failed')
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                self.assertTrue((self.output / '.generation.lock').exists())
+                cancelled.set()
+
+        with patch('drawing.dataset._candidate', candidate):
+            with self.assertRaisesRegex(ValueError, 'worker failed'):
+                await asyncio.wait_for(generate_dataset({**self.options(None), 'specs': specs, 'workers': 2}), 2)
+        self.assertTrue(cancelled.is_set())
+        self.assertFalse((self.output / '.generation.lock').exists())
+
     async def test_native_tools_preview_pixels_export_and_loss_mask(self):
         from training.data import convert_record
         from drawing.agent_contract import DRAWING_TOOLS

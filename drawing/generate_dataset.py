@@ -22,7 +22,7 @@ HELP = """Python dataset generation
   --input FILE          Custom JSONL specs instead of the built-in curriculum
   --drafts-from DIR     Legacy option; not supported with drawing-tool collection
   --candidates N        Programs per prompt (default: 2)
-  --workers N           Independent prompts processed concurrently, 1–8
+  --workers N           Independent prompts processed concurrently, 1–128
   --renderer BACKEND    docker (default), or local for explicitly trusted code
   --max-tokens N        Teacher output tokens per response (default: 32768)
   --prompt-model ID     Prompt-writing LLM (defaults to teacher model)
@@ -259,11 +259,19 @@ async def _main(argv: list[str] | None = None) -> int:
     timeout_ms = int(args.timeout_ms)
     if timeout_ms < 1 or timeout_ms > 300_000:
         raise ValueError("timeout-ms must be an integer from 1 to 300000")
+    workers = int(args.workers or 1)
+    if not 1 <= workers <= 128:
+        raise ValueError("workers must be an integer from 1 to 128")
+    # Docker renders use asyncio.to_thread; its default pool otherwise caps
+    # concurrent containers well below the requested generation parallelism.
+    from concurrent.futures import ThreadPoolExecutor
+    asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=max(32, workers)))
     teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms,
+                           "maxConnections": max(16, workers),
                            "reasoningEnabled": args.teacher_thinking == "enabled"}) if model else None
     options = {"output": output, "candidates": int(args.candidates or 2),
         "maxTokens": int(args.max_tokens) if args.max_tokens is not None else None,
-        "workers": int(args.workers or 1),
+        "workers": workers,
         "retryErrors": args.retry_errors,
         "draftsFrom": args.drafts_from, "teacher": teacher,
         "promptGenerator": prompt_generation,

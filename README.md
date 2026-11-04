@@ -282,7 +282,9 @@ bypasses prompt authoring. Minimal custom records look like:
 
 Prompt writing uses one request per prompt, with up to eight in flight
 (`--prompt-batch-size 8`) and up to five attempts per prompt. `--workers` separately
-controls teacher/render concurrency. Model-authored wording is checkpointed; the
+controls teacher/render concurrency (1–128), including the HTTP connection and
+Docker render thread pools. Workers take the next prompt as soon as they finish,
+without waiting for a group of prompts to complete. Model-authored wording is checkpointed; the
 seed alone does not reproduce it. Repeat the original command to resume missing
 work; `--retry-errors` retries candidate infrastructure failures. Changed settings
 or incompatible generator formats require a fresh output directory.
