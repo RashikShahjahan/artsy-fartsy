@@ -51,7 +51,8 @@ def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def prepare(source: Path, output: Path, seed: int, preference_count: int | None = None) -> dict:
+def prepare(source: Path, output: Path, seed: int, preference_count: int | None = None,
+            preference_to_evaluation: bool = False) -> dict:
     if digest(source.read_bytes()) != SOURCE_SHA256:
         raise ValueError("Source TSV does not match the pinned Hugging Face revision")
     with source.open(encoding="utf-8-sig", newline="") as stream:
@@ -130,6 +131,15 @@ def prepare(source: Path, output: Path, seed: int, preference_count: int | None 
     for rows in splits.values():
         rows.sort(key=lambda row: digest(f"{seed}:order:{row['id']}".encode()))
         validate_specs(rows)
+    original_evaluation = list(splits['evaluation'])
+    added_evaluation = list(splits['preference']) if preference_to_evaluation else []
+    if preference_to_evaluation:
+        # Keep the historical eval as a prefix so existing sample IDs and order
+        # remain usable; the extension can be evaluated independently.
+        splits['evaluation'].extend(added_evaluation)
+        splits['preference'] = []
+        targets['evaluation'] += targets['preference']
+        targets['preference'] = 0
     seen = set()
     seen_ids = set()
     for name, rows in splits.items():
@@ -163,13 +173,30 @@ def prepare(source: Path, output: Path, seed: int, preference_count: int | None 
                       "rl": "Compatible with training.grpo --dataset; requires an SFT checkpoint and configured judges."},
         "splits": {},
     }
+    if preference_to_evaluation:
+        manifest['format_version'] = 3
+        manifest['method'] += ' The complete preference reserve is then reassigned to evaluation, appended after the original evaluation prompts; SFT and RL remain unchanged.'
+        manifest['preference_reservation']['current_purpose'] = 'evaluation'
+        manifest['readiness']['preference'] = 'Empty: former reserved prompts are now evaluation-only and must not be used for preference tuning.'
+        manifest['evaluation_extension'] = {'from_split': 'preference', 'records': len(added_evaluation),
+            'original_records': len(original_evaluation), 'subsets': {}}
+        for name, rows in [('original', original_evaluation), ('added-from-preference', added_evaluation)]:
+            path = output / 'evaluation' / f'{name}.prompts.jsonl'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(''.join(json.dumps(row, ensure_ascii=False, separators=(',', ':')) + '\n' for row in rows), encoding='utf-8')
+            manifest['evaluation_extension']['subsets'][name] = {
+                'file': str(path.relative_to(output)), 'records': len(rows),
+                'sha256': digest(path.read_bytes())}
     for name, rows in splits.items():
         folder = output / name
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / "prompts.jsonl"
         text = "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n" for row in rows)
         path.write_text(text, encoding="utf-8")
-        assert len(load_specs(path)) == len(rows)
+        if rows:
+            assert len(load_specs(path)) == len(rows)
+        else:
+            assert not path.read_bytes()
         manifest["splits"][name] = {
             "file": f"{name}/prompts.jsonl", "records": len(rows),
             "sha256": digest(path.read_bytes()),
@@ -189,8 +216,10 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--preference-count", type=int,
                         help="Prompts to reserve from original SFT (default: 20%% of SFT, rounded)")
+    parser.add_argument('--preference-to-evaluation', action='store_true',
+                        help='Move the full preference reserve into evaluation; preserve original and added eval subsets')
     args = parser.parse_args()
-    manifest = prepare(args.source, args.output, args.seed, args.preference_count)
+    manifest = prepare(args.source, args.output, args.seed, args.preference_count, args.preference_to_evaluation)
     print(json.dumps({name: entry["records"] for name, entry in manifest["splits"].items()}, indent=2))
 
 

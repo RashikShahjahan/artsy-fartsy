@@ -25,6 +25,8 @@ class PartiPromptsTest(unittest.TestCase):
                 first = prepare(source, root / "first", 42)
                 second = prepare(source, root / "second", 42)
                 smaller = prepare(source, root / "smaller", 42, preference_count=7)
+                expanded = prepare(source, root / 'expanded', 42, preference_to_evaluation=True)
+                expanded_again = prepare(source, root / 'expanded-again', 42, preference_to_evaluation=True)
                 for invalid in (0, -1, 70, 71):
                     with self.subTest(count=invalid), self.assertRaises(ValueError):
                         prepare(source, root / "invalid", 42, preference_count=invalid)
@@ -55,6 +57,20 @@ class PartiPromptsTest(unittest.TestCase):
             self.assertEqual(pools["sft"] | pools["preference"], smaller_pool)
             self.assertEqual(len(all_ids), 100)
             self.assertEqual(len(all_prompts), 100)
+            self.assertEqual(expanded, expanded_again)
+            self.assertEqual({name: entry['records'] for name, entry in expanded['splits'].items()},
+                             {'sft': 56, 'evaluation': 24, 'rl': 20, 'preference': 0})
+            for name in ['sft', 'rl']:
+                self.assertEqual(expanded['splits'][name], first['splits'][name])
+            self.assertEqual((root / 'expanded/evaluation/prompts.jsonl').read_bytes(),
+                             (root / 'first/evaluation/prompts.jsonl').read_bytes()
+                             + (root / 'first/preference/prompts.jsonl').read_bytes())
+            self.assertEqual((root / 'expanded/preference/prompts.jsonl').read_bytes(), b'')
+            for name, original in [('original', 'evaluation'), ('added-from-preference', 'preference')]:
+                subset = expanded['evaluation_extension']['subsets'][name]
+                data = (root / 'expanded' / subset['file']).read_bytes()
+                self.assertEqual(data, (root / 'first' / original / 'prompts.jsonl').read_bytes())
+                self.assertEqual(digest(data), subset['sha256'])
 
 
 if __name__ == "__main__":

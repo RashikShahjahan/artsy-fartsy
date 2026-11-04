@@ -5,6 +5,9 @@ inspects PNG previews, repairs its work, and submits an image with editable sour
 The project includes a local web UI, teacher dataset generation, hosted LoRA SFT,
 GRPO training, and an independent Inspect evaluation harness.
 
+Completed experiment setups, results, and conclusions are recorded in the
+[experiment log](EXPERIMENT_LOG.md).
+
 Model sampling and training run on Tinker; tokenization and image processing run
 locally. The bundled inference bridge defaults to `Qwen/Qwen3.5-4B`. Dataset
 authors and evaluation/RL judges default to GPT-6 Luna through OpenRouter when
@@ -312,13 +315,16 @@ trusted programs. All outcomes remain
 in `candidates.jsonl`; no train/validation/test splits are assigned automatically.
 
 For the local PartiPrompts dataset, reproduce the prompt assignments with
-`python3 scripts/prepare_parti_prompts.py --preference-count 228`. This reserves
-228 of the original 1,142 SFT prompts in
-`datasets/parti-prompts/preference/prompts.jsonl`, leaving 914 in SFT and keeping
-the 163 evaluation and 327 RL prompts unchanged. The reserve is deterministic
-and stratified by upstream Category and Challenge. Keep these reserved prompts
-out of SFT generation and training; preference tuning still requires candidate
-outputs and preference labels. Dataset files and their manifest are local,
+`python3 scripts/prepare_parti_prompts.py --preference-count 228 --preference-to-evaluation`.
+This keeps 914 SFT and 327 RL prompts and moves the 228 former preference prompts
+into evaluation, expanding it from 163 to **391**. The original 163 remain first;
+`evaluation/original.prompts.jsonl` preserves that subset, and
+`evaluation/added-from-preference.prompts.jsonl` contains only the new 228 so they
+can be evaluated without regenerating historical outputs. The preference split
+is now empty; these prompts must stay out of SFT, RL, and preference training.
+Assignments are deterministic and stratified by upstream Category and Challenge.
+Omit `--preference-to-evaluation` only to reproduce the historical four-way split.
+Dataset files and their manifest are local,
 Git-ignored artifacts; the preparation script reproduces them from the pinned TSV.
 
 The output includes prompt plans/checkpoints, `prompts.jsonl`, candidate records,

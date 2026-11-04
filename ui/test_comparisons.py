@@ -131,6 +131,70 @@ class ComparisonTests(unittest.TestCase):
         get_image.assert_called_once()
         self.assertEqual(handler.wfile.getvalue(), b'png')
 
+    def collection(self):
+        folder = self.root / 'combined'
+        folder.mkdir()
+        config = {'label': 'Combined evaluation', 'prompts': [
+            {'id': 'prompt', 'prompt': '<untrusted prompt>', 'seed': 42},
+            {'id': 'new', 'prompt': 'a new drawing', 'seed': 43}],
+            'original_comparison': 'paired-run', 'original_ids': ['prompt'],
+            'added_runs': {'base': 'new-base', 'sft': 'new-sft'}, 'added_comparison': 'new-judge'}
+        (folder / 'collection.json').write_text(json.dumps(config))
+        directory = self.root / 'new-base/artifacts/new-1'
+        directory.mkdir(parents=True)
+        png = b'new image'
+        (directory / 'image.png').write_bytes(png)
+        result = {'prompt': 'a new drawing', 'seed': 43, 'model': 'openai-api/artsy/base-model',
+                  'scores': {'render_valid': 1.0}, 'outcome': 'submitted',
+                  'imageHash': hashlib.sha256(png).hexdigest()}
+        (directory / 'result.json').write_text(json.dumps(result))
+        return folder, directory, result
+
+    def test_combined_view_reuses_original_scores_and_shows_pending_new_output(self):
+        _, directory, _ = self.collection()
+        packet = comparisons.packet(self.root, 'combined')
+        original, added = packet['pairs']
+        self.assertEqual([p['subset'] for p in packet['pairs']], ['original', 'added'])
+        self.assertEqual(original['members']['base']['scores'], self.record['scores']['base'])
+        self.assertTrue(original['members']['sft']['finished'])
+        self.assertFalse(added['members']['sft']['finished'])
+        self.assertTrue(added['members']['base']['finished'])
+        self.assertIsNone(added['members']['base']['scores'])
+        self.assertEqual(packet['progress'], {'base': 2, 'sft': 1})
+        self.assertEqual(comparisons.image(self.root, 'combined', 'new', 'base'), b'new image')
+        self.assertEqual(comparisons.image(self.root, 'combined', 'prompt', 'base'), self.image.read_bytes())
+        self.assertNotIn(str(self.root), json.dumps(packet))
+        directory.joinpath('image.png').write_bytes(b'changed')
+        with self.assertRaises(ValueError):
+            comparisons.image(self.root, 'combined', 'new', 'base')
+
+    def test_combined_view_attaches_new_scores_only_when_image_inputs_match(self):
+        _, _, result = self.collection()
+        # The second model has a completed refusal, with no final image.
+        second = self.root / 'new-sft/artifacts/new-1'
+        second.mkdir(parents=True)
+        second.joinpath('result.json').write_text(json.dumps({**result, 'model': 'sft-model',
+            'scores': {'render_valid': 0.0}, 'outcome': 'refused', 'imageHash': None}))
+        judge = self.root / 'new-judge'
+        judge.joinpath('records').mkdir(parents=True)
+        manifest = {**self.data, 'pairs': [{'id': 'new', 'prompt': 'a new drawing', 'members': {
+            'base': {'outcome': 'submitted', 'image': 'unused', 'image_sha256': result['imageHash']},
+            'sft': {'outcome': 'refused', 'image': None, 'image_sha256': None}}}]}
+        judge.joinpath('manifest.json').write_text(json.dumps(manifest))
+        judge.joinpath('records/new.json').write_text(json.dumps(self.record))
+        packet = comparisons.packet(self.root, 'combined')
+        self.assertEqual(packet['pairs'][1]['preferred'], 'base')
+        manifest['pairs'][0]['members']['base']['image_sha256'] = 'stale'
+        judge.joinpath('manifest.json').write_text(json.dumps(manifest))
+        self.assertIsNone(comparisons.packet(self.root, 'combined')['pairs'][1]['preferred'])
+
+    def test_combined_view_rejects_changed_prompt_seed_or_model(self):
+        _, directory, result = self.collection()
+        for key, value in [('seed', 99), ('prompt', 'wrong prompt'), ('model', 'wrong model')]:
+            directory.joinpath('result.json').write_text(json.dumps({**result, key: value}))
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                comparisons.packet(self.root, 'combined')
+
 
 if __name__ == '__main__':
     unittest.main()

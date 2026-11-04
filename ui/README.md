@@ -83,6 +83,17 @@ The developer workspaces retain their shared navigation and styling:
 - **SFT candidates** inspects full trajectories and images, saves manual decisions, and exports approved, structurally trainable examples.
 - **Runs** (`/runs`) launches evaluations, supervised fine-tuning, and GRPO jobs from validated CLI settings, with status, console output, history, and Stop controls.
 - **Eval comparison** (`/comparisons`) shows saved Luna judgments for 2–8 models with final images, individual 0–4 adherence and visual-quality scores, comments, and preferences. Search prompts/comments, filter by preferred model or missing outputs, sort by adherence spread, and click images to enlarge. Summary averages use only prompts with scored images from every model. It discovers judge manifests under `eval-results/`; browsing makes no model calls. `evaluation.judge_pairs --run base=RUN --run rank32=RUN --run rank64=RUN --run rank128=RUN --output DIR` sends all available final images per prompt in one request. `evaluation.compare_pipeline` accepts the same run/output arguments, waits for launched evals, then runs the judge; `pipeline.json` records progress and failures.
+
+The **Combined eval · 391 prompts** collection joins the original 163 scored
+prompts with the 228 added prompts. Its Prompt subset selector updates both the
+gallery and score averages. New final images appear on Refresh results while
+generation continues; unfinished samples and completed missing outputs have
+separate filters. Unscored images never count as zero in score averages. A
+`collection.json` under `eval-results/<collection>/` defines the prompt snapshot,
+original comparison, per-model added eval directories, and optional added
+judgments directory. Saved judgments are attached only when model identities,
+prompt text, and final image hashes match. Browsing or refreshing never starts
+generation or judging. The historical comparison remains independently available.
 - **RL prompts** (`/rl/prompts`) browses the complete manifest-selected training prompt set, with search and category filters.
 - **RL rollouts** (`/rl/rollouts`) passively inspects completed RL episode artifacts and rewards, without launching or modifying training. The legacy `/rl` URL opens this workspace.
 
