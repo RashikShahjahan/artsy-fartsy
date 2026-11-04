@@ -27,15 +27,16 @@ def normalized_reward(score: float, center: float = 0.0, scale: float = 5.0) -> 
 
 class HPSv3Client:
     def __init__(self, url: str, model: str = DEFAULT_MODEL, *, center: float = 0.0,
-                 scale: float = 5.0, api_key: str | None = None):
+                 scale: float = 5.0, api_key: str | None = None, timeout: float = 120):
         normalized_reward(0.0, center, scale)
         self.url, self.model = url.rstrip("/"), model
         self.center, self.scale, self.api_key = center, scale, api_key
+        self.timeout = timeout
 
     async def score(self, prompt: str, png: bytes) -> dict:
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-        async with httpx.AsyncClient(timeout=120, headers=headers) as client:
-            response = await client.post(self.url + "/score", json={
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(self.url + "/score", headers=headers, json={
                 "prompt": prompt, "image": base64.b64encode(png).decode("ascii"),
                 "model": self.model})
             response.raise_for_status()

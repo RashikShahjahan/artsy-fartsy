@@ -188,6 +188,23 @@ def apply_reporting(summary: dict, specs: list[dict], artifacts: Path, epochs: i
     summary["by_kind"] = kind_summary(specs, artifacts, epochs, cache)
     summary["by_difficulty"] = difficulty_summary(specs, artifacts, epochs, cache)
     summary["refusal_by_category"] = refusal_summary(specs, artifacts, epochs, cache)
+    if summary.get("hpsv3_model"):
+        scores, preferences = [], []
+        for spec in specs:
+            for epoch in range(1, epochs + 1):
+                result = _result(artifacts / f"{spec['id']}-{epoch}" / "result.json", cache)
+                if result is None:
+                    continue
+                values = result.get("scores", {})
+                if "hpsv3_score" in values:
+                    scores.append(values["hpsv3_score"])
+                if "hpsv3_preference" in values:
+                    preferences.append(values["hpsv3_preference"])
+        summary["hpsv3"] = {"model": summary["hpsv3_model"], "images_scored": len(scores),
+                            "raw_score_mean": sum(scores) / len(scores) if scores else None,
+                            "preference_mean_completed": sum(preferences) / len(preferences) if preferences else None,
+                            "preference_mean_expected": sum(preferences) / (len(specs) * epochs),
+                            "missing_or_invalid_preference": 0.0}
     summary["reporting_notes"] = {
         "render_rate": "by_kind.drawing.render_rate excludes expected refusal prompts.",
         "refusal_success_rate": "by_kind.refusal.refusal_success_rate counts correct refusals among completed refusal prompts.",
@@ -250,13 +267,19 @@ def main() -> int:
     parser.add_argument("--code-safety-judge-model", default=os.getenv("ARTSY_CODE_SAFETY_JUDGE_MODEL"),
                         help="Source/action monitor; defaults to the safety judge model and endpoint")
     parser.add_argument("--execution-only", action="store_true", help="Smoke test rendering without any judges")
+    parser.add_argument("--hpsv3-url", help="Use the HPSv3 /score service instead of LLM judges")
+    parser.add_argument("--hpsv3-model", help="Exact pinned model ID returned by the service /health endpoint")
     parser.add_argument("--dry-run", action="store_true", help="Validate specs and show the plan without Docker or model requests")
     parser.add_argument("--report-only", action="store_true",
                         help="Rebuild summary metrics from a completed output directory without rerunning samples")
     args = parser.parse_args()
+    if bool(args.hpsv3_url) != bool(args.hpsv3_model):
+        parser.error("--hpsv3-url and --hpsv3-model must be provided together")
+    if args.execution_only and args.hpsv3_url:
+        parser.error("--execution-only cannot be combined with HPSv3 scoring")
     if args.report_only and args.dry_run:
         parser.error("--report-only and --dry-run are mutually exclusive")
-    if args.execution_only:
+    if args.execution_only or args.hpsv3_url:
         args.correctness_judge_model = None
         args.safety_judge_model = None
         args.code_safety_judge_model = None
@@ -283,9 +306,10 @@ def main() -> int:
             "correctness_judge_model": args.correctness_judge_model,
             "safety_judge_model": args.safety_judge_model,
             "code_safety_judge_model": args.code_safety_judge_model,
-            "mode": "execution-only" if args.execution_only else "full",
-            "scoring_version": "artsy-eval-v3-submitted-rubric",
-            "adherence_rubric": "integer 0–4 divided by four; shared with RL",
+            "hpsv3_url": args.hpsv3_url, "hpsv3_model": args.hpsv3_model,
+            "mode": "hpsv3" if args.hpsv3_url else "execution-only" if args.execution_only else "full",
+            "scoring_version": "artsy-eval-hpsv3-v1" if args.hpsv3_url else "artsy-eval-v3-submitted-rubric",
+            "adherence_rubric": None if args.hpsv3_url else "integer 0–4 divided by four; shared with RL",
             "refusal_prompts": sum(s.get("kind") == "refusal" for s in selected),
             "refusal_category_counts": {category: sum(s.get("kind") == "refusal"
                 and s.get("safetyCategory", "harmful_image") == category for s in selected)
@@ -309,10 +333,18 @@ def main() -> int:
         print(f"Updated report: {summary_path.resolve()}")
         print_kind_report(summary)
         return 0 if summary.get("status") == "success" else 1
-    if not args.execution_only and not (args.correctness_judge_model and args.safety_judge_model):
+    if not args.execution_only and not args.hpsv3_url and not (args.correctness_judge_model and args.safety_judge_model):
         parser.error("Full evaluation requires both --correctness-judge-model and --safety-judge-model "
                      "(or the corresponding ARTSY_*_JUDGE_MODEL variables); use --execution-only for render tests")
     check_native_bridge(args.model)
+    if args.hpsv3_url:
+        import httpx
+        response = httpx.get(args.hpsv3_url.rstrip("/") + "/health", timeout=10)
+        response.raise_for_status()
+        health = response.json()
+        if health.get("model") != args.hpsv3_model:
+            parser.error("HPSv3 service weights differ from --hpsv3-model")
+        plan["hpsv3_service"] = health
     args.output.mkdir(parents=True, exist_ok=False)
 
     # Inspect records each role and its model calls in the evaluation log.
@@ -341,6 +373,7 @@ def main() -> int:
     logs = eval(
         drawing_task(selected, str(args.output / "artifacts"), args.correctness_judge_model,
                      args.safety_judge_model, args.code_safety_judge_model,
+                     hpsv3_url=args.hpsv3_url, hpsv3_model=args.hpsv3_model,
                      max_connections=args.max_connections, max_tokens=args.max_tokens,
                      token_limit=args.token_limit, token_limit_type=args.token_limit_type,
                      time_limit=args.time_limit, max_turns=args.max_turns),
@@ -349,6 +382,8 @@ def main() -> int:
         max_sandboxes=args.max_sandboxes or args.max_samples,
     )
     # Interrupted runs can return headers or partial samples; complete logs need no I/O.
+    if not logs:
+        logs = [read_eval_log(str(path)) for path in sorted((args.output / "logs").glob("*.eval"))]
     logs = [_recover_log(log, len(selected) * args.epochs) for log in logs]
     result_cache = {}
     samples = [sample for log in logs for sample in (log.samples or [])]

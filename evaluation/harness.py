@@ -26,6 +26,7 @@ from drawing.config import (MODEL_ID, MODEL_CONTEXT_WINDOW, LIMITS,
 from drawing.agent_contract import drawing_tools_prompt
 from drawing.eval_specs import load_specs
 from drawing.dataset_client import TINKER_MODEL_URL, OPENROUTER_MODEL_URL
+from training.hpsv3 import HPSv3Client
 from .host_agent import AGENT_NAME, AGENT_VERSION, drawing_agent
 from drawing.judges import (
     JUDGE_MAX_TOKENS, correctness_judge_prompt, safety_judge_prompt,
@@ -216,7 +217,11 @@ def trajectory_metrics(messages: list, final_render_valid: bool) -> dict:
 @scorer(metrics={"*": [mean(), stderr()]})
 def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
                   safety_judge_model: str | None = None,
-                  code_safety_judge_model: str | None = None) -> Scorer:
+                  code_safety_judge_model: str | None = None, *,
+                  hpsv3_url: str | None = None, hpsv3_model: str | None = None) -> Scorer:
+    if bool(hpsv3_url) != bool(hpsv3_model):
+        raise ValueError("HPSv3 URL and pinned model must both be configured")
+    hpsv3 = HPSv3Client(hpsv3_url, hpsv3_model, api_key=os.getenv("ARTSY_HPSV3_API_KEY"), timeout=600) if hpsv3_url else None
     if bool(correctness_judge_model) != bool(safety_judge_model):
         raise ValueError("Correctness and safety judges must both be configured, or neither")
 
@@ -226,6 +231,8 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
         for name in ("program.py", "image.png", "result.json"):
             (directory / name).unlink(missing_ok=True)
         values = {"render_valid": 0.0}
+        if hpsv3:
+            values["hpsv3_preference"] = 0.0
         if correctness_judge_model:
             values.update(adherence=0.0, image_harmful=0.0)
         if code_safety_judge_model:
@@ -246,6 +253,8 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
                   "safetyJudgeModel": safety_judge_model,
                   "codeSafetyJudgeModel": code_safety_judge_model,
                   "safetyCategory": state.metadata.get("safetyCategory")}
+        if hpsv3:
+            result.update(scoringVersion="artsy-eval-hpsv3-v1", hpsv3Model=hpsv3_model)
         try:
             source = await sandbox().read_file("/workspace/program.py")
         except FileNotFoundError:
@@ -317,6 +326,11 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
                 (directory / "image.png").write_bytes(png)
                 result.update(outcome="submitted", sourceHash=sha256(source.encode()), imageHash=sha256(png))
                 values["render_valid"] = 1.0
+                if hpsv3 and not expected_refusal:
+                    judgment = await hpsv3.score(state.metadata["prompt"], png)
+                    result.setdefault("judgments", {})["hpsv3"] = judgment
+                    values.update(hpsv3_score=judgment["hpsv3_score"],
+                                  hpsv3_preference=judgment["preference"])
                 if correctness_judge_model:
                     # The two Inspect model roles issue independent judgments of the same final PNG.
                     image_data = "data:image/png;base64," + base64.b64encode(png).decode()
@@ -346,7 +360,10 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
         result["difficulty"] = state.metadata.get("difficulty")
         result["scores"] = values
         (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-        return Score(value=values, explanation=result.get("error", json.dumps(result.get("feedback", {}))),
+        # Inspect requires identical metric keys. Its NaN sentinel excludes a
+        # missing image from raw-score aggregation without inventing a reward.
+        inspect_values = {**values, "hpsv3_score": values.get("hpsv3_score", float("nan"))} if hpsv3 else values
+        return Score(value=inspect_values, explanation=result.get("error", json.dumps(result.get("feedback", {}))),
                      metadata={"artifacts": str(directory), **result})
     return score
 
@@ -355,6 +372,7 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
 def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str | None = None,
                  safety_judge_model: str | None = None,
                  code_safety_judge_model: str | None = None, *,
+                 hpsv3_url: str | None = None, hpsv3_model: str | None = None,
                  temperature: float = 0.0, max_connections: int = 10,
                  max_tokens: int | None = DEFAULT_MAX_TOKENS,
                  token_limit: int | None = DEFAULT_TOKEN_LIMIT, token_limit_type: str = "output",
@@ -395,7 +413,8 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
          solver=drawing_agent(config=config, generation_filter=generation_filter,
                               system_prompt=drawing_tools_prompt(),
                               max_calls=None, max_turns=max_turns, progress=progress, approval=approval),
-        scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model),
+        scorer=drawing_score(artifacts, correctness_judge_model, safety_judge_model, code_safety_judge_model,
+                             hpsv3_url=hpsv3_url, hpsv3_model=hpsv3_model),
         sandbox=("docker", str(ROOT / "evaluation/compose.yaml")),
         config=config,
         turn_limit=None,
@@ -416,7 +435,8 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                       for name in ("artcanvas.py", "cairo.py", "requirements.txt")},
                   "harness_sha256": {name: sha256((ROOT / "evaluation" / name).read_bytes())
                       for name in ("harness.py", "host_agent.py", "render.py", "mini.yaml", "Dockerfile", "compose.yaml", "requirements.txt")},
-                  "api_sha256": sha256(documentation.encode()), "visual_grading": bool(correctness_judge_model),
+                  "api_sha256": sha256(documentation.encode()), "visual_grading": bool(correctness_judge_model or hpsv3_url),
+                  "hpsv3_url": hpsv3_url, "hpsv3_model": hpsv3_model,
                   "grader_roles": (["correctness_grader", "safety_grader"] if correctness_judge_model else [])
                       + (["code_safety_grader"] if code_safety_judge_model else [])},
     )

@@ -36,6 +36,20 @@ HPSv3 does not establish a quality winner among the LoRAs. On the 67 rank-32/ran
 
 [Per-image HPSv3 scores](eval-results/parti-hpsv3-mlx-4bit/scores.csv) and [comparison summary](eval-results/parti-hpsv3-mlx-4bit/summary.json).
 
+### Mean HPSv3 rewards
+
+Higher raw reward is better. The available-image mean uses every delivered image for each rank. The matched mean uses the same 150 prompts with a valid image from all three LoRAs, giving a directly comparable prompt set. Missing images are excluded from both means.
+
+| Model | Available images | Mean reward, available images | Mean reward, same 150 prompts |
+|---|---:|---:|---:|
+| Rank 32 | 158 | -1.564 | -1.604 |
+| Rank 64 | 156 | -1.427 | -1.482 |
+| Rank 128 | 158 | -1.307 | -1.370 |
+
+Rank 128 has the highest observed mean reward under both denominators, followed by rank 64 and rank 32. This agrees with the ordering of Rashik's blinded human preference scores in Experiment 4. These are descriptive means; no significance test of mean reward differences has been performed.
+
+Mean reward uses the magnitude of reward differences. Pairwise wins and Bradley–Terry ratings use which score is higher. Rank 64 has the highest fitted Elo, while rank 128 has the highest mean reward. The Elo lead therefore should not be described as a general HPSv3 quality preference. The existing pairwise tests remain inconclusive.
+
 ### HPSv3 Bradley–Terry ratings on the Elo scale
 
 The fit uses 459 available LoRA pair matches across the original 163 prompts. Missing-image comparisons are excluded. The mean rating is fixed at 1500, an arbitrary shared reference. Pointwise 95% percentile intervals come from 10,000 whole-prompt bootstrap resamples with seed 42, retaining all within-prompt comparisons together.
@@ -260,4 +274,51 @@ The active 163 evaluation prompts and 327 RL prompts have no exact ID or normali
 | 64 | [Run directory](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank64-2026-11-04/) | [Log](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank64-2026-11-04.console.log) |
 | 128 | [Run directory](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank128-2026-11-04/) | [Log](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank128-2026-11-04.console.log) |
 
-All three runs completed on 2026-11-04 around 15:25 America/Toronto. Final-batch training losses were 0.59334 (rank 32), 0.59269 (rank 64), and 0.59230 (rank 128). These are training losses on the same final batch, not held-out quality measurements. Final checkpoint and sampler metadata are in each run’s `final.json`. Evaluation is pending. One seed per rank does not establish a general rank effect.
+All three runs completed on 2026-11-04 around 15:25 America/Toronto. Final-batch training losses were 0.59334 (rank 32), 0.59269 (rank 64), and 0.59230 (rank 128). These are training losses on the same final batch, not held-out quality measurements. Final checkpoint and sampler metadata are in each run’s `final.json`. HPSv3 Inspect evaluation is running on the original 163 held-out prompts for all three checkpoints (489 episodes). Temperature 0, 25-turn limit, 32,768 output tokens per response, and ten concurrent samples per rank match the earlier generation setup. The scorer uses the same MLX 4-bit language / bfloat16 vision / float32 reward-head pipeline as Experiment 1; its HTTP service reproduced a saved Experiment 1 reward exactly. LLM judges are disabled for these runs. Raw HPSv3 rewards are reported only for valid final images, with zero normalized preference for invalid or missing submissions. One seed per rank does not establish a general rank effect.
+
+- [HPSv3 service verification](eval-results/experiment3-hpsv3/service-validation.json).
+- [Evaluation launch commands](eval-results/experiment3-hpsv3/launches.json).
+- [Live evaluation status and retry counts](eval-results/experiment3-hpsv3/pipeline.json).
+- Inspect aggregation was corrected to mark missing-image raw rewards as unscored. The initial runs were interrupted and resumed from their saved logs, preserving 14 completed scored images; partial generations were restarted. Superseded attempts are retained in the original logs.
+- Evaluation outputs: `eval-results/experiment3-rank{32,64,128}-hpsv3-2026-11-04/`.
+
+- **Deferred scoring migration (2026-11-04):** Generation now resumes with all image and LLM scorers disabled, preserving 426 completed outcomes (146 rank-32, 141 rank-64, 139 rank-128). HPSv3's HTTP server was stopped. After every generation run succeeds, the runner launches `evaluation.score_hpsv3` once in the MLX environment, reuses matching pinned-model scores, scores the remaining saved images, and exits to release model/GPU memory. Remaining partial generations were restarted; completed images and original logs remain intact.
+- Deferred scoring writes separate checkpoints under `eval-results/experiment3-hpsv3/records/`, plus `comparison.json` and `scores.csv`; Inspect generation logs remain the execution record. Current run launch commands predate this migration; live runner status and retry logs record the generation-only resumes.
+
+
+
+## Experiment 4 — Blinded human preferences versus HPSv3
+
+- **Recorded:** 2026-11-04 (America/Toronto).
+- **Status:** Complete. Rashik ranked all 163 original Experiment 1 prompts and sealed the review before model identities were revealed.
+- **Question:** How well do the quantized HPSv3 preferences agree with the reviewer's preferences on the same saved images?
+- **Models:** Original Experiment 1 rank-32, rank-64 and rank-128 checkpoints. This review does not evaluate the newly trained Experiment 3 checkpoints.
+- **Review procedure:** Three anonymous final-image cards per prompt, with stable randomized ordering determined by reviewer, prompt case and a stored secret. Rank 1 is best; ties are allowed. Missing-image cards remain rankable. Decode the saved order before comparing preferences.
+- **Scorer:** The completed Experiment 1 HPSv3 run, with 4-bit MLX language weights, bfloat16 vision weights and float32 reward head.
+- **Validation:** Reconstructed preference scores match the UI's sealed score export. Source-file hashes are saved with the analysis.
+
+### Human preference scores
+
+A score is the mean pairwise result across the two alternatives, averaged equally over 163 prompts and multiplied by 100. A win earns 1, a tie .5 and a loss 0. Missing outcomes are included as ranked by the reviewer.
+
+| Model | Human preference /100 | Pointwise 95% CI | Mean HPSv3 reward, same 150 prompts | HPSv3 Elo |
+|---|---:|---|---:|---:|
+| Rank 128 | 55.7 | [50.5, 60.9] | −1.370 | 1499.2 |
+| Rank 64 | 47.7 | [42.3, 53.1] | −1.482 | 1506.8 |
+| Rank 32 | 46.6 | [40.5, 52.8] | −1.604 | 1493.9 |
+
+### Agreement on individual image pairs
+
+Of 489 possible pair comparisons, 459 have both images. The reviewer tied 104 of those pairs and expressed a strict preference on 355. HPSv3 agrees on 226 of 355 decisive pairs, or **63.7%**, with pointwise prompt-bootstrap 95% CI **[58.1%, 69.3%]**. The remaining 129 decisive pairs disagree. Human ties are reported separately because a strict HPS reward ordering does not provide a calibrated tie threshold.
+
+| Pair | Human first-model wins / losses / ties, all prompts | HPS agreement on decisive delivered pairs | Human adjusted p |
+|---|---|---|---:|
+| Rank 32 vs rank 64 | 63 / 65 / 35 | 71/118 (60.2%) | .930 |
+| Rank 32 vs rank 128 | 54 / 74 / 35 | 77/121 (63.6%) | .278 |
+| Rank 64 vs rank 128 | 54 / 71 / 38 | 78/116 (67.2%) | .304 |
+
+Human preference tests are two-sided exact sign tests excluding human ties, with Holm correction across the three comparisons. All confidence intervals use 10,000 whole-prompt percentile bootstrap resamples, seed 42, keeping each prompt's pair results together.
+
+The reviewer's preference scores and mean HPSv3 rewards have the same observed ordering, rank 128 > rank 64 > rank 32. HPSv3's pairwise-win Bradley–Terry fit instead places rank 64 first. This difference reflects how reward magnitudes and win frequencies are aggregated. Human preference and HPSv3 pairwise tests remain inconclusive; the mean-reward ordering is descriptive and has not been significance-tested. HPSv3 shows useful but incomplete agreement with this reviewer's decisive image preferences. This is one reviewer on a previously examined prompt set, and uncertainty covers prompt sampling only. It does not establish agreement across other people, training seeds or unquantized HPSv3.
+
+Artifacts: [sealed UI score export](eval-results/experiment-1-human-preferences/4dec3b7eb9e26fdea0644c07f56d059afbbbe0b2eeebe51c6f7e0f375a1b4bc1.scores.json), [analysis summary and source hashes](eval-results/experiment4-human-hpsv3/summary.json), [per-prompt pair comparisons](eval-results/experiment4-human-hpsv3/comparisons.csv), and [reproducible analysis](eval-results/experiment4-human-hpsv3/analyze.py).

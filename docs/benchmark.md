@@ -1,23 +1,10 @@
 # Experiment evaluation
 
-The current experiment dataset is `datasets/parti-prompts/evaluation/prompts.jsonl`
-with 391 held-out prompts. The original 163 and added 228 are also saved as
-`original.prompts.jsonl` and `added-from-preference.prompts.jsonl` alongside it.
-Keep all 391 prompts out of SFT, RL, and preference training. The setup, hashes,
-results, and artifact locations for the rank comparison are in
-[Experiment 1](../EXPERIMENT_LOG.md).
-
-## Prepare prompts
-
-From the repository root, with the pinned upstream TSV available locally:
-
-```sh
-python3 scripts/prepare_parti_prompts.py --preference-count 228 --preference-to-evaluation
-```
-
-This deterministically assigns 914 SFT prompts, 327 RL prompts, and 391 evaluation
-prompts. The preference reserve is empty. Dataset preparation makes no model
-calls; datasets and generated results are Git-ignored.
+The active held-out dataset is `datasets/parti-prompts/evaluation/prompts.jsonl`
+with **163 prompts**. The former 228-prompt preference reserve is now in SFT
+training. Its historical Experiment 2 outputs remain archived, but those 228
+prompts are not held out for Experiment 3. Current allocation and experiment
+provenance are recorded in [the experiment log](../EXPERIMENT_LOG.md).
 
 ## Generate checkpoint outputs
 
@@ -42,6 +29,60 @@ The agent uses `update_drawing`, `read_drawing`, `preview_drawing`,
 `submit_drawing`, and `refuse_drawing`. Submitted source is rendered afresh and
 validated as a 1920×1200 PNG. A preview or textual completion claim cannot pass.
 Inspect `summary.json` and resolve sample errors before comparing models.
+
+## Deferred HPSv3 scoring
+
+Run Inspect generation with `--execution-only`. The model writes, previews and
+submits drawings as before, and the trusted scorer validates and saves final
+PNGs. Generation needs neither HPSv3 weights nor a scoring server.
+
+After launching generation for each rank, start the comparison pipeline:
+
+```sh
+.venv/bin/python -m evaluation.compare_pipeline \
+  --judge hpsv3 \
+  --run rank32=eval-results/experiment3-rank32-generation \
+  --run rank64=eval-results/experiment3-rank64-generation \
+  --run rank128=eval-results/experiment3-rank128-generation \
+  --hpsv3-python .inference-venv/bin/python \
+  --hpsv3-cache .cache/hpsv3 \
+  --output eval-results/experiment3-hpsv3
+```
+
+The pipeline waits for every generation summary to report success, then starts
+one short-lived MLX HPSv3 batch process. It validates all image hashes before
+loading weights, scores final images sequentially, and exits to release GPU and
+model memory. A dedicated environment must contain the dependencies listed in
+[HPSv3 setup](hpsv3.md); `--hpsv3-python-path` can append an existing dependency
+directory when needed.
+
+For already completed generation runs, invoke the batch directly:
+
+```sh
+.inference-venv/bin/python -m evaluation.score_hpsv3 \
+  --run rank32=eval-results/experiment3-rank32-generation \
+  --run rank64=eval-results/experiment3-rank64-generation \
+  --cache .cache/hpsv3 --output eval-results/experiment3-hpsv3
+```
+
+Scoring checkpoints are saved under `records/`, separately from immutable
+Inspect generation logs and artifacts. Matching saved scores are reused; a
+changed prompt, image or scorer is rejected. Existing inline scores with the
+same pinned model can be reused when migrating a run. Scoring failure leaves
+generated images intact, so scoring can resume without regenerating drawings.
+Use `evaluation.resume_eval --output RUN --execution-only` to migrate an
+interrupted inline run while preserving its completed outputs.
+
+`comparison.json` and `scores.csv` retain raw HPSv3 rewards for valid images.
+A fixed sigmoid (center 0, scale 5) produces normalized preference; invalid or
+missing submissions receive zero preference and no raw reward. The report
+separates image delivery, raw image-only means, normalized all-episode means,
+and pairwise wins on matched delivered images. These are not calibrated human
+preference probabilities or separate adherence and safety judgments.
+
+The optional inline `evaluation.evaluate --hpsv3-url URL --hpsv3-model ID` mode
+remains available for callers that already operate a persistent scorer. The
+Experiment 3 pipeline now uses deferred scoring instead.
 
 ## Judge and review
 

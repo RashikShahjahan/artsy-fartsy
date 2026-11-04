@@ -181,6 +181,12 @@ For the current PartiPrompts experiments, select the held-out dataset explicitly
 make eval ARGS="--dataset datasets/parti-prompts/evaluation/prompts.jsonl --execution-only --output eval-results/parti-new-run"
 ```
 
+For HPSv3 evaluation, generate final images with `--execution-only`, then use
+`evaluation.compare_pipeline --judge hpsv3` to score them after every generation
+run completes. HPSv3 loads only for the scoring batch and exits afterward; no
+persistent scorer is required. See [HPSv3 setup](docs/hpsv3.md) and the
+[two-phase evaluation workflow](docs/benchmark.md).
+
 Without `--dataset`, the CLI still selects the 50-prompt regression suite at
 [`evaluation/generated-50-2026-10-28/prompts.jsonl`](evaluation/generated-50-2026-10-28/prompts.jsonl),
 frozen by [`evaluation/benchmark-v3/manifest.json`](evaluation/benchmark-v3/manifest.json).

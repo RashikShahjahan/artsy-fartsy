@@ -17,7 +17,29 @@ from evaluation.harness import check_native_bridge
 from evaluation.judge_pairs import write_json
 
 
-def prepare_retry_log(log):
+def prepare_retry_log(log, *, execution_only=False):
+    # Upgrade early HPSv3 logs to Inspect's per-metric unscored sentinel while
+    # preserving completed generations and their real raw rewards.
+    for sample in getattr(log, 'samples', None) or []:
+        for score in (sample.scores or {}).values():
+            if (score.metadata or {}).get('hpsv3Model') and isinstance(score.value, dict):
+                score.value.setdefault('hpsv3_score', float('nan'))
+    if execution_only:
+        keys = ('hpsv3_url', 'hpsv3_model', 'correctness_judge_model',
+                'safety_judge_model', 'code_safety_judge_model')
+        # Inspect retries prefer task_args_passed and restore recorded scorer
+        # options separately, so all three configurations must be migrated.
+        configurations = [log.eval.task_args, getattr(log.eval, 'task_args_passed', None)]
+        configurations += [scorer.options for scorer in getattr(log.eval, 'scorers', []) or []
+                           if scorer.name.rsplit('/', 1)[-1] == 'drawing_score']
+        for configuration in configurations:
+            if configuration is not None:
+                for key in keys:
+                    configuration[key] = None
+        for sample in getattr(log, 'samples', None) or []:
+            for score in (sample.scores or {}).values():
+                if isinstance(score.value, dict):
+                    score.value = {'render_valid': score.value['render_valid']}
     # Resolve the registered task rather than reloading its package as a file.
     log.eval.task_file = None
     sandbox = getattr(log.eval, 'sandbox', None)
@@ -29,13 +51,24 @@ def prepare_retry_log(log):
     return log
 
 
-def resume(output):
+def resume(output, *, execution_only=False):
     load_dotenv(ROOT / '.env')
     summary_path = output / 'summary.json'
     original = json.loads(summary_path.read_text())
+    if not original.get('logs'):
+        original['logs'] = [str(path) for path in sorted((output / 'logs').glob('*.eval'))]
+        if not original['logs']:
+            raise ValueError('No persisted Inspect logs available to resume')
     if original['status'] == 'success':
         print('Evaluation is already complete.', flush=True)
         return 0
+    if execution_only:
+        original.setdefault('previous_scoring', {key: original.get(key) for key in
+                             ('mode', 'hpsv3_model', 'hpsv3_url', 'scoring_version')})
+        original.update(mode='execution-only', hpsv3_model=None, hpsv3_url=None,
+                        correctness_judge_model=None, safety_judge_model=None,
+                        code_safety_judge_model=None, scoring_version='artsy-eval-v3-submitted-rubric')
+        original.pop('hpsv3', None)
     check_native_bridge(original['model'])
     # Inspect omits credentials from logs and reconstructs this named client
     # on retry. The local bridge accepts the same placeholder as the first run.
@@ -58,11 +91,14 @@ def resume(output):
                       'preserved_outcomes': len(list((output / 'artifacts').glob('*/result.json'))),
                       'failed_samples': original.get('sample_errors'), 'backup': str(backup)}), flush=True)
     try:
-        retry_logs = [prepare_retry_log(read_eval_log(path)) for path in original['logs']]
-        logs = eval_retry(retry_logs, log_dir=str(output / f'retry-{stamp}'),
+        retry_logs = [prepare_retry_log(read_eval_log(path), execution_only=execution_only) for path in original['logs']]
+        retry_directory = output / f'retry-{stamp}'
+        logs = eval_retry(retry_logs, log_dir=str(retry_directory),
                           max_samples=original['max_samples'],
                           max_sandboxes=original['max_sandboxes'],
                           max_connections=original['max_connections'], display='plain')
+        if not logs:
+            logs = [read_eval_log(str(path)) for path in sorted(retry_directory.glob('*.eval'))]
         expected = len(original['ids']) * original['epochs']
         logs = [_recover_log(log, expected) for log in logs]
         for path, expected_hash in preserved.items():
@@ -86,6 +122,9 @@ def resume(output):
         return 0 if summary['status'] == 'success' else 1
     except BaseException:
         if not summary_path.exists():
+            persisted = sorted(retry_directory.glob('*.eval')) if 'retry_directory' in locals() else []
+            if persisted:
+                original.update(status='incomplete', logs=[str(path) for path in persisted])
             write_json(summary_path, original)
         raise
 
@@ -93,4 +132,6 @@ def resume(output):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
-    raise SystemExit(resume(parser.parse_args().output.resolve()))
+    parser.add_argument('--execution-only', action='store_true', help='Resume generation without image or LLM judges')
+    args = parser.parse_args()
+    raise SystemExit(resume(args.output.resolve(), execution_only=args.execution_only))

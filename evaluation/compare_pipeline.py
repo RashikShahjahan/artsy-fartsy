@@ -11,6 +11,24 @@ import time
 from evaluation.judge_pairs import write_json
 
 
+def scoring_command(args):
+    if args.judge == 'hpsv3':
+        command = [args.hpsv3_python, '-u']
+        if args.hpsv3_python_path:
+            code = ('import sys,runpy; sys.path.extend(' + repr(args.hpsv3_python_path)
+                    + "); runpy.run_module('evaluation.score_hpsv3', run_name='__main__')")
+            command += ['-c', code]
+        else:
+            command += ['-m', 'evaluation.score_hpsv3']
+        command += ['--cache', str(args.hpsv3_cache)]
+    else:
+        command = [sys.executable, '-u', '-m', 'evaluation.judge_pairs']
+    command += ['--output', str(args.output)]
+    for value in args.run:
+        command += ['--run', value]
+    return command
+
+
 def run(args):
     runs = [Path(value.partition('=')[2]).resolve() for value in args.run]
     args.output.mkdir(parents=True, exist_ok=True)
@@ -50,9 +68,7 @@ def run(args):
                 raise RuntimeError('Timed out waiting for evals after 24 hours')
             time.sleep(30)
         state['status'] = 'judging'
-        command = [sys.executable, '-u', '-m', 'evaluation.judge_pairs', '--output', str(args.output)]
-        for value in args.run:
-            command += ['--run', value]
+        command = scoring_command(args)
         state['judge_command'] = command
         save()
         with (args.output / 'judge.console.log').open('ab') as log:
@@ -71,4 +87,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', action='append', required=True)
     parser.add_argument('--output', type=Path, required=True)
-    run(parser.parse_args())
+    parser.add_argument('--judge', choices=('llm', 'hpsv3'), default='llm')
+    parser.add_argument('--hpsv3-python', default=sys.executable, help='Python environment with MLX HPSv3 dependencies')
+    parser.add_argument('--hpsv3-cache', type=Path)
+    parser.add_argument('--hpsv3-python-path', action='append', default=[], help='Optional extra dependency directory')
+    args = parser.parse_args()
+    if args.judge == 'hpsv3' and args.hpsv3_cache is None:
+        parser.error('--hpsv3-cache is required for the deferred HPSv3 phase')
+    run(args)

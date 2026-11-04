@@ -21,6 +21,19 @@ from training.hpsv3 import DEFAULT_MODEL
 
 @asynccontextmanager
 async def lifespan(app):
+    if os.getenv("ARTSY_HPSV3_BACKEND") == "mlx":
+        from training.hpsv3_mlx import MLXRewardInferencer
+        cache = Path(os.environ["ARTSY_HPSV3_MLX_CACHE"])
+        digest = hashlib.sha256()
+        with (cache / "mlx-4bit.safetensors").open("rb") as source:
+            for block in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(block)
+        app.state.model_id = DEFAULT_MODEL + "@sha256:" + digest.hexdigest() + ":mlx-4bit-g64-v1"
+        app.state.inferencer = MLXRewardInferencer(cache)
+        app.state.backend = "mlx"
+        app.state.lock = threading.Lock()
+        yield
+        return
     from hpsv3 import HPSv3RewardInferencer
     from huggingface_hub import hf_hub_download
     revision = os.environ["ARTSY_HPSV3_REVISION"]
@@ -34,6 +47,7 @@ async def lifespan(app):
     app.state.inferencer = HPSv3RewardInferencer(
         checkpoint_path=checkpoint, device=os.getenv("ARTSY_HPSV3_DEVICE", "cuda"))
     app.state.lock = threading.Lock()
+    app.state.backend = "pytorch"
     yield
 
 
@@ -68,8 +82,11 @@ def score(request: ScoreRequest, authorization: str | None = Header(default=None
         path.write_bytes(png)
         # Serialize GPU access across concurrent rollout requests.
         with app.state.lock:
-            values = app.state.inferencer.reward([request.prompt], image_paths=[str(path)])
-            value = float(values[0][0].item())
+            if app.state.backend == "mlx":
+                value = app.state.inferencer.score(request.prompt, str(path))
+            else:
+                values = app.state.inferencer.reward([request.prompt], image_paths=[str(path)])
+                value = float(values[0][0].item())
     if not math.isfinite(value):
         raise HTTPException(502, "HPSv3 returned a nonfinite score")
     return {"model": app.state.model_id, "score": value}
@@ -77,4 +94,4 @@ def score(request: ScoreRequest, authorization: str | None = Header(default=None
 
 @app.get("/health")
 def health():
-    return {"model": app.state.model_id}
+    return {"model": app.state.model_id, "backend": app.state.backend}
