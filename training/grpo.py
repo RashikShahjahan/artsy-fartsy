@@ -5,7 +5,7 @@ python -m training.grpo --max-steps 1 --output-dir checkpoints/grpo-pilot
 
 The Cookbook owns rollout sampling, grouped advantages, PPO updates and
 checkpointing. Artsy's Docker tool environment supplies image observations
-and final-image adherence and visual-quality rewards. Inspect is used for evaluation.
+and final-image HPSv3 preference rewards. Inspect is used for evaluation.
 """
 
 from __future__ import annotations
@@ -21,18 +21,18 @@ import sys
 
 from drawing.config import IMAGE_SIZE, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
-from drawing.visual_judge import VISUAL_JUDGE_VERSION
+from training.hpsv3 import REWARD_VERSION, normalized_reward
 from drawing.agent_contract import DRAWING_TOOLS_CONTRACT_VERSION
 from training.data import ROOT, digest
 from training.sft import batches
 from training.run_store import atomic_json, atomic_text, contents, recover_jsonl_tail, run_lock
 
-ALGORITHM = "tinker-cookbook-rlhf-v6"
+ALGORITHM = "tinker-cookbook-rlhf-v7"
 PROVENANCE_FILES = (
     "docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
     "drawing/agent_contract.py", "drawing/eval_specs.py", "drawing/visual_judge.py",
     "drawing/render_contract.py", "drawing/model_profiles.py", "drawing/vision.py",
-    "training/run_store.py",
+    "training/run_store.py", "training/hpsv3.py", "training/hpsv3_server.py",
     "runtime/artcanvas.py", "runtime/cairo.py", "runtime/requirements.txt",
     "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/mini.yaml",
     "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
@@ -84,15 +84,15 @@ def load_run(args):
         "temperature": args.temperature, "max_tokens": args.max_tokens,
         "max_length": args.max_length, "max_sampled_tokens": None, "max_samples": args.max_samples,
         "seed": args.seed, "epochs": args.epochs, "max_steps": args.max_steps,
-        "correctness_judge_model": os.getenv("ARTSY_CORRECTNESS_JUDGE_MODEL"),
-        "correctness_judge_url": os.getenv("ARTSY_CORRECTNESS_JUDGE_URL"),
-        "correctness_judge_renderer": os.getenv("ARTSY_CORRECTNESS_JUDGE_RENDERER", "qwen3_8_medium_reasoning"),
-        "correctness_judge_revision": os.getenv("ARTSY_CORRECTNESS_JUDGE_REVISION"),
-        "correctness_judge_max_tokens": int(os.getenv("ARTSY_CORRECTNESS_JUDGE_MAX_TOKENS", "16384")),
-        "reward": "submitted final image=(adherence_score+visual_quality_score)/8; missing/refused/invalid=0",
-        "reward_version": VISUAL_JUDGE_VERSION,
+        "hpsv3_model": os.getenv("ARTSY_HPSV3_MODEL"),
+        "hpsv3_url": os.getenv("ARTSY_HPSV3_URL", "http://127.0.0.1:8090"),
+        "hpsv3_center": float(os.getenv("ARTSY_HPSV3_CENTER", "0")),
+        "hpsv3_scale": float(os.getenv("ARTSY_HPSV3_SCALE", "5")),
+        "reward": "submitted final image=sigmoid((hpsv3_mu-center)/scale); missing/refused/invalid=0",
+        "reward_version": REWARD_VERSION,
         "loss": "Cookbook PPO; optional reference-KL reward penalty",
     }
+    normalized_reward(0.0, config["hpsv3_center"], config["hpsv3_scale"])
     total = math.ceil(len(specs) / args.batch_size) * args.epochs
     if args.max_steps != -1:
         total = min(total, args.max_steps)
@@ -221,11 +221,8 @@ def make_cookbook_config(args, specs, plan, total):
             max_tokens=args.max_tokens, max_length=args.max_length,
             normalize_rewards=args.normalize_rewards,
             revision=plan.get("tokenizer_revision"),
-            judge_model=plan["correctness_judge_model"],
-            judge_url=plan["correctness_judge_url"],
-            judge_renderer=plan.get("correctness_judge_renderer", "qwen3_8_medium_reasoning"),
-            judge_revision=plan.get("correctness_judge_revision"),
-            judge_max_tokens=plan.get("correctness_judge_max_tokens", 16384),
+            hpsv3_model=plan["hpsv3_model"], hpsv3_url=plan["hpsv3_url"],
+            hpsv3_center=plan["hpsv3_center"], hpsv3_scale=plan["hpsv3_scale"],
             model=plan["model"],
             renderer=plan["renderer"],
         ),
@@ -386,8 +383,8 @@ def main(argv=None):
     print(json.dumps(plan, indent=2))
     if args.dry_run:
         return 0
-    if not config["correctness_judge_model"] or not config["correctness_judge_url"]:
-        p.error("Set ARTSY_CORRECTNESS_JUDGE_MODEL and ARTSY_CORRECTNESS_JUDGE_URL")
+    if not config["hpsv3_model"] or not config["hpsv3_url"]:
+        p.error("Set ARTSY_HPSV3_MODEL to the /health model ID and ARTSY_HPSV3_URL")
     if args.output_dir.resolve() == args.init_checkpoint.resolve().parent:
         p.error("RL output must differ from the initial SFT checkpoint directory")
     try:

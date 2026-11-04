@@ -26,9 +26,7 @@ from drawing.model_profiles import resolve_model
 from drawing.vision import prepare_image
 from drawing.agent_contract import (DRAWING_TOOLS, DRAWING_TOOLS_CONTRACT_VERSION,
                                     drawing_tools_prompt, host_user_prompt, turn_countdown)
-from drawing.judges import JUDGE_MAX_TOKENS
-from drawing.visual_judge import (VISUAL_JUDGE_VERSION, visual_judge_prompt,
-                                  parse_visual_judgment)
+from training.hpsv3 import REWARD_VERSION
 from training.data import ROOT
 from training.sft import RENDERER, create_encoder
 
@@ -339,20 +337,6 @@ class DockerSession:
         except (ValueError, UnicodeDecodeError):
             return source, ""
 
-    async def _judge(self, role, prompt, parser, png=None, max_tokens=None):
-        client = self.judge[role]
-        if max_tokens is None:
-            max_tokens = getattr(client, "max_tokens", JUDGE_MAX_TOKENS)
-        content = [{"type": "text", "text": prompt}]
-        if png is not None:
-            content.append({"type": "image_url", "image_url": {
-                "url": "data:image/png;base64," + base64.b64encode(png).decode()}})
-        response = await client.complete([{"role": "user", "content": content}],
-                                         max_tokens, temperature=0)
-        if response.get("finishReason") == "length":
-            raise ValueError(role + " judge reply truncated")
-        return parser(response["text"])
-
     async def grade(self, _messages: list[dict]) -> tuple[float, dict[str, float]]:
         """Judge the trusted final image; group reward is computed later."""
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -361,8 +345,8 @@ class DockerSession:
                   "outcome": "incomplete", "agent": "artsy-cookbook",
                   "toolCalls": self.tool_calls, "previewAttempts": len(self.previews),
                   "trajectoryContractVersion": DRAWING_TOOLS_CONTRACT_VERSION,
-                  "scores": {"render_valid": 0.0, "adherence": 0.0, "visual_quality": 0.0},
-                  "judgeVersion": VISUAL_JUDGE_VERSION,
+                  "scores": {"render_valid": 0.0, "preference": 0.0},
+                  "judgeVersion": REWARD_VERSION,
                   "refused": refusal is not None, "refusalCorrect": False,
                   "expectedRefusal": self.spec.get("kind") == "refusal"}
         if refusal is not None:
@@ -406,12 +390,10 @@ class DockerSession:
                 result["imageHash"] = hashlib.sha256(png).hexdigest()
                 result["scores"]["render_valid"] = 1.0
                 self.png = png
-                judgment = await self._judge(
-                    "visual", visual_judge_prompt(self.spec["prompt"]), parse_visual_judgment, png)
+                judgment = await self.judge["hpsv3"].score(self.spec["prompt"], png)
                 result["judgment"] = judgment
                 result["scores"].update(
-                    adherence=judgment["adherence_score"] / 4.0,
-                    visual_quality=judgment["visual_quality_score"] / 4.0)
+                    hpsv3=judgment["hpsv3_score"], preference=judgment["preference"])
         self.result = result
         (self.directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
         return 0.0, {
@@ -582,7 +564,7 @@ class ArtsyGroupBuilder:
                     or not result["scores"]["render_valid"]):
                 reward = 0.0
             else:
-                reward = (result["scores"]["adherence"] + result["scores"]["visual_quality"]) / 2
+                reward = result["scores"]["preference"]
             result["scores"].update(reward=reward)
             session.directory.mkdir(parents=True, exist_ok=True)
             (session.directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")

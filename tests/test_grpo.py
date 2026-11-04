@@ -84,10 +84,10 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             epochs=1, seed=42, max_tokens=128, max_length=32768,
             model="Qwen/Qwen3.8-27B", renderer="qwen3_8_disable_thinking",
             revision=None,
-            normalize_rewards=False, judge_model="visual", judge_url="https://judge.example/v1")
-        with patch("training.cookbook_dataset.chat_client", side_effect=lambda config: config) as client:
+            normalize_rewards=False, hpsv3_model="weights", hpsv3_url="https://judge.example")
+        with patch("training.cookbook_dataset.HPSv3Client") as client:
             dataset, evaluation = await builder()
-        self.assertEqual(set(dataset.judge), {"visual"})
+        self.assertEqual(set(dataset.judge), {"hpsv3"})
         self.assertEqual(client.call_count, 1)
         self.assertIsNone(evaluation)
 
@@ -117,7 +117,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 session = DockerSession(spec, Path(root) / str(index), judge)
                 session.submitted = True
                 session.png = b"image" + bytes([index])
-                session.result = {"scores": {"render_valid": 1.0, "adherence": (index + 1) / 4, "visual_quality": 1.0}}
+                session.result = {"scores": {"render_valid": 1.0, "preference": 0.625 + index * 0.125}}
                 builder.sessions.append(session)
             trajectories = [SimpleNamespace(transitions=[SimpleNamespace(reward=0.2)]) for _ in range(2)]
             adjustments = await builder.compute_group_rewards(trajectories, [])
@@ -140,15 +140,6 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result[0], 0.0)
             judge["visual"].complete.assert_not_awaited()
 
-    async def test_judge_error_fails_closed(self):
-        from drawing.visual_judge import parse_visual_judgment
-        judge = {"visual": SimpleNamespace(complete=AsyncMock(return_value={
-            "text": "not JSON", "finishReason": "stop"}))}
-        session = DockerSession({}, Path("/tmp"), judge)
-        with self.assertRaises(ValueError):
-            await session._judge("visual", "Grade", parse_visual_judgment, b"png")
-        self.assertIsNone(session.result)
-
     async def test_unsubmitted_source_never_reaches_renderer(self):
         with tempfile.TemporaryDirectory() as root:
             session = DockerSession({"id": "x", "prompt": "Draw", "seed": 1}, Path(root), {})
@@ -159,15 +150,6 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(session.result["scores"]["render_valid"], 0.0)
             self.assertIsNone(session.png)
 
-    async def test_native_judge_uses_configured_reasoning_budget(self):
-        from drawing.visual_judge import parse_visual_judgment
-        client = SimpleNamespace(max_tokens=16384, complete=AsyncMock(return_value={
-            "text": '{"adherence_score":4,"visual_quality_score":2,"comments":"All requested elements"}', "finishReason": "stop"}))
-        session = DockerSession({}, Path("/tmp"), {"visual": client})
-        result = await session._judge("visual", "Grade", parse_visual_judgment)
-        self.assertEqual(result["adherence_score"], 4)
-        self.assertEqual(client.complete.call_args.args[1], 16384)
-
     async def test_unsubmitted_image_gets_zero_reward_without_visual_judge(self):
         spec = {"id": "x", "prompt": "Draw", "seed": 1}
         judge = {"visual": SimpleNamespace(compare=AsyncMock(return_value="Tie"))}
@@ -177,7 +159,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 session = DockerSession(spec, Path(root) / str(index), judge)
                 session.submitted = index == 0
                 session.png = b"image"
-                session.result = {"scores": {"render_valid": 1., "adherence": 1., "visual_quality": 1.}}
+                session.result = {"scores": {"render_valid": 1., "preference": 1.}}
                 builder.sessions.append(session)
             adjustments = await builder.compute_group_rewards(
                 [SimpleNamespace(transitions=[]) for _ in range(2)], [])
@@ -189,9 +171,8 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         png_file = BytesIO()
         Image.new("RGB", (1920, 1200)).save(png_file, "PNG")
         png = png_file.getvalue()
-        judge = {"visual": SimpleNamespace(complete=AsyncMock(return_value={
-            "text": json.dumps({"adherence_score": 3, "visual_quality_score": 2,
-                                "comments": "Looks right but rough"}), "finishReason": "stop"}))}
+        judge = {"hpsv3": SimpleNamespace(score=AsyncMock(return_value={
+            "hpsv3_score": 2.5, "preference": 0.625, "model": "weights"}))}
         with tempfile.TemporaryDirectory() as root:
             session = DockerSession(spec, Path(root), judge)
             session.container = "fake-container"
@@ -215,18 +196,15 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(metrics["render_valid"], 1.0)
             self.assertEqual((Path(root) / "image.png").read_bytes(), png)
             self.assertEqual(json.loads((Path(root) / "result.json").read_text())
-                             ["scores"]["adherence"], 0.75)
-            self.assertEqual(session.result["scores"]["visual_quality"], 0.5)
+                             ["scores"]["hpsv3"], 2.5)
+            self.assertEqual(session.result["scores"]["preference"], 0.625)
             builder = ArtsyGroupBuilder(spec, 1, 1, Path(root), judge, 128, 32768, False)
             builder.sessions = [session]
             adjustment, = await builder.compute_group_rewards([SimpleNamespace(transitions=[])], [])
             self.assertEqual(adjustment[0], 0.625)
             self.assertEqual(json.loads((Path(root) / "result.json").read_text())["scores"]["reward"], 0.625)
-            judge["visual"].complete.assert_awaited_once()
-            content = judge["visual"].complete.call_args.args[0][0]["content"]
-            self.assertIn(spec["prompt"], content[0]["text"])
-            self.assertEqual(content[1]["image_url"]["url"],
-                             "data:image/png;base64," + base64.b64encode(png).decode())
+            judge["hpsv3"].score.assert_awaited_once_with(spec["prompt"], png)
+
 
 
 class PreviewTests(unittest.TestCase):
@@ -352,8 +330,8 @@ class ConfigurationTests(unittest.TestCase):
                 "model": "Qwen/Qwen3.8-27B",
                 "renderer": "qwen3_8_disable_thinking",
                 "tokenizer_revision": None,
-                "lora_rank": 32, "correctness_judge_model": "judge",
-                "correctness_judge_url": "https://judge.example/v1",
+                "lora_rank": 32, "hpsv3_model": "weights",
+                "hpsv3_url": "https://judge.example", "hpsv3_center": 0., "hpsv3_scale": 5.,
                 }
         config = make_cookbook_config(
             args, [{"id": "a", "prompt": "Draw a circle", "seed": 1}], plan, 1)

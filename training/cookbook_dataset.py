@@ -8,7 +8,7 @@ from pathlib import Path
 import chz
 from tinker_cookbook.rl.types import RLDataset, RLDatasetBuilder
 
-from drawing.dataset_client import chat_client
+from training.hpsv3 import HPSv3Client
 from training.cookbook_env import ArtsyGroupBuilder
 from training.sft import batches
 
@@ -49,20 +49,15 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
     model: str
     renderer: str
     revision: str | None
-    judge_model: str
-    judge_url: str
-    judge_renderer: str = "qwen3_8_medium_reasoning"
-    judge_revision: str | None = None
-    judge_max_tokens: int = 16384
+    hpsv3_model: str
+    hpsv3_url: str
+    hpsv3_center: float = 0.0
+    hpsv3_scale: float = 5.0
 
     async def __call__(self):
-        judge = chat_client({"model": self.judge_model, "baseUrl": self.judge_url,
-                             "apiKey": os.getenv("ARTSY_CORRECTNESS_JUDGE_API_KEY"),
-                             "timeoutMs": 600000 if self.judge_url == "tinker://native" else 120000,
-                             "renderer": self.judge_renderer,
-                             "revision": self.judge_revision,
-                             "maxTokens": self.judge_max_tokens})
-        judges = {"visual": judge}
+        judges = {"hpsv3": HPSv3Client(
+            self.hpsv3_url, self.hpsv3_model, center=self.hpsv3_center,
+            scale=self.hpsv3_scale, api_key=os.getenv("ARTSY_HPSV3_API_KEY"))}
         return ArtsyRLDataset(self.specs, self.output_dir, self.batch_size,
                               self.group_size, self.epochs, self.seed,
                               self.max_tokens, self.max_length,

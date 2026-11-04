@@ -31,7 +31,8 @@ class ContinuationTests(unittest.TestCase):
                                           for p in grpo.PROVENANCE_FILES},
                            reference_sampler_path='tinker://original-sft-reference',
                            initial_state_path='tinker://original-sft-state',
-                           correctness_judge_model='saved-judge', correctness_judge_url='saved-url')
+                           hpsv3_model='saved-weights', hpsv3_url='saved-url',
+                           hpsv3_center=0., hpsv3_scale=5.)
         self.record = dict(name='final', batch=3, state_path='tinker://rl-state',
                            sampler_path='tinker://rl-sampler')
         self.write_source()
@@ -53,7 +54,7 @@ class ContinuationTests(unittest.TestCase):
         self.assertEqual(self.args.epochs, 3)
         self.assertEqual(plan['reference_sampler_path'], 'tinker://original-sft-reference')
         self.assertEqual(plan['initial_state_path'], 'tinker://original-sft-state')
-        self.assertEqual(plan['correctness_judge_model'], 'saved-judge')
+        self.assertEqual(plan['hpsv3_model'], 'saved-weights')
         original = list(batches(specs, 2, 1, 42))
         extended = list(batches(specs, 2, self.args.epochs, self.args.seed))
         self.assertEqual(extended[:3], original)

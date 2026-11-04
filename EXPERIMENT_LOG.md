@@ -2,11 +2,65 @@
 
 Record completed experiments here with their setup, results, interpretation, and supporting artifacts. Append future entries with sequential experiment numbers; retain the scope and caveats of earlier results.
 
-## Experiment 1 — Qwen3.5-4B LoRA rank: 32 vs 64 vs 128
+## Experiment 1 — Original 163-prompt LoRA rank evaluation
+
+- **Scope:** Original 163 held-out PartiPrompts, evaluated on the base model and SFT ranks 32, 64 and 128. The subsequent 228-prompt extension is Experiment 2.
+- **Training:** Same three checkpoints and controlled training setup documented in Experiment 2 below, trained on 1,763 trajectories from 906 unique prompts with seed 42.
+- **Generation:** Temperature 0, 25-turn limit, one saved outcome per model and prompt.
+- **Luna judging:** Complete. Anonymous four-way image judging with separate 0–4 adherence and visual-quality scores.
+- **HPSv3 judging:** Complete on the original 163 prompts, scoring all 616 available images (base plus three LoRAs), using 4-bit MLX language weights, bfloat16 vision weights and float32 reward head on the Mac GPU. Original-prompt scores saved before the scope change were reused.
+- **Interpretation:** Rank 64 has the highest observed means. This exploratory result does not establish a quality winner. The original statistical artifact uses 133 prompts rendered by all four models and corrects across 12 comparisons. The descriptive table below instead uses the 150 prompts rendered by all three LoRAs.
+
+| Metric | Rank 32 | Rank 64 | Rank 128 |
+|---|---:|---:|---:|
+| Adherence /4, 150 matched LoRA prompts | 2.513 | 2.660 | 2.600 |
+| Visual quality /4, 150 matched LoRA prompts | 2.473 | 2.540 | 2.473 |
+| Valid final image /163 | 158 | 156 | 158 |
+
+- [Original prompts](datasets/parti-prompts/evaluation/original.prompts.jsonl).
+- [Original Luna rubric and provenance](eval-results/parti-base-rank32-rank64-rank128-luna-2026-11-03/manifest.json).
+- [Original statistical analysis](eval-results/parti-base-rank32-rank64-rank128-luna-2026-11-03/statistical-analysis.json).
+- [HPSv3 run log](eval-results/parti-hpsv3-mlx-4bit/run.log) and [run manifest](eval-results/parti-hpsv3-mlx-4bit/manifest.json).
+
+### HPSv3 results
+
+| Pair, first model wins | Wins–losses | Win rate | Pointwise 95% CI | Holm-adjusted p |
+|---|---:|---:|---|---:|
+| Rank 64 vs rank 32 | 77–75 | 50.7% | 42.8%–58.5% | 1.000 |
+| Rank 64 vs rank 128 | 80–73 | 52.3% | 44.4%–60.0% | 1.000 |
+| Rank 32 vs rank 128 | 74–80 | 48.1% | 40.3%–55.9% | 1.000 |
+
+These comparisons include only prompts where both models delivered an image. Two-sided exact sign tests compare wins and losses, with Holm correction over the three comparisons. Win-rate intervals are pointwise Wilson 95% intervals. Missing drawings are excluded from these preference comparisons and remain visible in the delivery counts above.
+
+HPSv3 does not establish a quality winner among the LoRAs. On the 67 rank-32/rank-64 pairs given equal visual-quality scores by Luna, HPSv3 split 34–33 in favor of rank 32. This is an exploratory analysis under one quantized scorer, with one checkpoint per rank. Quantization preserved the three-image smoke-test ranking but changed absolute rewards.
+
+[Per-image HPSv3 scores](eval-results/parti-hpsv3-mlx-4bit/scores.csv) and [comparison summary](eval-results/parti-hpsv3-mlx-4bit/summary.json).
+
+### HPSv3 Bradley–Terry ratings on the Elo scale
+
+The fit uses 459 available LoRA pair matches across the original 163 prompts. Missing-image comparisons are excluded. The mean rating is fixed at 1500, an arbitrary shared reference. Pointwise 95% percentile intervals come from 10,000 whole-prompt bootstrap resamples with seed 42, retaining all within-prompt comparisons together.
+
+| Model | Elo | Pointwise 95% interval |
+|---|---:|---|
+| Rank 64 | 1506.8 | [1478.6, 1535.3] |
+| Rank 128 | 1499.2 | [1469.7, 1529.2] |
+| Rank 32 | 1493.9 | [1462.7, 1524.6] |
+
+Rank 64 leads rank 32 by 12.9 Elo, with paired bootstrap interval [−38.9, 64.6]. Every pairwise Elo-difference interval includes zero. These ratings summarize the quantized HPSv3 preferences for these checkpoints. Uncertainty covers prompt sampling only. The ordering remains unresolved.
+
+[Rating estimates and pairwise intervals](eval-results/parti-hpsv3-mlx-4bit/elo.json) and [reproducible fitting script](eval-results/parti-hpsv3-mlx-4bit/fit_elo.py).
+
+### Current dataset allocation
+
+The 228 added prompts have been restored to the SFT **prompt input** split. The active allocation is SFT 1,142, evaluation 163, RL 327, preference 0. This operation does not create teacher trajectories or retrain checkpoints. Exact ID disjointness was checked across the active splits.
+
+Experiment 2 remains a valid historical evaluation of its original checkpoints. Its added prompts must not be treated as held-out evaluation for future models trained on the restored SFT prompts. The archived [391 prompts](eval-results/experiment-2-extended-prompts/extended.prompts.jsonl), [added 228 prompts](eval-results/experiment-2-extended-prompts/added.prompts.jsonl), and [split manifest](eval-results/experiment-2-extended-prompts/dataset-manifest.json) preserve its provenance. Recreate the current allocation by preparing the historical expanded split and then restoring its added subset to SFT, as recorded in the active dataset manifest.
+
+## Experiment 2 — Extended 391-prompt evaluation of LoRA ranks 32, 64 and 128
 
 - **Recorded:** 2026-11-04 (America/Toronto).
 - **Run dates:** 2026-11-03–2026-11-04.
-- **Status:** Complete: all 391 prompts evaluated on all four models and judged.
+- **Status:** Historical extended evaluation complete: all 391 prompts evaluated on all four models and judged by Luna. HPSv3 is restricted to Experiment 1.
 - **Question:** How does LoRA rank affect prompt adherence, visual quality, final-image reliability, and generation efficiency?
 - **Comparison:** SFT LoRA ranks 32, 64, and 128 on Qwen/Qwen3.5-4B. The base model was included as a control in generation and four-way judging.
 - **Recommended choice:** Rank 64 for these checkpoints, based on the observed quality/efficiency tradeoff. Quality superiority over the other ranks is not statistically established.
@@ -144,8 +198,8 @@ Methods: [paired permutation tests](https://docs.scipy.org/doc/scipy/reference/g
 | Rank 128 | [final.json](checkpoints/sft-parti-qwen3.5-4b-rank128-2026-11-03/final.json) |
 
 - [Combined 391-prompt viewer](http://127.0.0.1:4173/comparisons#comparison=parti-combined-391-four-model-2026-11-04).
-- [Evaluation prompts](datasets/parti-prompts/evaluation/prompts.jsonl), [original 163](datasets/parti-prompts/evaluation/original.prompts.jsonl), and [added 228](datasets/parti-prompts/evaluation/added-from-preference.prompts.jsonl).
-- [Dataset split manifest](datasets/parti-prompts/manifest.json).
+- [Experiment 2 evaluation prompts](eval-results/experiment-2-extended-prompts/extended.prompts.jsonl), [original 163](datasets/parti-prompts/evaluation/original.prompts.jsonl), and [added 228](datasets/parti-prompts/evaluation/added-from-preference.prompts.jsonl).
+- [Historical dataset split manifest](eval-results/experiment-2-extended-prompts/dataset-manifest.json).
 - [Training manifest](checkpoints/sft-parti-qwen3.5-4b-rank64-2026-11-03/training-manifest.json).
 - [Original four-model judge manifest and rubric](eval-results/parti-base-rank32-rank64-rank128-luna-2026-11-03/manifest.json).
 - [Added four-model judge manifest and rubric](eval-results/parti-added-four-model-luna-2026-11-04/manifest.json).
@@ -162,3 +216,48 @@ Datasets, checkpoints, and raw eval artifacts are Git-ignored local files. This 
 - Do blinded human judgments agree with Luna on adherence and visual quality?
 - How much do the 25-turn cap and repeated context/preview tokens affect the efficiency ranking?
 - Do category differences persist on larger, prespecified category samples?
+
+## Experiment 3 — LoRA rank comparison with the expanded SFT dataset
+
+- **Recorded:** 2026-11-04 (America/Toronto).
+- **Status:** Training complete for ranks 32, 64, and 128: all 70 optimizer updates, final optimizer checkpoints, and final sampler exports are saved. All recorded losses are finite. Saved training configurations are identical except for LoRA rank. Evaluation is pending.
+- **Question:** How do ranks 32, 64, and 128 perform after adding the restored 228 SFT prompts to the original training data?
+- **Initialization:** Three independent fresh adapters from `Qwen/Qwen3.5-4B`; no continuation from Experiment 1/2 adapters.
+- **Training data:** 2,219 complete trajectories from 1,134 unique prompts: the exact original 1,763-trajectory training file (906 prompts), plus 456 new Luna teacher trajectories (228 prompts, two candidates each). Eight of the original SFT prompt inputs still lack a structurally trainable trajectory in the selected original file.
+- **Teacher collection:** `openai/gpt-6-luna`, reasoning enabled, Docker renderer, maximum 32,768 output tokens per response and 12 model turns. All 456 new trajectories passed structural SFT conversion and artifact integrity checks, with no generation failures.
+- **Review status:** All 2,219 selected trajectories retain pending visual review. As in the earlier rank comparison, these experimental runs explicitly use `--allow-unreviewed`; structural validation does not imply human approval.
+
+| Setting | Value |
+|---|---|
+| Base model | `Qwen/Qwen3.5-4B` |
+| LoRA ranks | 32, 64, 128 |
+| Epochs | 1 |
+| Batch size | 32 complete trajectories |
+| Updates per rank | 70 (last batch: 11 trajectories) |
+| Learning rate | 0.0002 with cosine decay |
+| Training seed | 42 |
+| Loss policy | `final-write-final-preview-submit` |
+| Maximum sequence length | 262,144 tokens; no truncation; preflight maximum 36,075 tokens |
+| Checkpoint cadence | Every 5 updates and at completion |
+
+The three runs use the same dataset, seed, batch order, loss policy, and training settings; only LoRA rank differs. Compared with the earlier 56-update runs, the expanded dataset raises the one-epoch schedule to 70 updates, so cross-experiment differences combine added data and additional optimizer steps.
+
+The combined training-file SHA-256 is `76af6b58b4b6619b5a093781e22344db234a66bc2cf28242452db7a1b701ab34`. The original source training-file SHA-256 remains `87290b018a3f4dcf4f085f4c8ec542ab8b61edf852d64e5f7c443153fc3a0fc6`.
+
+The active 163 evaluation prompts and 327 RL prompts have no exact ID or normalized-text overlap with this training set. The 228 prompts added to the historical Experiment 2 evaluation are now training inputs and cannot serve as held-out evaluation for Experiment 3. Near-duplicate or semantic overlap has not been screened.
+
+### Artifacts and run status
+
+- [Combined dataset and source hashes](datasets/parti-prompts/sft-experiment-3/dataset-manifest.json).
+- [Local token/image preflight](datasets/parti-prompts/sft-experiment-3/preflight.log).
+- [New trajectory validation](datasets/parti-prompts/sft-restored-228/validation.json).
+- [Launch commands and process metadata](datasets/parti-prompts/sft-experiment-3/launches.json).
+- [Verified startup status](datasets/parti-prompts/sft-experiment-3/status.json).
+
+| Rank | Training output | Console log |
+|---|---|---|
+| 32 | [Run directory](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank32-2026-11-04/) | [Log](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank32-2026-11-04.console.log) |
+| 64 | [Run directory](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank64-2026-11-04/) | [Log](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank64-2026-11-04.console.log) |
+| 128 | [Run directory](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank128-2026-11-04/) | [Log](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank128-2026-11-04.console.log) |
+
+All three runs completed on 2026-11-04 around 15:25 America/Toronto. Final-batch training losses were 0.59334 (rank 32), 0.59269 (rank 64), and 0.59230 (rank 128). These are training losses on the same final batch, not held-out quality measurements. Final checkpoint and sampler metadata are in each run’s `final.json`. Evaluation is pending. One seed per rank does not establish a general rank effect.
