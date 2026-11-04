@@ -408,9 +408,6 @@ bridge is unnecessary during training.
 ```sh
 uv pip install --python .venv/bin/python -r training/requirements-grpo.txt
 
-# Generate the default 1,000 training prompts (paid author calls, no rendering).
-make dataset ARGS="--prompts-only --count 1000 --harmful-count 120 --malicious-code-count 80 --benign-boundary-count 0 --difficulty mixed --seed 44 --output datasets/grpo-v2"
-
 # Validate local inputs without API/Docker calls or writes.
 .venv/bin/python -m training.grpo --dry-run \
   --init-checkpoint checkpoints/sft-run/final.json --max-steps 1
@@ -423,20 +420,19 @@ For a full run, omit `--max-steps 1` and choose a new output directory. Repeat t
 original command to resume. `--finalize-only --output-dir PATH` recovers the final
 export after training completes.
 
-The default prompt path is `datasets/grpo-v2/prompts.jsonl` (800 drawings, 120
-harmful-image refusals, 80 malicious-code refusals). The default initialization is
+The default prompt path is `datasets/parti-prompts/rl/prompts.jsonl`, the reserved
+Parti RL split. Each full update uses eight prompts with four rollouts per prompt,
+with capacity for all 32 Docker episodes concurrently. The default initialization is
 the local `checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json`;
-pass `--init-checkpoint` for your own SFT run. To create a diverse 200-prompt subset
-with 10% refusals, run `.venv/bin/python -m training.curate_grpo`, then pass
-`--dataset datasets/grpo-v2-subset-200/prompts.jsonl`.
+pass `--init-checkpoint` for your own SFT run.
 
 | Setting | Default |
 | --- | --- |
-| Prompt groups / trajectories per group | 2 / 4 |
-| Concurrent Docker episodes | 4 |
+| Prompt groups / trajectories per group | 8 / 4 |
+| Concurrent Docker episodes | 32 |
 | Learning rate / sampling temperature | `1e-5` / 1.0 |
 | PPO ratio clipping / reference-KL coefficient | 0.8–1.2 / 0.01 |
-| Epochs | 1 (500 updates, 4,000 episodes on 1,000 prompts) |
+| Epochs | 1 (41 updates, 1,308 episodes on 327 prompts; final batch has 7 prompts) |
 | Model turns per trajectory | 20, with a countdown and submission reminder |
 | Per-response / aggregate generated-token cap | No separate cap |
 | Maximum context | 262,144 tokens |

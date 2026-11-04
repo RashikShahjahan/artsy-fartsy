@@ -93,8 +93,7 @@ class DrawingToolTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("Path('/workspace/program.py').unlink(missing_ok=True)", argv[-1])
             self.assertEqual(json.loads(docker.call_args.kwargs['stdin']), {'reason': reason})
             self.assertNotIn('bash', argv)
-        with patch.object(self.session, '_read_source', new=AsyncMock(return_value='')), \
-             patch.object(self.session, '_read_refusal', new=AsyncMock(return_value=reason)):
+        with patch.object(self.session, '_read_submission', new=AsyncMock(return_value=('', reason))):
             await self.session.grade([])
         self.assertEqual(self.session.result['outcome'], 'refused')
         self.assertEqual(self.session.result['trajectoryContractVersion'], DRAWING_TOOLS_CONTRACT_VERSION)

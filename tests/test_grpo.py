@@ -25,6 +25,57 @@ def response(code=0, output=b"", stderr=b""):
 
 
 class ToolTests(unittest.IsolatedAsyncioTestCase):
+    async def test_submission_reads_current_bounded_files_in_one_exec(self):
+        import subprocess
+        session = DockerSession({}, Path('/tmp'), {})
+        session.container = 'workspace'
+        with tempfile.TemporaryDirectory() as root:
+            directory = Path(root)
+            (directory / 'program.py').write_bytes(b'x' * 70000)
+            (directory / 'refusal.json').write_text(json.dumps({'reason': 'Declined'}))
+
+            async def docker(argv, **kwargs):
+                self.assertEqual(argv[:4], ['exec', 'workspace', 'python', '-c'])
+                self.assertEqual(kwargs['timeout'], 10)
+                script = argv[-1].replace('/workspace/', root + '/')
+                return await asyncio.to_thread(
+                    subprocess.run, [sys.executable, '-c', script], capture_output=True, check=True)
+
+            with patch('training.cookbook_env._docker', new=AsyncMock(side_effect=docker)) as mock:
+                source, refusal = await session._read_submission()
+                self.assertEqual(len(source.encode()), 65537)
+                self.assertEqual(refusal, 'Declined')
+                mock.assert_awaited_once()
+                (directory / 'program.py').write_bytes(b'changed')
+                (directory / 'refusal.json').write_bytes(b'{broken')
+                self.assertEqual(await session._read_submission(), ('changed', ''))
+                for invalid in (b'\xff', json.dumps({'reason': 'x' * 2049}).encode(),
+                                b' ' * 5000 + b'{}'):
+                    (directory / 'refusal.json').write_bytes(invalid)
+                    self.assertEqual(await session._read_submission(), ('changed', ''))
+                (directory / 'refusal.json').unlink()
+                self.assertEqual(await session._read_submission(), ('changed', None))
+                (directory / 'program.py').write_bytes(b'\xff')
+                with self.assertRaises(UnicodeDecodeError):
+                    await session._read_submission()
+
+    async def test_preview_processing_runs_outside_event_loop_thread(self):
+        import threading
+        session = DockerSession({'seed': 1}, Path('/tmp'), {})
+        session.container = 'workspace'
+        session.start = AsyncMock()
+        session._read_source = AsyncMock(return_value='draw()')
+        loop_thread = threading.get_ident()
+
+        def preview(*args):
+            self.assertNotEqual(threading.get_ident(), loop_thread)
+            return 'observation', {'ok': True}
+
+        with patch('training.cookbook_env._docker', new=AsyncMock(return_value=response())), \
+             patch('training.cookbook_env._preview_observation', side_effect=preview):
+            self.assertEqual(await session.execute_tool('preview_drawing', {}), ('observation', False))
+        self.assertEqual(session.previews, [{'ok': True}])
+
     async def test_dataset_builds_only_final_image_client(self):
         from training.cookbook_dataset import ArtsyDatasetBuilder
         builder = ArtsyDatasetBuilder(
@@ -81,8 +132,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             judge = {"visual": SimpleNamespace(complete=AsyncMock())}
             session = DockerSession(spec, Path(root), judge)
             session.submitted = True
-            with patch.object(session, "_read_source", new=AsyncMock(return_value="")), \
-                 patch.object(session, "_read_refusal", new=AsyncMock(return_value="I cannot help")):
+            with patch.object(session, "_read_submission", new=AsyncMock(return_value=("", "I cannot help"))):
                 await session.grade([])
             builder = ArtsyGroupBuilder(spec, 1, 1, Path(root), judge, 128, 32768, False)
             builder.sessions = [session]
@@ -102,8 +152,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
     async def test_unsubmitted_source_never_reaches_renderer(self):
         with tempfile.TemporaryDirectory() as root:
             session = DockerSession({"id": "x", "prompt": "Draw", "seed": 1}, Path(root), {})
-            with patch.object(session, "_read_source", new=AsyncMock(return_value="draw()")), \
-                 patch.object(session, "_read_refusal", new=AsyncMock(return_value=None)), \
+            with patch.object(session, "_read_submission", new=AsyncMock(return_value=("draw()", None))), \
                  patch("training.cookbook_env._docker", new=AsyncMock()) as docker:
                 await session.grade([])
             docker.assert_not_awaited()
@@ -149,10 +198,9 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             session.submitted = True
 
             async def docker(argv, **kwargs):
-                if argv[0] == "exec" and "refusal.json" in argv[-1]:
-                    return response()
                 if argv[0] == "exec":
-                    return response(output=b"print('draw')\n")
+                    return response(output=json.dumps([
+                        base64.b64encode(b"print('draw')\n").decode(), ""]).encode())
                 if argv[0] == "run":
                     self.assertIn("/opt/artsy/score_rl.py", argv)
                     self.assertEqual(kwargs["stdin"], b"print('draw')\n")
@@ -252,7 +300,10 @@ class ConfigurationTests(unittest.TestCase):
     def test_defaults_match_existing_agent_protocol(self):
         args = parser().parse_args([])
         self.assertEqual(args.group_size, 4)
-        self.assertEqual(args.max_samples, 4)
+        self.assertEqual(args.batch_size, 8)
+        self.assertEqual(args.max_samples, 32)
+        from training.data import ROOT
+        self.assertEqual(args.dataset, ROOT / "datasets/parti-prompts/rl/prompts.jsonl")
         self.assertIsNone(args.max_tokens)
         self.assertIsNone(parser().parse_args(['--max-tokens', '0']).max_tokens)
         self.assertEqual(args.max_length, 262144)
@@ -498,8 +549,7 @@ class RolloutResourceTests(unittest.IsolatedAsyncioTestCase):
         session = DockerSession({'id': 'x', 'prompt': 'draw', 'seed': 1}, Path('/tmp'), MagicMock())
         session.container = 'workspace'
         session.submitted = True
-        session._read_source = AsyncMock(return_value='print(1)')
-        session._read_refusal = AsyncMock(return_value=None)
+        session._read_submission = AsyncMock(return_value=('print(1)', None))
         session._judge = AsyncMock(return_value={'malicious': False})
         started = asyncio.Event()
         calls = []

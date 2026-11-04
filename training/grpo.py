@@ -306,7 +306,7 @@ async def train(args, specs, plan, total):
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
-    p.add_argument("--dataset", type=Path, default=ROOT / "datasets/grpo-v2/prompts.jsonl")
+    p.add_argument("--dataset", type=Path, default=ROOT / "datasets/parti-prompts/rl/prompts.jsonl")
     p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v4")
     p.add_argument("--dry-run", action="store_true")
@@ -317,9 +317,9 @@ def parser():
     p.add_argument("--limit", type=int, help="First N prompts for a pilot")
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--max-steps", type=int, default=-1)
-    p.add_argument("--batch-size", type=int, default=2, help="Prompt groups per update")
+    p.add_argument("--batch-size", type=int, default=8, help="Prompt groups per update")
     p.add_argument("--group-size", type=int, default=4, help="Independent trajectories per prompt")
-    p.add_argument("--max-samples", type=int, default=4, help="Maximum concurrent Docker episodes")
+    p.add_argument("--max-samples", type=int, default=32, help="Maximum concurrent Docker episodes")
     p.add_argument("--learning-rate", type=float, default=1e-5)
     # Cookbook recommends T=1 when using a reference-policy KL penalty.
     p.add_argument("--temperature", type=float, default=1.0)

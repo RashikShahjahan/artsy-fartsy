@@ -291,7 +291,8 @@ class DockerSession:
                 stdin=source.encode(), timeout=timeout + 2)
         except subprocess.TimeoutExpired:
             return "Return code: 124\nDrawing operation timed out.", False
-        observation, preview = _preview_observation(
+        observation, preview = await asyncio.to_thread(
+            _preview_observation,
             result.stdout, result.stderr, result.returncode, self.model, self.renderer,
             self.max_length, self.revision)
         if preview:
@@ -311,22 +312,32 @@ class DockerSession:
             raise RuntimeError("Cannot read submitted program from sandbox")
         return result.stdout.decode("utf-8") if result.stdout else ""
 
-    async def _read_refusal(self):
+    async def _read_submission(self) -> tuple[str, str | None]:
+        """Read bounded source and refusal state in one Docker command."""
         if not self.container:
-            return None
-        response = await _docker(["exec", self.container, "python", "-c",
-            "from pathlib import Path; import sys; p=Path('/workspace/refusal.json'); "
-            "sys.stdout.buffer.write(p.open('rb').read(4097) if p.is_file() else b'')"], timeout=10)
+            return "", None
+        response = await _docker([
+            "exec", self.container, "python", "-c",
+            "from pathlib import Path\n"
+            "import base64, json\n"
+            "source = Path('/workspace/program.py')\n"
+            "refusal = Path('/workspace/refusal.json')\n"
+            "data = [source.open('rb').read(65537) if source.is_file() else b'',\n"
+            "        refusal.open('rb').read(4097) if refusal.is_file() else b'']\n"
+            "print(json.dumps([base64.b64encode(value).decode('ascii') for value in data]))"], timeout=10)
         if response.returncode:
-            raise RuntimeError("Cannot read refusal from sandbox")
-        if not response.stdout:
-            return None
+            raise RuntimeError("Cannot read submission from sandbox")
+        encoded_source, encoded_refusal = json.loads(response.stdout)
+        source = base64.b64decode(encoded_source, validate=True).decode("utf-8")
+        refusal = base64.b64decode(encoded_refusal, validate=True)
+        if not refusal:
+            return source, None
         try:
-            value = json.loads(response.stdout)
+            value = json.loads(refusal)
             reason = value.get("reason") if isinstance(value, dict) else None
-            return reason if isinstance(reason, str) and 0 < len(reason.encode()) <= 2048 else ""
+            return source, reason if isinstance(reason, str) and 0 < len(reason.encode()) <= 2048 else ""
         except (ValueError, UnicodeDecodeError):
-            return ""
+            return source, ""
 
     async def _judge(self, role, prompt, parser, png=None, max_tokens=None):
         client = self.judge[role]
@@ -345,8 +356,7 @@ class DockerSession:
     async def grade(self, _messages: list[dict]) -> tuple[float, dict[str, float]]:
         """Judge the trusted final image; group reward is computed later."""
         self.directory.mkdir(parents=True, exist_ok=True)
-        source = await self._read_source()
-        refusal = await self._read_refusal()
+        source, refusal = await self._read_submission()
         result = {"prompt": self.spec["prompt"], "seed": self.spec["seed"],
                   "outcome": "incomplete", "agent": "artsy-cookbook",
                   "toolCalls": self.tool_calls, "previewAttempts": len(self.previews),
