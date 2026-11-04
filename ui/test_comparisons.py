@@ -78,6 +78,35 @@ class ComparisonTests(unittest.TestCase):
         self.assertIsNone(pair['preferred'])
         self.assertIsNone(pair['members']['base']['scores'])
 
+    def test_four_model_comparison_preserves_every_role(self):
+        self.data['roles'] = ['base', 'sft', 'rank64', 'rank128']
+        self.data['source_models'] += ['rank64-model', 'rank128-model']
+        for role in ['rank64', 'rank128']:
+            self.data['pairs'][0]['members'][role] = dict(self.data['pairs'][0]['members']['base'])
+            self.record['scores'][role] = dict(self.record['scores']['base'])
+        self.save_manifest()
+        self.save_record()
+        result = comparisons.packet(self.root, 'paired-run')
+        self.assertEqual(list(result['models']), self.data['roles'])
+        self.assertEqual(set(result['pairs'][0]['members']), set(self.data['roles']))
+        self.assertEqual(comparisons.image(self.root, 'paired-run', 'prompt', 'rank128'), self.image.read_bytes())
+        with self.assertRaises(ValueError):
+            comparisons.image(self.root, 'paired-run', 'prompt', 'unknown')
+
+    def test_waiting_pipeline_is_visible_without_fabricating_judgments(self):
+        source = self.root / 'base'
+        (source / 'summary.json').write_text(json.dumps({'model': 'base-model', 'ids': ['prompt']}))
+        waiting = self.root / 'new-comparison'
+        waiting.mkdir()
+        (waiting / 'pipeline.json').write_text(json.dumps({
+            'runs': [f'base={source}'], 'status': 'waiting_for_evals'}))
+        self.assertEqual(comparisons.list_comparisons(self.root)[0]['id'], 'new-comparison')
+        data = comparisons.packet(self.root, 'new-comparison')
+        self.assertTrue(data['pending'])
+        self.assertEqual(data['progress']['base'], 0)
+        self.assertEqual(data['pairs'], [])
+        self.assertNotIn(str(self.root), json.dumps(data))
+
     def test_routes_serve_comparison_but_do_not_allow_arbitrary_files(self):
         handler = object.__new__(server.Handler)
         handler.headers = {'Host': f'127.0.0.1:{server.PORT}'}

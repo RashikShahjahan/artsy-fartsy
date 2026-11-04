@@ -34,7 +34,7 @@ class RLMonitorTests(unittest.TestCase):
                 "prompt": "Draw a blue circle",
                 "outcome": "submitted", "commands": ["echo ok", "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"],
                 "previewAttempts": 1, "scores": {
-                    "reward": reward, "adherence": 0.75, "render_valid": 1.0,
+                    "reward": reward, "adherence": 0.75, "visual_quality": 0.5, "render_valid": 1.0,
                 },
                 "unsafe": False,
             }))
@@ -61,12 +61,25 @@ class RLMonitorTests(unittest.TestCase):
         self.assertEqual(len(result["episodes"]), 1)
         row = result["episodes"][0]
         self.assertEqual(row["score"], 0.75)
+        self.assertEqual(row["visualQuality"], 0.5)
         self.assertTrue(row["renderValid"])
         self.assertTrue(row["hasImage"])
         self.assertEqual(row["bashCalls"], 2)
         self.assertEqual(row["step"], "step-000001")
         self.assertTrue(unfinished.is_dir())
         self.assertTrue(finished.is_dir())
+
+    def test_drawing_tool_rollouts_report_tool_count(self):
+        directory = self.sample()
+        path = directory / "result.json"
+        result = json.loads(path.read_text())
+        result.pop("commands")
+        result["toolCalls"] = [{"name": "update_drawing", "arguments": {"source": "draw()"}},
+                               {"name": "submit_drawing", "arguments": {}}]
+        path.write_text(json.dumps(result))
+        row, = rl_monitor.episodes(self.root, "grpo-v4")["episodes"]
+        self.assertEqual(row["toolCalls"], 2)
+        self.assertEqual(row["bashCalls"], 0)
 
     def test_bounded_to_recent_three_steps(self):
         for step in range(1, 6):

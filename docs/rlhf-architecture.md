@@ -6,29 +6,25 @@ Training proceeds through **SFT → RL**. GRPO defaults to the latest completed 
 
 Supervise complete drawing trajectories, including source-writing tool calls, previews, repairs and submission. `training.sft` exports state and sampler paths in `checkpoints/sft-v1/final.json`.
 
-## RL: improve adherence and safety
+## RL: improve adherence and visual quality
 
-`training.grpo` initializes directly from the selected SFT state. Its frozen reference sampler is the same SFT checkpoint. It optimizes complete Mini SWE agent trajectories, including tool calls and optional visual repairs. Independent judges provide:
+`training.grpo` initializes from the selected SFT state and keeps that SFT sampler as its frozen reference. It optimizes complete drawing-tool trajectories, including optional visual repairs. RL uses the shared `update_drawing`, `read_drawing`, `preview_drawing`, `submit_drawing`, and `refuse_drawing` schemas and drawing prompt from `drawing/agent_contract.py`. Tools run sequentially; successful submission or refusal ends the episode and prevents later tool mutations. Model arguments enter fixed Docker commands as stdin, without a model-facing shell.
 
-- **Safety:** content-image and code/action-history checks. A violation earns −1. Earlier unsafe commands still count after a refusal or a later harmless image.
-- **Refusal:** a trusted prompt that should be refused earns +1 only for a submitted, protocol-valid refusal with no program. A refusal on a benign prompt earns 0.
-- **Instruction adherence:** a VLM grades the final rendered image against the original request on a 0–4 rubric, normalized to 0–1. It does not grade aesthetics.
+One vision judge grades only the trusted final render using the absolute rubric shared with the latest paired evals in `drawing/visual_judge.py`:
 
-| Outcome | Terminal reward |
-| --- | ---: |
-| Unsafe code/actions or image | −1 |
-| Correct refusal of a trusted harmful request | +1 |
-| Benign over-refusal, incorrect refusal, render failure or missing submission | 0 |
-| Safe rendered response to a benign request | adherence |
+- **Adherence (0–4):** from no meaningful requested content to all material constraints fulfilled.
+- **Visual quality (0–4):** from unusable/blank to exceptionally polished and visually effective, judged within the requested style. Simple drawings can score highly.
 
-Budget-limit terminations cannot earn positive reward. There is currently **no separate aesthetic optimization stage or visual-quality RL reward**. Image safety reviews the final render, not every intermediate preview.
+The judge returns both integer scores and concrete comments in one response. RL uses absolute judgments per output, rather than model comparisons or position-dependent preferences. Terminal reward is `(adherence_score + visual_quality_score) / 8`. Artifacts retain the raw judgment, normalized `adherence` and `visual_quality` components, and the final reward.
 
-The Tinker Cookbook environment carries the full tool trajectory and trusted terminal artifacts. `compute_group_rewards` applies safety/refusal outcomes and adherence, returning terminal reward adjustments. Cookbook subtracts the group mean without dividing by standard deviation. There is no per-component z-score normalization, efficiency reward or intermediate-render reward. Optional KL regularization uses the initial SFT sampler.
+Missing submissions, invalid renders, refusals, and budget-limit terminations earn zero. The previous code-safety, image-safety, and refusal rewards are removed from RL. Prefer drawing-only datasets: refusal examples from older datasets cannot earn positive reward under this objective. Independent evaluation still supports its safety and refusal metrics.
 
-The policy and safety/adherence judges use separate clients. Judge failures stop scoring instead of producing fabricated rewards. The SFT-initialized run uses a new algorithm version; older RL runs cannot be continued under it. Compatible runs can resume or continue with the original SFT KL reference.
+The final source is rerendered in a fresh Docker container without network access. Agent previews cannot substitute for the final image. Only a successful explicit submission reaches rendering and judging. Configure the single judge through `ARTSY_CORRECTNESS_JUDGE_*`; the policy and judge use separate clients. Invalid, truncated, or failed judge responses stop scoring instead of creating zero rewards.
+
+`compute_group_rewards` combines the normalized components and adjusts terminal rewards. Cookbook subtracts the group mean without dividing by standard deviation. There is no efficiency or intermediate-render reward. Optional KL regularization uses the initial SFT sampler. The algorithm version is `tinker-cookbook-rlhf-v6` and rollout artifacts record drawing-tool trajectory contract v3; older RL runs cannot resume or continue under this setup.
 
 ## Independent validation
 
-Keep held-out evaluation prompts out of SFT and RL training. Track human visual preference against SFT, adherence, safety failures, benign over-refusal, refusal success and render validity. Tool/turn metrics and RL reward are diagnostics; checkpoint selection still needs independent visual evaluation because RL does not explicitly optimize aesthetics.
+Keep held-out eval prompts out of SFT and RL training. Track independent human visual preference, adherence, visual quality, render validity, safety, and refusal behavior against the SFT checkpoint. Reward gains still need held-out evaluation to detect judge overfitting.
 
-Before large runs, validate SFT checkpoint compatibility, refusal behavior and reward calculation offline, then run small live Docker/RL smoke tests.
+Before large runs, validate checkpoint compatibility and reward calculation offline, then run small live Docker/RL smoke tests.

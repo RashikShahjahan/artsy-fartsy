@@ -54,8 +54,6 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
     judge_renderer: str = "qwen3_8_medium_reasoning"
     judge_revision: str | None = None
     judge_max_tokens: int = 16384
-    safety_config: dict | None = None
-    code_safety_config: dict | None = None
 
     async def __call__(self):
         judge = chat_client({"model": self.judge_model, "baseUrl": self.judge_url,
@@ -64,13 +62,7 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
                              "renderer": self.judge_renderer,
                              "revision": self.judge_revision,
                              "maxTokens": self.judge_max_tokens})
-        judges = {"adherence": judge}
-        for role, config, env_prefix in (
-                ("safety", self.safety_config, "ARTSY_SAFETY_JUDGE"),
-                ("code_safety", self.code_safety_config, "ARTSY_CODE_SAFETY_JUDGE")):
-            if not config or not config.get("model") or not config.get("baseUrl"):
-                raise ValueError(role + " judge must be independently configured")
-            judges[role] = chat_client({**config, "apiKey": os.getenv(env_prefix + "_API_KEY")})
+        judges = {"visual": judge}
         return ArtsyRLDataset(self.specs, self.output_dir, self.batch_size,
                               self.group_size, self.epochs, self.seed,
                               self.max_tokens, self.max_length,

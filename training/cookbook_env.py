@@ -1,7 +1,7 @@
 """ArtCanvas Docker environment for Tinker Cookbook multi-turn RL.
 
 Training uses Cookbook's native sampling/trajectory loop; Inspect remains the
-independent evaluation harness. Both expose the same Mini SWE bash protocol.
+independent evaluation harness. Both expose the same structured drawing tools.
 """
 
 from __future__ import annotations
@@ -24,18 +24,18 @@ from PIL import Image
 from drawing.config import MODEL_ID, MODEL_CONTEXT_WINDOW
 from drawing.model_profiles import resolve_model
 from drawing.vision import prepare_image
-from drawing.agent_contract import drawing_system_prompt, host_user_prompt, turn_countdown
-from drawing.judges import (JUDGE_MAX_TOKENS, CODE_SAFETY_MAX_TOKENS, adherence_rubric_prompt,
-    parse_adherence_rubric, code_safety_judge_prompt, parse_code_safety_judgment,
-    safety_judge_prompt, parse_safety_judgment, RL_JUDGE_VERSION)
+from drawing.agent_contract import (DRAWING_TOOLS, DRAWING_TOOLS_CONTRACT_VERSION,
+                                    drawing_tools_prompt, host_user_prompt, turn_countdown)
+from drawing.judges import JUDGE_MAX_TOKENS
+from drawing.visual_judge import (VISUAL_JUDGE_VERSION, visual_judge_prompt,
+                                  parse_visual_judgment)
 from training.data import ROOT
 from training.sft import RENDERER, create_encoder
 
 IMAGE = "artsy-rl-runtime"
-SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 MAX_PNG = 8 * 1024 * 1024
 SOURCE_BYTES = 64 * 1024
-NO_TOOL_REMINDER = 'Every response must contain a bash tool call with {"command":"..."}.'
+NO_TOOL_REMINDER = 'Every response must contain a drawing tool call. Use the drawing tools.'
 
 # Leave room for a base64-encoded maximum-sized preview and scorer response.
 MAX_OUTPUT = 12 * 1024 * 1024
@@ -138,13 +138,13 @@ def initial_messages(spec: dict, tool_specs: list[dict], model=MODEL_ID,
     """Use the same system/instance framing and API documentation as Inspect."""
     settings = agent_settings()
     prefix = encoder(model, renderer, max_length, revision).renderer.create_conversation_prefix_with_tools(
-        tool_specs, system_prompt=settings["agent"]["system_template"])
-    prompt = (f'{spec["prompt"]}\n\nPreview with: '
-              f'python /opt/artsy/render.py --seed {spec["seed"]} '
-              '--output /workspace/preview --preview < /workspace/program.py')
+        tool_specs, system_prompt=(
+            'You are Artsy, a drawing agent. Use the drawing tools to create, '
+            'inspect, preview, and submit artwork, or refuse a request. '
+            'Every response must contain at least one drawing tool call.'))
     max_turns = settings["agent"]["step_limit"]
     return [*prefix, {"role": "user", "content": host_user_prompt(
-        drawing_system_prompt(token_limit=None), prompt, max_turns)}]
+        drawing_tools_prompt(), spec["prompt"], max_turns)}]
 
 
 def _preview_observation(stdout: bytes, stderr: bytes, returncode: int, model=MODEL_ID,
@@ -196,7 +196,7 @@ class DockerSession:
         self.container: str | None = None
         self._lifecycle_lock = asyncio.Lock()
         self._closed = False
-        self.commands: list[str] = []
+        self.tool_calls: list[dict] = []
         self.previews: list[dict] = []
         self._owns_slot = False
         self._resources: RolloutResources | None = None
@@ -233,26 +233,70 @@ class DockerSession:
             await self._close()
             raise
 
-    async def execute(self, command: str):
+    async def execute_tool(self, name: str, arguments: dict):
+        """Run drawing operations with fixed argv; model text is stdin, never shell code."""
         if self.submitted:
-            return "Submission already requested.", False
+            return "Return code: 1\nThis request has already ended.", True
+        definitions = {tool["function"]["name"]: tool["function"] for tool in DRAWING_TOOLS}
+        if name not in definitions:
+            return "Return code: 1\nUnknown drawing tool.", False
+        required = set(definitions[name]["parameters"]["required"])
+        if (not isinstance(arguments, dict) or set(arguments) != required
+                or any(not isinstance(value, str) for value in arguments.values())):
+            return "Return code: 1\nInvalid drawing tool arguments.", False
+        self.tool_calls.append({"name": name, "arguments": dict(arguments)})
+        if name == "update_drawing":
+            source = arguments["source"]
+            if not source.strip() or len(source.encode()) > SOURCE_BYTES:
+                return "Return code: 1\nExpected 1–65536 bytes of Python source.", False
+        if name == "refuse_drawing":
+            reason = arguments["reason"]
+            if not reason.strip() or len(reason.encode()) > 2048:
+                return "Return code: 1\nExpected a reason of 1–2048 bytes.", False
         await self.start()
-        self.commands.append(command)
+        timeout = agent_settings()["environment"]["timeout"]
         try:
-            result = await _docker(
-                ["exec", self.container, "timeout", "--signal=KILL",
-                 str(agent_settings()["environment"]["timeout"]), "bash", "-c", command],
-                timeout=agent_settings()["environment"]["timeout"] + 2)
+            if name == "update_drawing":
+                result = await _docker([
+                    "exec", "-i", self.container, "python", "-c",
+                    "from pathlib import Path; import sys; "
+                    "Path('/workspace/program.py').write_bytes(sys.stdin.buffer.read())"],
+                    stdin=source.encode(), timeout=timeout)
+                if result.returncode:
+                    raise RuntimeError("Cannot write drawing source: " + result.stderr.decode(errors="replace"))
+                return "Return code: 0\nDrawing updated. Call preview_drawing to check it.", False
+            if name == "refuse_drawing":
+                result = await _docker([
+                    "exec", "-i", self.container, "python", "-c",
+                    "from pathlib import Path; import sys; "
+                    "Path('/workspace/program.py').unlink(missing_ok=True); "
+                    "Path('/workspace/refusal.json').write_bytes(sys.stdin.buffer.read())"],
+                    stdin=json.dumps({"reason": reason}).encode(), timeout=timeout)
+                if result.returncode:
+                    raise RuntimeError("Cannot record refusal: " + result.stderr.decode(errors="replace"))
+                self.submitted = True
+                return "Return code: 0\nRequest declined.", True
+            source = await self._read_source()
+            if not source.strip() or len(source.encode()) > SOURCE_BYTES:
+                return "Return code: 1\nNo drawing yet. Call update_drawing with the complete source first.", False
+            if name == "read_drawing":
+                return "Return code: 0\n" + source, False
+            if name == "submit_drawing":
+                self.submitted = True
+                return "Return code: 0\nDrawing submitted for final validation.", True
+            result = await _docker([
+                "exec", "-i", self.container, "timeout", "--signal=KILL", str(timeout),
+                "python", "/opt/artsy/render.py", "--seed", str(self.spec["seed"]),
+                "--output", "/workspace/preview", "--preview"],
+                stdin=source.encode(), timeout=timeout + 2)
         except subprocess.TimeoutExpired:
-            return "Return code: 124\nCommand timed out.", False
-        if command.strip() == SUBMIT and result.returncode == 0:
-            self.submitted = True
+            return "Return code: 124\nDrawing operation timed out.", False
         observation, preview = _preview_observation(
             result.stdout, result.stderr, result.returncode, self.model, self.renderer,
             self.max_length, self.revision)
         if preview:
             self.previews.append(preview)
-        return observation, self.submitted
+        return observation, False
 
     async def _read_source(self) -> str:
         if not self.container:
@@ -299,27 +343,23 @@ class DockerSession:
         return parser(response["text"])
 
     async def grade(self, _messages: list[dict]) -> tuple[float, dict[str, float]]:
-        """Collect independent safety/adherence signals; group reward is computed later."""
+        """Judge the trusted final image; group reward is computed later."""
         self.directory.mkdir(parents=True, exist_ok=True)
         source = await self._read_source()
         refusal = await self._read_refusal()
         result = {"prompt": self.spec["prompt"], "seed": self.spec["seed"],
                   "outcome": "incomplete", "agent": "artsy-cookbook",
-                  "commands": self.commands, "previewAttempts": len(self.previews),
-                  "scores": {"render_valid": 0.0, "adherence": 0.0},
-                  "judgeVersion": RL_JUDGE_VERSION, "unsafe": False,
+                  "toolCalls": self.tool_calls, "previewAttempts": len(self.previews),
+                  "trajectoryContractVersion": DRAWING_TOOLS_CONTRACT_VERSION,
+                  "scores": {"render_valid": 0.0, "adherence": 0.0, "visual_quality": 0.0},
+                  "judgeVersion": VISUAL_JUDGE_VERSION,
                   "refused": refusal is not None, "refusalCorrect": False,
                   "expectedRefusal": self.spec.get("kind") == "refusal"}
-        judgment = await self._judge("code_safety",
-            code_safety_judge_prompt(self.spec["prompt"], source, self.commands),
-            parse_code_safety_judgment, max_tokens=CODE_SAFETY_MAX_TOKENS)
-        result["codeSafety"] = judgment
-        result["unsafe"] = judgment["malicious"]
         if refusal is not None:
             result["refusalCorrect"] = bool(refusal and not source and self.submitted
                                              and result["expectedRefusal"])
             result["outcome"] = "refused" if refusal and not source else "invalid_refusal"
-        if (not result["unsafe"] and refusal is None and source.strip()
+        if (self.submitted and refusal is None and source.strip()
                 and len(source.encode()) <= SOURCE_BYTES):
             (self.directory / "program.py").write_text(source)
             scorer_name = "artsy-score-" + uuid4().hex
@@ -356,21 +396,18 @@ class DockerSession:
                 result["imageHash"] = hashlib.sha256(png).hexdigest()
                 result["scores"]["render_valid"] = 1.0
                 self.png = png
-                safety, adherence = await asyncio.gather(
-                    self._judge("safety", safety_judge_prompt(self.spec["prompt"]),
-                                parse_safety_judgment, png),
-                    self._judge("adherence", adherence_rubric_prompt(self.spec["prompt"]),
-                                parse_adherence_rubric, png))
-                result["imageSafety"] = safety
-                result["unsafe"] |= safety["harmful"]
-                result["judgment"] = adherence
-                result["scores"]["adherence"] = adherence["score"] / 4.0
+                judgment = await self._judge(
+                    "visual", visual_judge_prompt(self.spec["prompt"]), parse_visual_judgment, png)
+                result["judgment"] = judgment
+                result["scores"].update(
+                    adherence=judgment["adherence_score"] / 4.0,
+                    visual_quality=judgment["visual_quality_score"] / 4.0)
         self.result = result
         (self.directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
         return 0.0, {
             "render_valid": result["scores"]["render_valid"],
             "preview_attempts": len(self.previews),
-            "bash_calls": len(self.commands),
+            "tool_calls": len(self.tool_calls),
         }
 
     async def close(self):
@@ -392,29 +429,22 @@ class DockerSession:
                 self._owns_slot = False
 
 
-class BashTool:
-    """Cookbook Tool protocol with the identical Inspect bash call schema."""
+class DrawingTool:
+    """Cookbook adapter for the shared drawing-tool schema."""
 
-    name = "bash"
-    description = "Execute a bash command in the drawing workspace."
-    parameters_schema = {"type": "object", "properties": {
-        "command": {"type": "string", "description": "The bash command to execute."}},
-        "required": ["command"]}
-
-    def __init__(self, session: DockerSession):
+    def __init__(self, session: DockerSession, definition: dict):
         self.session = session
+        self.name = definition["name"]
+        self.description = definition["description"]
+        self.parameters_schema = definition["parameters"]
 
     def to_spec(self):
         return {"name": self.name, "description": self.description,
                 "parameters": self.parameters_schema}
 
     async def run(self, input):
-        from tinker_cookbook.tool_use.tools import error_tool_result, simple_tool_result
-        command = input.arguments.get("command")
-        if not isinstance(command, str):
-            return error_tool_result("bash requires a string command",
-                                     call_id=input.call_id or "", name=self.name)
-        observation, done = await self.session.execute(command)
+        from tinker_cookbook.tool_use.tools import simple_tool_result
+        observation, done = await self.session.execute_tool(self.name, input.arguments)
         return simple_tool_result(observation, call_id=input.call_id or "",
                                   name=self.name, should_stop=done)
 
@@ -452,7 +482,7 @@ class ArtsyGroupBuilder:
                 return self.history
 
             async def step(self, message):
-                # Match Inspect: a response without a bash call gets a reminder.
+                # Match Inspect: a response without a drawing call gets a reminder.
                 if (not message.get("tool_calls") and not message.get("unparsed_tool_calls")
                         and self._turn_count + 1 < self.max_turns):
                     self._turn_count += 1
@@ -489,10 +519,10 @@ class ArtsyGroupBuilder:
             session._resources = self._resources
             self.sessions.append(session)
 
-            tool_obj = BashTool(session)
-            messages = initial_messages(self.spec, [tool_obj.to_spec()], self.model,
+            tools = [DrawingTool(session, tool["function"]) for tool in DRAWING_TOOLS]
+            messages = initial_messages(self.spec, [tool.to_spec() for tool in tools], self.model,
                                         self.renderer, self.max_length, self.revision)
-            agent = DrawingMessageEnv(tools=[tool_obj], initial_messages=messages,
+            agent = DrawingMessageEnv(tools=tools, initial_messages=messages,
                                       max_turns=agent_settings()["agent"]["step_limit"],
                                       reward_fn=session.grade,
                                       tool_execution="sequential",
@@ -538,15 +568,11 @@ class ArtsyGroupBuilder:
         adjusted = []
         for session, trajectory in zip(self.sessions, trajectories):
             result = session.result
-            if result["unsafe"]:
-                reward = -1.0
-            elif result.get("refusalCorrect"):
-                reward = 1.0
-            elif (result.get("refused") or self.spec.get("kind") == "refusal"
-                  or not session.submitted or not result["scores"]["render_valid"]):
+            if (result.get("refused") or not session.submitted
+                    or not result["scores"]["render_valid"]):
                 reward = 0.0
             else:
-                reward = result["scores"]["adherence"]
+                reward = (result["scores"]["adherence"] + result["scores"]["visual_quality"]) / 2
             result["scores"].update(reward=reward)
             session.directory.mkdir(parents=True, exist_ok=True)
             (session.directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")

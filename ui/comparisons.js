@@ -1,7 +1,9 @@
 /* Saved evaluations only: browsing never invokes a model. */
 (function () {
   "use strict";
-  const roles = ["base", "sft"], titles = {base: "Base", sft: "SFT"}, pageSize = 8;
+  let roles = ["base", "sft"];
+  const titles = {base: "Base", sft: "SFT", rank32: "LoRA · rank 32", rank64: "LoRA · rank 64", rank128: "LoRA · rank 128"}, pageSize = 8;
+  const title = role => titles[role] || role;
   let data = null, page = 0, loadVersion = 0;
   const $ = id => document.getElementById("comparison-" + id);
   const el = (tag, text, cls) => {
@@ -12,7 +14,8 @@
   };
   const both = pair => roles.every(role => pair.members[role].image_url);
   const scored = pair => roles.every(role => pair.members[role].scores?.adherence_score != null);
-  const gain = pair => both(pair) && scored(pair) ? pair.members.sft.scores.adherence_score - pair.members.base.scores.adherence_score : null;
+  const adherence = pair => both(pair) && scored(pair) ? roles.map(role => pair.members[role].scores.adherence_score) : null;
+  const gain = pair => adherence(pair) ? Math.max(...adherence(pair)) - Math.min(...adherence(pair)) : null;
   const mean = (pairs, role, field) => pairs.length ? (pairs.reduce((sum, pair) => sum + pair.members[role].scores[field], 0) / pairs.length).toFixed(2) : "—";
   async function request(url) {
     const response = await fetch(url);
@@ -20,14 +23,21 @@
     return response.json();
   }
   function summary() {
+    if (data.pending) {
+      $("summary").replaceChildren(...roles.map(role => {
+        const card = el("div", undefined, "comparison-stat");
+        card.append(el("span", title(role)), el("strong", data.progress[role] + " / " + data.total), el("small", "Final outcomes saved · awaiting joint image scoring"));
+        return card;
+      }));
+      return;
+    }
     const paired = data.pairs.filter(pair => both(pair) && scored(pair));
-    const wins = paired.filter(pair => pair.preferred === "sft").length;
-    const stats = [
-      ["Prompts reviewed", data.pairs.filter(pair => pair.preferred !== null).length + " / " + data.pairs.length, paired.length + " pairs with both images scored"],
-      ["SFT preferred", paired.length ? (100 * wins / paired.length).toFixed(1) + "%" : "—", wins + " of " + paired.length + " matched pairs"],
-      ["Prompt adherence · /4", mean(paired, "base", "adherence_score") + " → " + mean(paired, "sft", "adherence_score"), "Base → SFT · matched images"],
-      ["Visual quality · /4", mean(paired, "base", "visual_quality_score") + " → " + mean(paired, "sft", "visual_quality_score"), "Base → SFT · matched images"]
-    ];
+    const stats = roles.map(role => {
+      const wins = paired.filter(pair => pair.preferred === role).length;
+      const available = data.pairs.filter(pair => pair.members[role].image_url).length;
+      return [title(role), mean(paired, role, "adherence_score") + " / 4",
+        "Adherence · visual quality " + mean(paired, role, "visual_quality_score") + " / 4 · preferred " + wins + "/" + paired.length + " · " + available + "/" + data.pairs.length + " images"];
+    });
     $("summary").replaceChildren(...stats.map(([title, value, note]) => {
       const card = el("div", undefined, "comparison-stat");
       card.append(el("span", title), el("strong", value), el("small", note));
@@ -36,15 +46,15 @@
   }
   function output(pair, role) {
     const member = pair.members[role], card = el("section", undefined, "comparison-output");
-    card.setAttribute("aria-label", titles[role] + " output");
+    card.setAttribute("aria-label", title(role) + " output");
     const heading = el("div", undefined, "comparison-model");
-    heading.append(el("h3", titles[role]));
+    heading.append(el("h3", title(role)));
     if (pair.preferred === role) heading.append(el("span", "Luna’s pick"));
     card.append(heading, el("small", data.models[role], "comparison-model-name"));
     if (member.image_url) {
       const button = el("button", undefined, "comparison-image"); button.type = "button";
-      button.setAttribute("aria-label", "Enlarge " + titles[role] + " image: " + pair.prompt);
-      const img = el("img"); img.src = member.image_url; img.alt = titles[role] + ": " + pair.prompt; img.loading = "lazy";
+      button.setAttribute("aria-label", "Enlarge " + title(role) + " image: " + pair.prompt);
+      const img = el("img"); img.src = member.image_url; img.alt = title(role) + ": " + pair.prompt; img.loading = "lazy";
       button.append(img);
       img.addEventListener("error", () => { button.replaceWith(el("div", "Saved image unavailable. Refresh results to try again.", "comparison-missing")); });
       button.addEventListener("click", () => ArtsyUI.openImage({src: member.image_url, alt: img.alt, returnFocus: button}));
@@ -76,7 +86,7 @@
     if (sort !== "original") pairs.sort((a, b) => {
       const ga = gain(a), gb = gain(b);
       if (ga === null || gb === null) return ga === gb ? 0 : ga === null ? 1 : -1;
-      return sort === "gain" ? gb - ga : ga - gb;
+      return sort === "gain" ? gb - ga : Math.min(...adherence(a)) - Math.min(...adherence(b));
     });
     const pages = Math.max(1, Math.ceil(pairs.length / pageSize)); page = Math.min(page, pages - 1);
     $("count").textContent = pairs.length + " of " + data.pairs.length + " prompts";
@@ -87,10 +97,11 @@
       const header = el("header", undefined, "comparison-prompt");
       header.append(el("h2", pair.prompt), el("small", pair.id));
       const columns = el("div", undefined, "comparison-columns"); columns.append(...roles.map(role => output(pair, role)));
+      columns.style.setProperty("--comparison-models", roles.length);
       const verdict = el("footer", undefined, "comparison-verdict");
-      const preferred = titles[pair.preferred] || ({tie: "Tie", neither: "Neither output"}[pair.preferred]) || "Awaiting judgment";
+      const preferred = pair.preferred ? ({tie: "Tie", neither: "No output"}[pair.preferred] || title(pair.preferred)) : "Awaiting judgment";
       verdict.append(el("strong", "Preferred: " + preferred), el("p", pair.comparison || "Judgment not yet saved."));
-      if (pair.labels) verdict.append(el("small", "Labels in Luna’s comments: " + Object.entries(pair.labels).map(([label, role]) => label + " = " + titles[role]).join(" · ")));
+      if (pair.labels) verdict.append(el("small", "Labels in Luna’s comments: " + Object.entries(pair.labels).map(([label, role]) => label + " = " + title(role)).join(" · ")));
       section.append(header, columns, verdict);
       return section;
     });
@@ -104,10 +115,19 @@
     try {
       const result = await request("/api/comparisons/" + encodeURIComponent(id));
       if (version !== loadVersion) return;
-      data = result; page = 0; summary(); render();
+      data = result; roles = Object.keys(data.models); page = 0;
+      if (data.pending) {
+        summary();
+        $("status").textContent = data.error ? "Pipeline failed: " + data.error : "Generating eval outputs for all models. Luna will score all outputs together automatically when generation completes. Refresh results for progress.";
+        history.replaceState(null, "", "#comparison=" + encodeURIComponent(id));
+        return;
+      }
+      const options = [["all", "All prompts"], ["both", "All final images"], ...roles.map(role => [role, title(role) + " preferred"]), ["tie", "Ties"], ["missing", "Missing outputs"]];
+      $("filter").replaceChildren(...options.map(([value, label]) => { const option = el("option", label); option.value = value; return option; }));
+      summary(); render();
       $("browser").hidden = false; $("method").hidden = false;
       const missing = data.pairs.filter(pair => !both(pair)).length;
-      $("status").textContent = "Judge: " + data.judge + " · " + missing + " prompts with missing outputs · Saved results";
+      $("status").textContent = "Judge: " + data.judge + " · " + data.pairs.filter(pair => pair.preferred !== null).length + "/" + data.pairs.length + " reviewed · " + missing + " prompts with missing outputs · " + roles.length + " models";
       history.replaceState(null, "", "#comparison=" + encodeURIComponent(id));
     } catch (error) {
       if (version === loadVersion) $("status").textContent = error.message;

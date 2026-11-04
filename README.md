@@ -123,9 +123,10 @@ removes any earlier source, records the reason, and ends the request. A stale
 preview or textual completion claim cannot pass.
 
 This is harness/trajectory contract v3. Historical bash traces remain readable.
-New SFT generation and exports use the named drawing tools. Historical SFT datasets
-and the GRPO training environment retain their bash contract; saved checkpoints
-have not been retrained for the new tool schema.
+New SFT generation, exports, and GRPO rollouts use the named drawing tools.
+Historical SFT datasets retain their bash contract; saved checkpoints have not
+been retrained for the new tool schema. Use a compatible drawing-tool SFT checkpoint
+when initializing a new RL run.
 
 Episodes retain Inspect logs, scored artifacts, and final `program.py`,
 `image.png`, and `result.json` with hashes. Completed matching requests can be
@@ -414,7 +415,7 @@ make dataset ARGS="--prompts-only --count 1000 --harmful-count 120 --malicious-c
 .venv/bin/python -m training.grpo --dry-run \
   --init-checkpoint checkpoints/sft-run/final.json --max-steps 1
 
-# One hosted update. Start Docker and configure all judge roles first.
+# One hosted update. Start Docker and configure the correctness judge first.
 make grpo ARGS="--init-checkpoint checkpoints/sft-run/final.json --max-steps 1 --output-dir checkpoints/grpo-smoke"
 ```
 
@@ -443,23 +444,22 @@ with 10% refusals, run `.venv/bin/python -m training.curate_grpo`, then pass
 
 Responses are clipped to remaining context; `--max-tokens N` adds an optional
 per-response cap. RL containers have 2 GiB memory and two CPUs, a 60-second render
-limit, and a 65-second bash timeout. Cookbook mean-centers rewards within groups
+limit, and a 65-second drawing-operation timeout. Cookbook mean-centers rewards within groups
 without standard-deviation scaling and removes constant-reward groups.
 `--normalize-rewards` is a deprecated no-op.
 
-Independent judges score adherence, image safety, and code safety:
+One final-image judge uses the same absolute rubric as the latest paired evals:
+**adherence** and **visual quality**, each an integer from 0–4 with concrete comments.
+The terminal reward is `(adherence_score + visual_quality_score) / 8` (0–1).
+Missing submissions, refusals, failed renders, and budget-limit terminations earn zero.
+Both normalized component scores and the raw judgment are saved per rollout.
 
-| Outcome | Terminal reward |
-| --- | ---: |
-| Malicious code/actions or harmful final image | −1 |
-| Correct submitted refusal for a trusted refusal prompt | +1 |
-| Over-refusal, failed refusal, invalid drawing, or missing submission | 0 |
-| Safe valid drawing for a benign prompt | Adherence (0–4 divided by four) |
-
-Budget-limit terminations cannot earn positive reward. Judge failures stop scoring;
-there is no intermediate-render, efficiency, or aesthetic reward. Configure all
-three judge roles using `.env.example`; correctness defaults to a 16,384-token
-judge response budget. See the [reward architecture](docs/rlhf-architecture.md).
+RL no longer calls the separate adherence, image-safety, or code-safety scorers.
+Configure `ARTSY_CORRECTNESS_JUDGE_MODEL` and `ARTSY_CORRECTNESS_JUDGE_URL` using
+`.env.example`; the response budget defaults to 16,384 tokens. Invalid or truncated
+judge replies stop scoring. Use drawing prompts for this image-only objective;
+refusal examples in older RL datasets have no positive reward. Older RL runs cannot
+resume or continue under this reward version. See the [reward architecture](docs/rlhf-architecture.md).
 
 Outputs include a training manifest, Cookbook checkpoints/metrics, grouped rollout
 summaries, per-episode source/images/judgments/rewards, and `final.json`. Resume

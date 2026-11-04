@@ -22,7 +22,7 @@ from inspect_ai.solver import solver
 from PIL import Image
 import yaml
 
-from evaluation.harness import (ROOT, drawing_score, drawing_task, load_specs, model_from_env,
+from evaluation.harness import (ROOT, DEFAULT_MAX_TOKENS, drawing_score, drawing_task, load_specs, model_from_env,
                                 parse_correctness_judgment, parse_safety_judgment,
                                 preview_attempts, trajectory_metrics)
 from evaluation.render import render
@@ -178,7 +178,7 @@ class EvaluationTest(unittest.TestCase):
         self.assertIsNone(task.metadata['environment_limits']['maxCalls'])
         self.assertIsNone(task.token_limit)
         self.assertIsNone(task.token_limit_type)
-        self.assertIsNone(task.config.max_tokens)
+        self.assertEqual(task.config.max_tokens, DEFAULT_MAX_TOKENS)
         self.assertIsNone(task.time_limit)
         self.assertIsNone(task.config.timeout)
         self.assertEqual(task.metadata['max_model_turns'], 25)
@@ -257,12 +257,14 @@ class EvaluationTest(unittest.TestCase):
             request = asyncio.run(request_through_bridge())
         self.assertEqual(request.get("max_completion_tokens", request.get("max_tokens")), 8192)
 
-    def test_default_generation_omits_per_response_cap_on_the_wire(self):
+    def test_default_generation_sends_configured_cap_and_allows_uncapped_requests(self):
         from openai.types.chat import ChatCompletion
         from inspect_ai.model import ChatMessageUser
 
-        async def request_default():
+        async def request_default(*, uncapped=False):
             model = model_from_env()
+            if uncapped:
+                model.config.max_tokens = None
             completion = ChatCompletion.model_validate({
                 "id": "test-completion", "created": 0, "object": "chat.completion",
                 "model": model.name,
@@ -278,8 +280,10 @@ class EvaluationTest(unittest.TestCase):
         with patch.dict(os.environ, {"ARTSY_MODEL_URL": "http://127.0.0.1:8080/v1",
                                     "ARTSY_MODEL_API_KEY": "test-only"}):
             request = asyncio.run(request_default())
-        self.assertIsNone(request.get("max_tokens"))
-        self.assertIsNone(request.get("max_completion_tokens"))
+            uncapped = asyncio.run(request_default(uncapped=True))
+        self.assertEqual(request.get("max_completion_tokens", request.get("max_tokens")), DEFAULT_MAX_TOKENS)
+        self.assertIsNone(uncapped.get("max_tokens"))
+        self.assertIsNone(uncapped.get("max_completion_tokens"))
 
     def test_correctness_and_safety_judges_validate_independently(self):
         correct = {"score": 0.9, "reason": "Prompt matches"}
@@ -393,7 +397,7 @@ class EvaluationTest(unittest.TestCase):
                 self.assertEqual(main(), 0)
             plan = json.loads(output.getvalue())
             self.assertEqual((plan["token_limit"], plan["token_limit_type"]), expected)
-            self.assertIsNone(plan["max_tokens"])
+            self.assertEqual(plan["max_tokens"], DEFAULT_MAX_TOKENS)
         with patch.object(sys, "argv", ["evaluate", "--dry-run", "--max-tokens", "0"]), redirect_stdout(io.StringIO()) as output:
             self.assertEqual(main(), 0)
         self.assertIsNone(json.loads(output.getvalue())["max_tokens"])

@@ -481,7 +481,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({'comparisons': comparisons.list_comparisons(ROOT / 'eval-results')})
         if target.startswith('/api/comparisons/'):
             try:
-                match = re.fullmatch(r'/api/comparisons/([^/]+)/images/([^/]+)/(base|sft)', target)
+                match = re.fullmatch(r'/api/comparisons/([^/]+)/images/([^/]+)/([a-z][a-z0-9_]{0,39})', target)
                 if match:
                     content = comparisons.image(ROOT / 'eval-results', *match.groups())
                     self.send_response(200)

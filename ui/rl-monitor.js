@@ -40,12 +40,13 @@ function metrics(rows, data) {
   const scored = rows.filter(r => typeof r.score === "number" && Number.isFinite(r.score));
   const average = scored.length ? scored.reduce((sum, r) => sum + r.score, 0) / scored.length : null;
   const valid = rows.filter(r => r.renderValid).length;
-  const unsafe = rows.filter(r => r.unsafe).length;
+  const quality = rows.filter(r => typeof r.visualQuality === "number" && Number.isFinite(r.visualQuality));
+  const meanQuality = quality.length ? quality.reduce((sum, r) => sum + r.visualQuality, 0) / quality.length : null;
   byId("rl-metrics").replaceChildren(
     metric("Recent completed", rows.length, "Latest " + data.steps.length + " step(s), capped at " + data.maxEpisodes),
     metric("Mean terminal reward", fmt(average), scored.length + " scored episodes"),
     metric("Valid final renders", rows.length ? (100 * valid / rows.length).toFixed(0) + "%" : "—", valid + " rendered"),
-    metric("Unsafe outcomes", String(unsafe), "Saved safety judgments")
+    metric("Mean visual quality", fmt(meanQuality), "Normalized final-image score (0–1)")
   );
 }
 function groupEpisodeRows(rows, search = "") {
@@ -205,8 +206,9 @@ function renderRows() {
       stats.append(element("span", "Rollout " + number, "rl-rollout-label"));
       stats.append(element("span", "Reward " + fmt(row.score), "rl-reward"));
       stats.append(element("span", "Adherence " + fmt(row.adherence), "rl-adherence"));
+      stats.append(element("span", "Visual quality " + fmt(row.visualQuality), "rl-quality"));
       stats.append(element("span", (row.outcome || "unknown") +
-        " · " + row.bashCalls + " tool calls", "rl-meta"));
+        " · " + (row.toolCalls ?? row.bashCalls) + " tool calls", "rl-meta"));
       button.append(visual, stats);
       button.onclick = () => selectEpisode(row);
       state.episodeButtons.set(key, button);
@@ -242,7 +244,8 @@ async function selectEpisode(e) {
     for (const [name, value] of [
       ["Step", e.step.replace("step-", "")], ["Outcome", e.outcome || "unknown"],
       ["Reward", fmt(e.score)], ["Adherence", fmt(e.adherence)],
-      ["Tool calls", e.bashCalls], ["Previews", e.previewAttempts ?? "—"]
+      ["Visual quality", fmt(e.visualQuality)],
+      ["Tool calls", e.toolCalls ?? e.bashCalls], ["Previews", e.previewAttempts ?? "—"]
     ]) kv.append(element("span", name + ": " + value));
     panel.append(kv);
     if (e.hasImage) {
@@ -258,11 +261,12 @@ async function selectEpisode(e) {
       scores: result.scores, outcome: result.outcome, expectedRefusal: result.expectedRefusal,
       refusalCorrect: result.refusalCorrect, unsafe: result.unsafe, feedback: result.feedback
     });
-    detailsBlock(panel, "Independent judgments", {
+    detailsBlock(panel, "Saved judgments", {
       codeSafety: result.codeSafety, imageSafety: result.imageSafety,
-      adherence: result.judgment
+      finalImage: result.judgment
     });
-    detailsBlock(panel, "Recorded bash commands (" + e.bashCalls + ")", result.commands || []);
+    detailsBlock(panel, "Recorded tool calls (" + (e.toolCalls ?? e.bashCalls) + ")",
+      result.toolCalls || result.commands || []);
     if (e.hasSource) {
       const box = element("details");
       box.append(element("summary", "Final Python source"));

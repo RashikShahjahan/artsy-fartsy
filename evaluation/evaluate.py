@@ -238,7 +238,7 @@ def main() -> int:
     parser.add_argument("--max-turns", type=positive, default=DEFAULT_MAX_TURNS,
                         help="Limit model turns and announce the limit and current turn on every request")
     parser.add_argument("--max-tokens", type=optional_token_budget, default=DEFAULT_MAX_TOKENS,
-                        help="Output tokens per response; 0 uses provider capacity (default: 0, same as datagen)")
+                        help=f"Output tokens per response; 0 uses provider capacity (default: {DEFAULT_MAX_TOKENS}, same as datagen)")
     parser.add_argument("--token-limit", type=optional_token_budget, default=DEFAULT_TOKEN_LIMIT,
                         help=f"Token budget per sample; 0 disables it (default: {DEFAULT_TOKEN_LIMIT}, same as datagen)")
     parser.add_argument("--token-limit-type", choices=("output", "all"), default="output",

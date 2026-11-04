@@ -143,7 +143,10 @@ def episodes(root: Path, name: str):
                     "unsafe": result.get("unsafe") is True,
                     "score": scores.get("reward"),
                     "adherence": scores.get("adherence"),
+                    "visualQuality": scores.get("visual_quality"),
                     "renderValid": scores.get("render_valid") == 1,
+                    "toolCalls": (len(result["toolCalls"]) if isinstance(result.get("toolCalls"), list)
+                                  else len(result["commands"]) if isinstance(result.get("commands"), list) else 0),
                     "bashCalls": len(result["commands"]) if isinstance(result.get("commands"), list) else 0,
                     "previewAttempts": result.get("previewAttempts"),
                     "hasImage": (sample / "image.png").is_file(),

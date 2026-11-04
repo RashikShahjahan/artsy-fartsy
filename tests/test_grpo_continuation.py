@@ -31,8 +31,6 @@ class ContinuationTests(unittest.TestCase):
                            reference_sampler_path='tinker://original-sft-reference',
                            initial_state_path='tinker://original-sft-state',
                            correctness_judge_model='saved-judge', correctness_judge_url='saved-url')
-        self.config.update(safety_config={'model': 'safety', 'baseUrl': 'saved-url'},
-                           code_safety_config={'model': 'code-safety', 'baseUrl': 'saved-url'})
         self.record = dict(name='final', batch=3, state_path='tinker://rl-state',
                            sampler_path='tinker://rl-sampler')
         self.write_source()
