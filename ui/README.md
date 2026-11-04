@@ -166,7 +166,7 @@ The **RL prompts** workspace lists every prompt selected in the run
 manifest, even prompts absent from recent rollouts. It offers full-text search,
 category filters (including safety/refusal categories), expandable original prompt
 text, and 50-prompt pagination. The viewer finds a matching prompt JSONL in
-`datasets/*/prompts.jsonl`, preferring `datasets/grpo-v2/prompts.jsonl`.
+`datasets/*/prompts.jsonl`, preferring `datasets/parti-prompts/rl/prompts.jsonl`.
 For an external or nonstandard dataset path, pass
 `--rl-dataset /path/to/original/prompts.jsonl` or set `ARTSY_RL_DATASET`.
 The source file must match the **SHA-256 recorded when RL training began**;

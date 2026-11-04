@@ -4,7 +4,7 @@ Training proceeds through **SFT → RL**. GRPO defaults to the latest completed 
 
 ## SFT: learn the agent workflow
 
-Supervise complete drawing trajectories, including source-writing tool calls, previews, repairs and submission. `training.sft` exports state and sampler paths in `checkpoints/sft-v1/final.json`.
+Supervise complete drawing trajectories, including source-writing tool calls, previews, repairs and submission. `training.sft` exports state and sampler paths in the selected output directory's `final.json`. Current SFT and RL prompt assignments come from `datasets/parti-prompts/`; keep its 391 evaluation prompts out of training.
 
 ## RL: improve adherence and visual quality
 

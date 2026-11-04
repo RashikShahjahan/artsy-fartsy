@@ -181,7 +181,7 @@ def _prompt_datasets(override: Path | None):
     if override is not None:
         yield Path(override).expanduser()
         return
-    default = PROJECT_ROOT / "datasets/grpo-v2/prompts.jsonl"
+    default = PROJECT_ROOT / "datasets/parti-prompts/rl/prompts.jsonl"
     yield default
     for candidate in sorted((PROJECT_ROOT / "datasets").glob("*/prompts.jsonl")):
         if candidate != default and not candidate.is_symlink():

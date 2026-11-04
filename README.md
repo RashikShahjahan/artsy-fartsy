@@ -8,6 +8,11 @@ GRPO training, and an independent Inspect evaluation harness.
 Completed experiment setups, results, and conclusions are recorded in the
 [experiment log](EXPERIMENT_LOG.md).
 
+The current experiments use PartiPrompts: 914 SFT prompts, 327 reserved RL
+prompts, and 391 evaluation prompts. Experiment 1 compares Qwen3.5-4B LoRA
+ranks 32, 64, and 128. See [experiment evaluation](docs/benchmark.md) for the
+generation and judging workflow. GRPO and all UI workspaces remain supported.
+
 Model sampling and training run on Tinker; tokenization and image processing run
 locally. The bundled inference bridge defaults to `Qwen/Qwen3.5-4B`. Dataset
 authors and evaluation/RL judges default to GPT-6 Luna through OpenRouter when
@@ -170,7 +175,13 @@ For another supported base model, keep the bridge running and select it explicit
 
 ## Evaluate models
 
-The default held-out suite is
+For the current PartiPrompts experiments, select the held-out dataset explicitly:
+
+```sh
+make eval ARGS="--dataset datasets/parti-prompts/evaluation/prompts.jsonl --execution-only --output eval-results/parti-new-run"
+```
+
+Without `--dataset`, the CLI still selects the 50-prompt regression suite at
 [`evaluation/generated-50-2026-10-28/prompts.jsonl`](evaluation/generated-50-2026-10-28/prompts.jsonl),
 frozen by [`evaluation/benchmark-v3/manifest.json`](evaluation/benchmark-v3/manifest.json).
 It contains 35 ordinary drawings, five benign boundary prompts, five harmful-image

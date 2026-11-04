@@ -151,7 +151,7 @@ class RLMonitorTests(unittest.TestCase):
 
     def test_auto_discovery_and_missing_or_changed_dataset(self):
         dataset = self.prompt_dataset()
-        folder = self.root / "project" / "datasets" / "custom-rl"
+        folder = self.root / "project" / "datasets" / "parti-prompts" / "rl"
         folder.mkdir(parents=True)
         auto = folder / "prompts.jsonl"
         auto.write_bytes(dataset.read_bytes())

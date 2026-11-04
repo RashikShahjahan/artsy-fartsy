@@ -71,7 +71,7 @@ class BenchmarkTests(unittest.TestCase):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 selected_models(values, catalog)
 
-    def test_runner_forwards_datagen_defaults_without_restoring_a_response_cap(self):
+    def test_runner_forwards_current_evaluation_budgets(self):
         from evaluation.run_benchmark import main
         from drawing.config import MODEL_ID, LIMITS
         catalog = [{'id': MODEL_ID, 'model_path': None},
@@ -89,7 +89,8 @@ class BenchmarkTests(unittest.TestCase):
                     'backend': 'tinker', 'model_path': None, 'models': catalog}
                 self.assertEqual(main(), 0)
             plan = json.loads((output / 'run-plan.json').read_text())
-            self.assertIsNone(plan['max_tokens'])
+            self.assertEqual(plan['max_tokens'], 32768)
+            self.assertEqual(plan['max_turns'], 25)
             self.assertIsNone(plan['token_limit'])
             self.assertEqual(plan['environment_limits'], {**LIMITS, 'maxCalls': None, 'episodeMs': None})
             self.assertIsNone(plan['time_limit'])
@@ -98,7 +99,8 @@ class BenchmarkTests(unittest.TestCase):
             self.assertEqual(run.call_count, 2)
             for call in run.call_args_list:
                 command = call.args[0]
-                self.assertEqual(command[command.index('--max-tokens') + 1], '0')
+                self.assertEqual(command[command.index('--max-tokens') + 1], '32768')
+                self.assertEqual(command[command.index('--max-turns') + 1], '25')
                 self.assertEqual(command[command.index('--token-limit') + 1], '0')
                 self.assertEqual(command[command.index('--time-limit') + 1], '0')
 
