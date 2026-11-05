@@ -2,10 +2,27 @@
 
 import copy
 import json
+import re
 
 from drawing.agent_contract import SFT_MAX_TURNS
 from drawing.mini_agent import TOOLS, VERSION, system_prompt, task_prompt
 from drawing.tool_dataset import trajectory_hash
+
+
+def edits_python_source(command: str) -> bool:
+    """Recognize definite source writes; a shell command's exit status alone is not enough.
+
+    The bash tool permits arbitrary programs, so this intentionally does not
+    infer writes from generic Python invocations or failed diagnostic commands.
+    """
+    return bool(
+        re.search(r"""(?m)(?:^|[;&|])\s*(?:cat|printf|echo|tee)\b[^\n]*>{1,2}\s*['"]?[^\s'";]+\.py\b""", command)
+        or re.search(r"\b(?:write_text|write_bytes)\s*\(", command)
+        or re.search(r"""\bopen\s*\([^)]*,\s*['"][wax][bt+]*['"]""", command)
+        or re.search(r"\b(?:apply_patch|patch)\b", command)
+        or re.search(r"\b(?:sed|perl)\s+-[^\s]*i\b", command)
+        or re.search(r"\b(?:cp|mv)\s+[^\n;]*\.py\b", command)
+    )
 
 
 def convert_mini_record(record, root, loss_policy):
@@ -45,6 +62,9 @@ def convert_mini_record(record, root, loss_policy):
     pending = None
     seen = set()
     selected = []
+    error_aware = loss_policy == 'error-aware'
+    unverified_edits = []
+    masked_edits = set()
     submitted = False
     for index, message in enumerate(messages):
         if submitted:
@@ -87,6 +107,23 @@ def convert_mini_record(record, root, loss_policy):
             _, command, assistant_index = pending
             pending = None
             selected.append(assistant_index)
+            if error_aware:
+                if edits_python_source(command):
+                    unverified_edits.append(assistant_index)
+                    # A failed shell write may already have modified the workspace.
+                    if extra.get('returncode') != 0:
+                        masked_edits.add(assistant_index)
+                for feedback in extra.get('previewEvents') or []:
+                    # Only a renderer event tied to an actual source snapshot
+                    # diagnoses the program. CLI usage and missing-path errors
+                    # must not retroactively condemn an otherwise valid edit.
+                    if not isinstance(feedback, dict) or not feedback.get('sourceHash'):
+                        continue
+                    if feedback.get('ok') is False:
+                        masked_edits.update(unverified_edits)
+                        unverified_edits.clear()
+                    elif feedback.get('ok') is True:
+                        unverified_edits.clear()
             images = [p for p in message['content'] if p['type'] == 'image']
             from drawing.mini_session import session_action
             action, entrypoint = session_action(command)
@@ -105,8 +142,11 @@ def convert_mini_record(record, root, loss_policy):
             raise ValueError(f'{rid}: invalid mini conversation order')
     if pending or not submitted:
         raise ValueError(f'{rid}: incomplete mini submission')
-    # Targeted edits accumulate: supervising only the last patch would discard
-    # the earlier edits that construct the final program. Retain every executed
-    # action under either policy; malformed, unexecuted replies stay context.
+    # Keep all recorded actions, feedback, and preview pixels in context.
+    # Experiment 6 only removes loss on edits implicated by an observed
+    # failed render (or the edit command's own nonzero status). A later repair
+    # and the diagnostic preview action remain supervised.
+    if error_aware:
+        selected = [index for index in selected if index not in masked_edits]
     return {'id': rid, 'messages': messages, 'tools': copy.deepcopy(TOOLS),
             'trainable_message_indices': selected}
