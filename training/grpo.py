@@ -68,7 +68,8 @@ def checkpoint_tool_contract(path: Path, source: dict) -> str | None:
         return None
     if mini == total:
         return "mini-swe"
-    if mini == 0 and manifest.get("drawing_tool_trajectories") == total:
+    if mini == 0 and manifest.get("drawing_tool_trajectories") in (None, total):
+        # Pre-metadata SFT manifests did not record named-tool counts.
         return "drawing-tools"
     # A checkpoint trained on heterogeneous or historical bash demonstrations
     # must not be assumed compatible with the new mini-SWE tool interface.
