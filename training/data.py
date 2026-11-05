@@ -30,7 +30,8 @@ TOOLS = [{"type": "function", "function": {
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 INPUT_MODE = "multimodal-previews"
-CONVERSION = "drawing-tools-v18-mini-swe-error-aware"
+CONVERSION = "drawing-tools-v17-mini-swe-edits"
+ERROR_AWARE_CONVERSION = "drawing-tools-v18-mini-swe-error-aware"
 LOSS_POLICY = "final-write-final-preview-submit"
 LOSS_POLICIES = (LOSS_POLICY, "assistant-only", "error-aware")
 
@@ -526,5 +527,5 @@ def load_examples(path: Path, loss_policy: str = LOSS_POLICY) -> tuple[list[dict
         "examples_with_images": sum(any(p["type"] == "image" for m in e["messages"] for p in m["content"]) for e in examples),
         "input_mode": INPUT_MODE,
         "api_doc_sha256": digest(api_documentation().encode()),
-        "conversion": CONVERSION,
+        "conversion": ERROR_AWARE_CONVERSION if loss_policy == "error-aware" else CONVERSION,
     }
