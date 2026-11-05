@@ -490,6 +490,18 @@ For a full run, omit `--max-steps 1` and choose a new output directory. Repeat t
 original command to resume. `--finalize-only --output-dir PATH` recovers the final
 export after training completes.
 
+**GRPO now defaults to `--harness mini-swe`.** It uses the same mini-SWE-agent
+2.2.3 `bash(command)` schema, prompt, persistent editing workspace, optional
+`artsy-preview` images, and `artsy-submit` (or native completion) as new SFT
+trajectories. Submissions snapshot all Python modules; a separate network-isolated
+container re-renders their bundled source for final-image scoring.
+
+Select `--harness drawing-tools` when starting from an older SFT checkpoint trained
+with named drawing tools. New SFT checkpoints declare a `tool_contract` so GRPO
+rejects a mismatched selection. Older checkpoint files lack this marker: inspect
+their training dataset before selecting a harness. A new GRPO run cannot resume
+or continue an older algorithm-version run.
+
 The default prompt path is `datasets/parti-prompts/rl/prompts.jsonl`, the reserved
 Parti RL split. Each full update uses eight prompts with four rollouts per prompt,
 with capacity for all 32 Docker episodes concurrently. The default initialization is
@@ -503,7 +515,7 @@ pass `--init-checkpoint` for your own SFT run.
 | Learning rate / sampling temperature | `1e-5` / 1.0 |
 | PPO ratio clipping / reference-KL coefficient | 0.8–1.2 / 0.01 |
 | Epochs | 1 (41 updates, 1,308 episodes on 327 prompts; final batch has 7 prompts) |
-| Model turns per trajectory | 20, with a countdown and submission reminder |
+| Model turns per trajectory | 12 for mini-SWE; 20 for legacy drawing-tools |
 | Per-response / aggregate generated-token cap | No separate cap |
 | Maximum context | 262,144 tokens |
 | Checkpoint cadence | Every update |
@@ -514,18 +526,14 @@ limit, and a 65-second drawing-operation timeout. Cookbook mean-centers rewards 
 without standard-deviation scaling and removes constant-reward groups.
 `--normalize-rewards` is a deprecated no-op.
 
-One final-image judge uses the same absolute rubric as the latest paired evals:
-**adherence** and **visual quality**, each an integer from 0–4 with concrete comments.
-The terminal reward is `(adherence_score + visual_quality_score) / 8` (0–1).
-Missing submissions, refusals, failed renders, and budget-limit terminations earn zero.
-Both normalized component scores and the raw judgment are saved per rollout.
-
-RL no longer calls the separate adherence, image-safety, or code-safety scorers.
-Configure `ARTSY_CORRECTNESS_JUDGE_MODEL` and `ARTSY_CORRECTNESS_JUDGE_URL` using
-`.env.example`; the response budget defaults to 16,384 tokens. Invalid or truncated
-judge replies stop scoring. Use drawing prompts for this image-only objective;
-refusal examples in older RL datasets have no positive reward. Older RL runs cannot
-resume or continue under this reward version. See the [reward architecture](docs/rlhf-architecture.md).
+GRPO uses a separately configured HPSv3 final-image preference scorer. A
+successfully submitted, valid PNG receives the normalized preference reward
+`sigmoid((hpsv3_score - center) / scale)`. Missing submissions, invalid renders,
+refusals, and budget-limit terminations earn zero. The raw HPSv3 score and
+normalized preference are saved per rollout. Set `ARTSY_HPSV3_MODEL` and
+`ARTSY_HPSV3_URL`, with optional `ARTSY_HPSV3_CENTER` and `ARTSY_HPSV3_SCALE`,
+before starting training. The judge is separate from the policy sampler.
+See the [reward architecture](docs/rlhf-architecture.md).
 
 Outputs include a training manifest, Cookbook checkpoints/metrics, grouped rollout
 summaries, per-episode source/images/judgments/rewards, and `final.json`. Resume
