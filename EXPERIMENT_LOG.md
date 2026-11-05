@@ -491,6 +491,7 @@ rendering and SFT conversion passed, retaining all seven assistant actions. Usag
 `datasets/mini-swe-output-path-demo-2026-11-04/`, including `trajectory.md`, source,
 `sft-example.json`, raw trajectory, and final PNG. Human review is pending;
 no training was launched.
+
 ## Experiment 6 — Error-aware SFT on cumulative mini-SWE edits
 
 - **Recorded:** 2026-11-05 (America/Toronto).
