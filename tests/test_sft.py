@@ -202,6 +202,10 @@ class ConversionTests(unittest.TestCase):
                 self.assertIn(6, example["trainable_message_indices"])
                 self.assertNotIn("correctness", json.dumps(example["messages"]))
 
+    def test_error_aware_requires_mini_swe_records(self):
+        with self.assertRaisesRegex(ValueError, "requires mini-swe-bash-v1"):
+            convert_record(self.record, self.root, loss_policy="error-aware")
+
     def test_baseline_policy_preserves_identical_context_and_trains_failed_write(self):
         masked = convert_record(self.record, self.root)
         baseline = convert_record(self.record, self.root, loss_policy="assistant-only")
