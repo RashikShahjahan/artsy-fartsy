@@ -98,6 +98,9 @@ def load_run(args):
                    for key in ("state_path", "sampler_path"))):
         raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
     recorded_contract = checkpoint_tool_contract(args.init_checkpoint, source)
+    if recorded_contract is None:
+        print("Warning: SFT tool contract is unknown; verify its training dataset matches "
+              f"--harness {args.harness} before training.", file=sys.stderr)
     if recorded_contract is not None and recorded_contract != args.harness:
         raise ValueError(
             f"SFT checkpoint uses {recorded_contract}, not {args.harness}; select the matching --harness")
