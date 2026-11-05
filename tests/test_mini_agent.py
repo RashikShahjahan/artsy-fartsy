@@ -150,6 +150,15 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(baseline['messages'], treatment['messages'])
             self.assertEqual(baseline['trainable_message_indices'], [2, 4, 6, 8, 10, 12])
             self.assertEqual(treatment['trainable_message_indices'], [4, 6, 8, 10, 12])
+            from training.data import ERROR_AWARE_CONVERSION, CONVERSION, load_examples
+            dataset = Path(root) / 'accepted.jsonl'
+            dataset.write_text(json.dumps(record) + '\n')
+            _, control_manifest = load_examples(dataset)
+            _, masked_manifest = load_examples(dataset, loss_policy='error-aware')
+            self.assertEqual(control_manifest['conversion'], CONVERSION)
+            self.assertEqual(masked_manifest['conversion'], ERROR_AWARE_CONVERSION)
+            self.assertEqual(control_manifest['supervised_actions'], 6)
+            self.assertEqual(masked_manifest['supervised_actions'], 5)
             self.assertIn('broken source', json.dumps(treatment['messages']))
             self.assertIn('diagnostic failure', json.dumps(treatment['messages']))
             self.assertIn('artsy-submit', json.dumps(
