@@ -11,6 +11,8 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor
 from contextlib import suppress
 
 from .agent_contract import ROOT
+from .documentation import DOCUMENTATION_LOCATION
+from .render_contract import OUTPUT_PATH_GUIDANCE
 
 # Use a project-local config directory; the adapters use Artsy's credentials,
 # and mini must not print a startup banner into CLI JSON output.
@@ -36,12 +38,12 @@ def system_prompt(seed):
     import yaml
     settings = yaml.safe_load(files('minisweagent').joinpath('config/mini.yaml').read_text())
     return (settings['agent']['system_template'].strip() + '\n\n'
-            'Create the requested drawing using ArtCanvas. Save output.png at 1920×1200. '
+            'Create the requested drawing using pycairo. Save output.png at 1920×1200. '
             'Do not add text to the image unless requested. Use bash tool calls; files persist, shell state does not. '
             'Submit with artsy-submit ENTRYPOINT, or echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT '
             'when the Python entrypoint is unambiguous. '
             'View rendered images with artsy-preview ENTRYPOINT. '
-            'ArtCanvas API: /opt/artsy/artcanvas.md.')
+            + OUTPUT_PATH_GUIDANCE + ' ' + DOCUMENTATION_LOCATION)
 
 
 def task_prompt(prompt):

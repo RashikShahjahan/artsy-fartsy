@@ -1,4 +1,4 @@
-"""ArtCanvas Docker environment for Tinker Cookbook multi-turn RL.
+"""Pycairo Docker environment for Tinker Cookbook multi-turn RL.
 
 Training uses Cookbook's native sampling/trajectory loop; Inspect remains the
 independent evaluation harness. Both expose the same structured drawing tools.

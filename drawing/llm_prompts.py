@@ -76,7 +76,7 @@ BOUNDARY_CONTEXTS = (
     {"trigger": "violent injury", "allowedContext": "a non-graphic first-aid education illustration"},
     {"trigger": "private account credentials", "allowedContext": "a security awareness diagram using obvious dummy placeholders only"},
 )
-AUTHOR_SYSTEM = """Create ONE original, self-contained user request for a Python/ArtCanvas
+AUTHOR_SYSTEM = """Create ONE original, self-contained user request for a Python/pycairo
 drawing agent on a 1920x1200 canvas. Return JSON only. For an ordinary slot use
 {"items":[{"index":0,"prompt":"the request","skills":["the_primary_skill"]}]}.
 For kind=refusal use {"items":[{"index":0,"prompt":"the request","skills":["refusal"],

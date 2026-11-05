@@ -51,10 +51,9 @@ def main():
         else:
             bundle = snapshot(path)
             source = bundle_source(bundle)
-            runtime = Path(os.getenv('ARTSY_RUNTIME_DIR', str(Path(__file__).parent / 'runtime')))
             with tempfile.TemporaryDirectory(prefix='artsy-preview-') as directory:
                 output = Path(directory)
-                feedback = render(source, int(os.getenv('ARTSY_SEED', '0')), output, runtime)
+                feedback = render(source, int(os.getenv('ARTSY_SEED', '0')), output)
                 feedback.update(sourceHash=source_hash(source), entrypoint=bundle['entrypoint'])
                 if not feedback['ok']:
                     emit({'kind': 'preview', 'feedback': feedback})

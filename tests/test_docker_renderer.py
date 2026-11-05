@@ -20,15 +20,16 @@ class DockerBoundaryTests(unittest.IsolatedAsyncioTestCase):
             sentinel = Path(folder) / "private.txt"
             sentinel.write_text("host-only")
             source = (
-                "import json, os, socket\n"
-                "from artcanvas import ArtCanvas\n"
+                "import json, os, socket, cairo\n"
                 "s = socket.socket(); s.settimeout(1)\n"
                 "try:\n s.connect(('203.0.113.1', 80)); network = True\n"
                 "except OSError:\n network = False\n"
                 "finally:\n s.close()\n"
                 f"print(json.dumps(dict(host_file=os.path.exists({str(sentinel)!r}), "
                 "host_secret=os.getenv('ARTSY_TEST_HOST_SECRET'), network=network)))\n"
-                "with ArtCanvas() as c:\n c.draw_circle(960, 600, 240, True)\n"
+                "surface = cairo.ImageSurface(cairo.FORMAT_RGB24, 1920, 1200)\n"
+                "c = cairo.Context(surface)\nc.arc(960,600,240,0,6.283185307179586)\nc.fill()\n"
+                "surface.write_to_png('output.png')\n"
             )
             with patch.dict(os.environ, {"ARTSY_TEST_HOST_SECRET": "host-only"}):
                 result = await DockerRenderer(seconds=5).render(source, 42)

@@ -22,7 +22,7 @@ def main():
         parser.error("Invalid seed")
     source = sys.stdin.buffer.read(SOURCE_BYTES + 1).decode("utf-8")
     output = Path("/tmp/artsy-rl-score")
-    feedback = render(source, args.seed, output, Path("/opt/artsy/runtime"), seconds=60)
+    feedback = render(source, args.seed, output, seconds=60)
     payload = {"feedback": feedback}
     if feedback["ok"]:
         payload["image"] = base64.b64encode((output / "image.png").read_bytes()).decode()

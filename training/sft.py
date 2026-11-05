@@ -298,7 +298,7 @@ def main(argv=None):
         if selected is None:
             p.error(f"Sample ID not found: {args.sample_id}")
         shown = copy.deepcopy(selected)
-        shown["messages"][0]["content"][0]["text"] = "[System instructions and full docs/artcanvas.md omitted from preview]"
+        shown["messages"][0]["content"][0]["text"] = "[System instructions and documentation location omitted from preview]"
         print(json.dumps({"summary": manifest, "sample": shown}, indent=2, ensure_ascii=False))
         return
     if manifest["unreviewed_records"] and not args.allow_unreviewed and not args.check_batch:

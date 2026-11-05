@@ -355,12 +355,13 @@ Artifacts: [sealed UI score export](eval-results/experiment-1-human-preferences/
 1. **Avoid unsolicited image text:** In the trajectory-generation prompts, instruct the teacher not to include text in images unless specifically required by the drawing request.
 2. **Use a proper coding harness:** Replace the small set of custom drawing tools with a general coding harness for trajectory generation and the resulting SFT tool interface. Selected mini-SWE-agent 2.2.3 with a persistent Docker editing workspace; see the harness selection notes below.
 3. **Remove the refusal tool:** Remove `refuse_drawing` from the tool interface used for the new trajectories and SFT run. Experiment 3's invalid-output inspection found two benign requests terminated through this tool with visual-quality self-critiques.
+4. **Use native pycairo:** Replace the minimal ArtCanvas interface and cairocffi shim with the full installed pycairo API (`import cairo`). New trajectories use `pycairo-v1`, create their own surface/context/background, and explicitly save `output.png`. Update prompts, examples, Docker dependencies, and provenance hashes together; regenerate trajectories for this runtime rather than mixing in ArtCanvas recordings.
 
 ### Run details and evaluation
 
 Teacher model, trajectory count, adapter initialization, training settings other than rank, and harness configuration remain to be recorded before launch. Save the final prompt and tool schemas, dataset hashes, and training configuration with the run artifacts.
 
-Use the original 163 held-out evaluation prompts for comparison with the previous rank-128 checkpoints. The restored 228 SFT prompts remain training inputs and must not be counted as held-out evaluation. Report image quality, valid final-image rate, rendering failures, turn-limit outcomes, and token/turn usage, with the generation settings and tool interface recorded for each comparison. Because all three changes are introduced together, this experiment measures their combined effect and cannot isolate each change's contribution.
+Use the original 163 held-out evaluation prompts for comparison with the previous rank-128 checkpoints. The restored 228 SFT prompts remain training inputs and must not be counted as held-out evaluation. Report image quality, valid final-image rate, rendering failures, turn-limit outcomes, and token/turn usage, with the generation settings and tool interface recorded for each comparison. Because these four changes are introduced together, this experiment measures their combined effect and cannot isolate each change's contribution.
 
 ### Experiment 5 harness selection — mini-SWE-agent
 
@@ -406,3 +407,87 @@ SFT conversion passed; human review is pending. Artifacts are in
 `datasets/mini-swe-second-demo-2026-11-04/`, including `trajectory.md`, `draw.py`,
 and `sft-example.json`. Recorded usage: 15,342 prompt tokens and 4,861 completion
 tokens. No training was launched.
+
+Experiment 5 runtime follow-up (2026-11-04): migrated the active harness to native
+pycairo 1.29.2 and removed the ArtCanvas wrapper and local `cairo.py` shim. The
+official upstream docs are bundled at `/opt/artsy/docs/pycairo/` and searchable
+with `rg`; no custom API guide is injected. Runtime and documentation hashes distinguish
+new records from earlier experiments. The two smoke trajectories above predate
+this migration and remain historical ArtCanvas artifacts. No new teacher collection
+or training was launched as part of this migration.
+
+Validation: the focused migration suite ran 165 tests (three optional Docker
+skips); all enabled checks passed. All seven rendering/shell Docker checks passed
+with Docker flags enabled, including searching the official docs, preview,
+submission, and interrupted-workspace recovery. Both local image tags were rebuilt.
+The full unit suite ran 284 tests with four failures and one error, all reproduced
+on the unchanged baseline (code-safety fixture expectations, prompt-review copy,
+and the obsolete `DockerSession._judge` test). Dependency synchronization and
+Python compilation passed.
+The real one-shot RL Docker scorer also rendered a valid 1920×1200 PNG.
+
+A native-pycairo single-trajectory smoke test reused the owl prompt above with
+`openai/gpt-6-luna` through OpenRouter. It completed in five model turns with one
+successful PNG preview, independent final rendering, and SFT conversion retaining
+all five assistant actions. It used 23,004 prompt tokens and 4,920 completion tokens.
+The trace preserves program repairs and output-path/tool-command errors; it did
+not consult the bundled docs. Human review is pending. Artifacts:
+`datasets/mini-swe-pycairo-demo-2026-11-04/`, including `trajectory.md`, `draw.py`,
+`sft-example.json`, the raw trajectory, and final PNG. This is one collected
+trajectory using `pycairo-v1`; no training was launched.
+
+Experiment 5 docs simplification (2026-11-04): removed the separately vendored
+upstream documentation tree. The editing and rendering images now expose the
+installed pycairo package’s `cairo/__init__.pyi` through the stable link
+`/opt/artsy/pycairo-api.pyi`. This file contains method signatures and full API
+documentation and can be searched with `rg`. Agent prompts point to that file;
+no custom API guide is injected. Documentation provenance hashes the installed
+reference and records its package version. Existing smoke-test artifacts retain
+their original documentation hashes and prompts. No new teacher requests or
+training runs were made for this simplification.
+Validation for the simplification: all 125 focused tests and all seven Docker
+checks passed, including searching method documentation through the installed
+reference link. Both local image tags were rebuilt; dependency synchronization
+and Python compilation passed.
+
+A single-trajectory run with the installed-reference harness reused the owl
+prompt and `openai/gpt-6-luna` through OpenRouter. It completed in 11 model turns,
+with one successful PNG preview, valid independent final rendering, and SFT
+conversion retaining all 11 assistant actions. Recorded usage: 68,381 prompt
+tokens and 6,955 completion tokens; zero infrastructure errors. The teacher
+repaired API and output-path errors but did not consult `pycairo-api.pyi`.
+Artifacts: `datasets/mini-swe-installed-docs-demo-2026-11-04/`, including
+`trajectory.md`, `draw.py`, `sft-example.json`, raw trajectory, and final PNG.
+Human review is pending; no training was launched.
+
+Experiment 5 prompt follow-up: the shared documentation guidance now explicitly
+instructs the agent: “Before writing code, search the installed API reference for
+the operations you plan to use.” This applies to new trajectories; earlier
+recordings retain their original prompts.
+
+A docs-first single-trajectory rerun reused the owl prompt with the configured
+`openai/gpt-6-luna` teacher. The first two actions searched the installed
+`pycairo-api.pyi` reference before writing code. It completed in 6 turns,
+with 1 successful PNG preview(s), valid independent final rendering, and SFT
+conversion retaining all 6 assistant actions. Recorded usage: 22,162 prompt
+tokens and 4,686 completion tokens. Artifacts:
+`datasets/mini-swe-docs-first-demo-2026-11-04/`, including `trajectory.md`, source,
+`sft-example.json`, raw trajectory, and final PNG. Human review is pending;
+no training was launched.
+
+Experiment 5 output-path clarification: the mini harness now explicitly requires
+relative `output.png` and explains that Python previews and final validation rerun
+in a fresh directory. The renderer’s missing-output error repeats this guidance
+instead of exposing only a temporary-path FileNotFoundError. The regression test
+checks that a successful program writing elsewhere receives this explanation.
+All 40 focused tests passed and both local image tags were rebuilt.
+
+A single owl trajectory with this prompt completed in seven turns. The first
+three actions searched the installed API reference; the program used relative
+`output.png`, so the earlier path error did not recur. One gradient-argument
+execution error was repaired before a successful preview. Independent final
+rendering and SFT conversion passed, retaining all seven assistant actions. Usage:
+33,032 prompt tokens and 4,377 completion tokens. Artifacts:
+`datasets/mini-swe-output-path-demo-2026-11-04/`, including `trajectory.md`, source,
+`sft-example.json`, raw trajectory, and final PNG. Human review is pending;
+no training was launched.

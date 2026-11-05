@@ -58,7 +58,7 @@ class HostAgentTests(unittest.TestCase):
                  patch("inspect_ai._util.appdirs.user_data_path", side_effect=lambda name: root / "data" / name), \
                  patch("inspect_ai._util.appdirs.user_cache_path", side_effect=lambda name: root / "cache" / name):
                 logs = eval(Task(dataset=[Sample(id="drawing", input="Draw a circle", metadata={"seed": 7})],
-                    solver=drawing_agent("Use ArtCanvas.", GenerateConfig(max_tokens=4096,
+                    solver=drawing_agent("Use pycairo.", GenerateConfig(max_tokens=4096,
                                          temperature=0.8, max_retries=0), callback,
                                          max_calls=max_calls, max_turns=max_turns, progress=progress, approval=approval),
                     token_limit=token_limit, turn_limit=turn_limit),
@@ -342,9 +342,7 @@ class HostAgentTests(unittest.TestCase):
                 return reply(calls=[ToolCall(id='refuse', function='refuse_drawing',
                                             arguments={'reason': 'Try a different idea.'})])
             if turn == 0:
-                source = ('from artcanvas import ArtCanvas\n'
-                          'with ArtCanvas(1920,1200) as c:\n'
-                          ' c.set_color(COLOR)\n c.draw_circle(960,600,200,True)\n')
+                source = ('import cairo\nsurface = cairo.ImageSurface(cairo.FORMAT_RGB24, 1920, 1200)\nc = cairo.Context(surface)\nc.set_source_rgb(COLOR)\nc.arc(960,600,200,0,6.283185307179586)\nc.fill()\nsurface.write_to_png("output.png")\n')
                 source = source.replace("COLOR", "1,0,0" if "red circle" in messages[1].text else "0,0,1")
                 return reply(source)
             elif turn == 1:

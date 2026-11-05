@@ -157,7 +157,7 @@ def drawing_agent(system_prompt, config, generation_filter=None, max_calls=LIMIT
         @tool(name='update_drawing', parallel=False)
         def update_drawing():
             async def execute(source: str) -> ToolResult:
-                """Create or replace the drawing with a complete ArtCanvas Python program.
+                """Create or replace the drawing with a complete pycairo Python program.
 
                 Args:
                     source: Complete Python source saving a 1920×1200 output.png, at most 64 KiB.

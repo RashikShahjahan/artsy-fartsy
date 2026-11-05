@@ -1,5 +1,7 @@
 """Exercise the pinned mini loop, real targeted shell edits, preview and SFT export."""
 
+from drawing.documentation import api_documentation
+
 import asyncio
 import copy
 import json
@@ -18,7 +20,7 @@ from drawing.renderer import LocalRenderer
 from drawing.tool_dataset import trajectory_hash
 from training.data import convert_record
 
-CODE = 'from artcanvas import ArtCanvas\nwith ArtCanvas(1920, 1200, "output.png") as c:\n    c.fill_background(1,0,0)\n'
+CODE = 'import cairo\nsurface = cairo.ImageSurface(cairo.FORMAT_RGB24, 1920, 1200)\nc = cairo.Context(surface)\nc.set_source_rgb(1,0,0)\nc.paint()\nsurface.write_to_png("output.png")\n'
 
 
 class TestWorkspace:
@@ -36,7 +38,6 @@ class TestWorkspace:
             path.chmod(0o755)
         self.env = {**__import__('os').environ, 'PATH': str(binary) + ':' + __import__('os').environ['PATH'],
                     'ARTSY_SELECTION_FILE': str(self.directory / 'selection.json'),
-                    'ARTSY_RUNTIME_DIR': str(project / 'runtime'),
                     'DYLD_FALLBACK_LIBRARY_PATH': '/opt/homebrew/lib:/usr/local/lib:/usr/lib'}
 
 
@@ -81,7 +82,7 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
             record = await candidate({'output': root, 'teacher': teacher,
                                       'renderer': LocalRenderer()},
                                      {'id': 'edit', 'prompt': 'Draw a blue background', 'seed': 7},
-                                     0, Path('docs/artcanvas.md').read_text())
+                                     0, api_documentation())
         return record, teacher
 
     async def test_targeted_edit_optional_preview_and_portable_sft_export(self):
@@ -116,12 +117,13 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
     async def test_arbitrary_entrypoint_and_helper_module_with_optional_previews(self):
         from drawing.mini_agent import system_prompt
         self.assertTrue(system_prompt(7).startswith('You are a helpful assistant'))
+        self.assertIn('Before writing code, search the installed API reference for the operations you plan to use.',
+                      system_prompt(7))
         self.assertNotIn('/workspace/program.py', system_prompt(7))
         self.assertNotIn('from artcanvas import', system_prompt(7))
         for preview in (False, True):
             with self.subTest(preview=preview), tempfile.TemporaryDirectory() as root:
-                main = ('from artcanvas import ArtCanvas\nfrom palette import BLUE\n'
-                        'with ArtCanvas(1920,1200,"output.png") as c:\n    c.fill_background(*BLUE)\n')
+                main = ('import cairo\nfrom palette import BLUE\nsurface = cairo.ImageSurface(cairo.FORMAT_RGB24, 1920, 1200)\nc = cairo.Context(surface)\nc.set_source_rgb(*BLUE)\nc.paint()\nsurface.write_to_png("output.png")\n')
                 create = ("cat > /workspace/scene.py <<'EOF'\n" + main + 'EOF\n'
                           + "printf 'BLUE = (0,0,1)\\n' > /workspace/palette.py")
                 commands = [create] + (['artsy-preview scene.py'] if preview else []) + ['artsy-submit scene.py']
@@ -129,7 +131,7 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
                 with patch('drawing.mini_dataset.Workspace', TestWorkspace):
                     record = await candidate({'output': root, 'teacher': teacher, 'renderer': LocalRenderer()},
                         {'id': 'modules', 'prompt': 'Draw blue', 'seed': 7}, 0,
-                        Path('docs/artcanvas.md').read_text())
+                        api_documentation())
                 self.assertEqual(record['status'], 'review', record['reason'])
                 self.assertEqual(set(record['sourceBundle']['files']), {'scene.py', 'palette.py'})
                 self.assertEqual(record['submission']['entrypoint'], 'scene.py')
@@ -185,7 +187,7 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
                                      'artsy-submit scene.py'])
         with tempfile.TemporaryDirectory() as root, patch('drawing.mini_dataset.Workspace', TestWorkspace):
             record = await candidate({'output': root, 'teacher': teacher, 'renderer': LocalRenderer()},
-                {'id': 'empty', 'prompt': 'Draw', 'seed': 7}, 0, Path('docs/artcanvas.md').read_text())
+                {'id': 'empty', 'prompt': 'Draw', 'seed': 7}, 0, api_documentation())
             self.assertEqual(record['status'], 'review', record['reason'])
             self.assertEqual(record['generation']['modelTurns'], 3)
             self.assertEqual(record['trace'][0]['completion']['finishReason'], 'empty')

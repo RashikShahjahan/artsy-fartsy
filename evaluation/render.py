@@ -16,15 +16,15 @@ import sys
 import tempfile
 
 if __package__:
-    from drawing.render_contract import validate_png
+    from drawing.render_contract import OUTPUT_PATH_GUIDANCE, validate_png
 else:
-    from render_contract import validate_png
+    from render_contract import OUTPUT_PATH_GUIDANCE, validate_png
 
 SOURCE_BYTES = 64 * 1024
 PNG_BYTES = 8 * 1024 * 1024
 
 
-def render(source: str, seed: int, output: Path, runtime: Path, seconds: int = 60) -> dict:
+def render(source: str, seed: int, output: Path, seconds: int = 60) -> dict:
     if not source.strip() or len(source.encode()) > SOURCE_BYTES:
         return {"ok": False, "error": "Expected 1–65536 bytes of Python source"}
     output.mkdir(parents=True, exist_ok=True)
@@ -38,7 +38,7 @@ def render(source: str, seed: int, output: Path, runtime: Path, seconds: int = 6
             f"resource.setrlimit(resource.RLIMIT_FSIZE, ({PNG_BYTES}, {PNG_BYTES})); "
             f"random.seed({seed}); runpy.run_path('program.py', run_name='__main__')"
         )
-        env = {**os.environ, "PYTHONPATH": str(runtime.resolve()),
+        env = {**os.environ,
                "PYTHONHASHSEED": str(seed % 2**32), "PYTHONDONTWRITEBYTECODE": "1"}
         if sys.platform == "darwin":
             env.setdefault("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib:/usr/local/lib:/usr/lib")
@@ -65,7 +65,11 @@ def render(source: str, seed: int, output: Path, runtime: Path, seconds: int = 6
         if timed_out or process.returncode:
             return {**feedback, "error": "Rendering timed out" if timed_out else "Python execution failed"}
         try:
-            fd = os.open(work / "output.png", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                fd = os.open(work / "output.png", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            except FileNotFoundError:
+                return {**feedback, "error": "Program exited successfully but did not create output.png. "
+                        + OUTPUT_PATH_GUIDANCE}
             with os.fdopen(fd, "rb") as file:
                 import stat
                 info = os.fstat(file.fileno())
@@ -89,7 +93,7 @@ if __name__ == "__main__":
     if not 0 <= args.seed <= 2**53 - 1:
         parser.error("seed must be a nonnegative safe integer")
     source = sys.stdin.buffer.read(SOURCE_BYTES + 1).decode("utf-8")
-    result = render(source, args.seed, args.output, Path(__file__).parent / "runtime", seconds=args.seconds)
+    result = render(source, args.seed, args.output, seconds=args.seconds)
     if args.preview:
         result["sourceHash"] = hashlib.sha256(source.encode("utf-8")).hexdigest()
     print(json.dumps(result))

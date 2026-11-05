@@ -1,5 +1,7 @@
 """Shared host-side Inspect harness for drawing and baseline evaluation."""
 
+from drawing.documentation import api_documentation
+
 import asyncio
 import base64
 import hashlib
@@ -41,7 +43,7 @@ DEFAULT_MAX_TOKENS = MAX_RESPONSE_TOKENS
 DEFAULT_TOKEN_LIMIT = None
 DEFAULT_TIME_LIMIT = None
 DEFAULT_MAX_TURNS = 25
-RUNTIME_VERSION = "artcanvas-v2"
+RUNTIME_VERSION = "pycairo-v1"
 LOCAL_MODEL_URL = "http://127.0.0.1:8080/v1"
 sha256 = lambda data: hashlib.sha256(data).hexdigest()
 
@@ -317,8 +319,6 @@ def drawing_score(artifacts: str, correctness_judge_model: str | None = None,
             # Restore the trusted renderer/runtime into a new directory, then
             # execute only the final source. Agent-created previews cannot pass.
             work = f"/tmp/artsy-score-{uuid4().hex}"
-            for name in ("artcanvas.py", "cairo.py"):
-                await sandbox().write_file(f"{work}/runtime/{name}", (ROOT / "runtime" / name).read_bytes())
             await sandbox().write_file(f"{work}/render.py", (ROOT / "evaluation/render.py").read_bytes())
             await sandbox().write_file(f"{work}/render_contract.py", (ROOT / "drawing/render_contract.py").read_bytes())
             rendered = await sandbox().exec(
@@ -414,7 +414,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
     config.temperature = temperature
     config.max_connections = max_connections
     config.max_tokens = max_tokens
-    documentation = (ROOT / "docs/artcanvas.md").read_text()
+    documentation = api_documentation()
     if harness == 'mini-swe':
         from .mini_agent import mini_drawing_agent
         solver = mini_drawing_agent(config=config, generation_filter=generation_filter,
@@ -425,7 +425,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                                max_turns=max_turns, progress=progress, approval=approval)
     return Task(
         dataset=[Sample(id=row["id"], input=(
-                        "Edit the following existing ArtCanvas drawing. Preserve everything "
+                        "Edit the following existing pycairo drawing. Preserve everything "
                         "unless the user requests a change. If they ask for a new drawing, "
                         "start fresh instead. Write the full revised source to "
                         "/workspace/program.py, preview it and submit.\n\n"
@@ -456,7 +456,7 @@ def drawing_task(specs: list[dict], artifacts: str, correctness_judge_model: str
                   "runtime_version": RUNTIME_VERSION,
                   "dataset_sha256": sha256(json.dumps(specs, sort_keys=True).encode()),
                   "runtime_sha256": {name: sha256((ROOT / "runtime" / name).read_bytes())
-                      for name in ("artcanvas.py", "cairo.py", "requirements.txt")},
+                      for name in ("requirements.txt",)},
                   "harness_sha256": {name: sha256((ROOT / "evaluation" / name).read_bytes())
                       for name in ("harness.py", "host_agent.py", "mini_agent.py", "render.py", "mini.yaml", "Dockerfile", "compose.yaml", "requirements.txt")},
                   "api_sha256": sha256(documentation.encode()), "visual_grading": bool(correctness_judge_model or hpsv3_url),

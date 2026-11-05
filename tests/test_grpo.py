@@ -1,5 +1,7 @@
 """Cookbook RL integration tests (no Docker/Tinker service required)."""
 
+from drawing.documentation import api_documentation
+
 import asyncio
 import base64
 import importlib.util
@@ -301,7 +303,7 @@ class ConfigurationTests(unittest.TestCase):
             checkpoint = directory / 'final.json'
             config = {'model': MODEL_ID, 'tokenizer_revision': MODEL_REVISION,
                       'renderer': RENDERER, 'lora_rank': 32,
-                      'api_doc_sha256': digest((ROOT / 'docs/artcanvas.md').read_bytes())}
+                      'api_doc_sha256': digest(api_documentation().encode())}
             initial = {'config': config, 'state_path': 'tinker://sft/state',
                        'sampler_path': 'tinker://sft/sampler'}
             checkpoint.write_text(json.dumps(initial))

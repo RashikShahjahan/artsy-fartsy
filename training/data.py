@@ -8,6 +8,8 @@ and preview images are context. The assistant-only policy retains the baseline.
 Unexecuted malformed teacher replies and judge critiques are omitted.
 """
 
+from drawing.documentation import DOCUMENTATION_LOCATION, api_documentation
+
 import copy
 import hashlib
 import json
@@ -122,7 +124,7 @@ def parse_source(text: str) -> str:
 def system_prompt() -> str:
     return (
         "Fulfill the drawing request by writing /workspace/program.py. "
-        "Use the installed ArtCanvas module to save output.png at 1920×1200. "
+        "Use the installed pycairo package (import cairo) to save output.png at 1920×1200. "
         "Use bash commands to write, run, and fix your program. "
         "Write the program and run its preview in separate bash calls on separate turns. "
         "Use the preview command to receive execution feedback and the actual PNG image. "
@@ -132,7 +134,7 @@ def system_prompt() -> str:
         'If you cannot fulfill the request, write only refusal.json containing {"reason":"..."} '
         "with a concise reason and do not create program.py. "
         "\n\n"
-        + (ROOT / "docs/artcanvas.md").read_text()
+        + DOCUMENTATION_LOCATION
         + "\n\nEvery response must contain at least one bash tool call with "
         '{"command":"..."}. Shell state does not persist between commands; files do persist. '
         f"Finish by calling bash with exactly: {SUBMIT}"
@@ -328,9 +330,9 @@ def _convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) ->
     if loss_policy not in LOSS_POLICIES:
         raise ValueError(f"Unknown loss policy: {loss_policy}")
     rid = record["id"]
-    if record.get("runtimeVersion") != "artcanvas-v2":
+    if record.get("runtimeVersion") != "pycairo-v1":
         raise ValueError(f"{rid}: incompatible drawing runtime")
-    if record.get("apiDocHash") != digest((ROOT / "docs/artcanvas.md").read_bytes()):
+    if record.get("apiDocHash") != digest(api_documentation().encode()):
         raise ValueError(f"{rid}: API documentation changed since generation")
     if record.get('trajectoryFormat') == 'mini-swe-bash-v1':
         from training.mini_data import convert_mini_record
@@ -518,6 +520,6 @@ def load_examples(path: Path, loss_policy: str = LOSS_POLICY) -> tuple[list[dict
         "unreviewed_records": sum(r.get("status") != "accepted" for r in records),
         "examples_with_images": sum(any(p["type"] == "image" for m in e["messages"] for p in m["content"]) for e in examples),
         "input_mode": INPUT_MODE,
-        "api_doc_sha256": digest((ROOT / "docs/artcanvas.md").read_bytes()),
+        "api_doc_sha256": digest(api_documentation().encode()),
         "conversion": CONVERSION,
     }

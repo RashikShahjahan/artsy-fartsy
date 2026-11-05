@@ -19,7 +19,7 @@ def make_png(width=32, height=32):
 
 PNG = make_png()
 CONFIG = {**ENVIRONMENT_CONFIG, "width": 32, "height": 32}
-GOOD = "from artcanvas import ArtCanvas\nwith ArtCanvas(32, 32) as c:\n c.draw_circle(16,16,8,True)\n"
+GOOD = 'import cairo\nsurface = cairo.ImageSurface(cairo.FORMAT_RGB24, 32, 32)\nc = cairo.Context(surface)\nc.arc(16,16,8,0,6.283185307179586)\nc.fill()\nsurface.write_to_png("output.png")\n'
 
 
 class FakeRenderer:

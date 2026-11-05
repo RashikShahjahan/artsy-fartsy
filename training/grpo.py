@@ -10,6 +10,8 @@ and final-image HPSv3 preference rewards. Inspect is used for evaluation.
 
 from __future__ import annotations
 
+from drawing.documentation import api_documentation
+
 import argparse
 import asyncio
 import json
@@ -29,11 +31,11 @@ from training.run_store import atomic_json, atomic_text, contents, recover_jsonl
 
 ALGORITHM = "tinker-cookbook-rlhf-v7"
 PROVENANCE_FILES = (
-    "docs/artcanvas.md", "drawing/config.py", "drawing/judges.py",
+    "drawing/documentation.py", "drawing/config.py", "drawing/judges.py",
     "drawing/agent_contract.py", "drawing/eval_specs.py", "drawing/visual_judge.py",
     "drawing/render_contract.py", "drawing/model_profiles.py", "drawing/vision.py",
     "training/run_store.py", "training/hpsv3.py", "training/hpsv3_server.py",
-    "runtime/artcanvas.py", "runtime/cairo.py", "runtime/requirements.txt",
+    "runtime/requirements.txt",
     "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/mini.yaml",
     "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
     "evaluation/requirements.txt", "training/cookbook_env.py",
@@ -58,7 +60,7 @@ def load_run(args):
             or type(source.get("lora_rank")) is not int
             or source["lora_rank"] < 1
             or source.get("image_size", IMAGE_SIZE) != IMAGE_SIZE
-            or source.get("api_doc_sha256") != digest((ROOT / "docs/artcanvas.md").read_bytes())
+            or source.get("api_doc_sha256") != digest(api_documentation().encode())
             or any(not isinstance(initial.get(key), str) or not initial[key].startswith("tinker://")
                    for key in ("state_path", "sampler_path"))):
         raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
@@ -76,7 +78,7 @@ def load_run(args):
         "reference_model": (source["model"] if ":peft:" in source["model"]
                             else f"{checkpoint_model}:peft:{MODEL_CONTEXT_WINDOW}"),
         "reference_sampler_path": initial["sampler_path"],
-        "api_doc_sha256": digest((ROOT / "docs/artcanvas.md").read_bytes()),
+        "api_doc_sha256": digest(api_documentation().encode()),
         "source_sha256": {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES},
         "batch_size": args.batch_size, "group_size": args.group_size,
         "learning_rate": args.learning_rate, "clip_epsilon": args.clip_epsilon,

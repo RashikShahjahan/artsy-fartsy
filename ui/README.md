@@ -27,7 +27,7 @@ so you can switch models between versions.
 The consumer endpoint (`POST /api/artsy/runs`) accepts the selected model ID and
 enforces **10 internal model turns per response**, including edits. Start Docker
 before drawing.
-Edits reuse the completed drawing's verified ArtCanvas source. Choose **Auto** to
+Edits reuse the completed drawing's verified pycairo source. Choose **Auto** to
 let Artsy continue drawing, or **Approve steps** to pause before every drawing
 action, review its details, and click **Approve action** to continue. Each approval
 releases only that action, including when one model turn proposes several actions.

@@ -64,9 +64,10 @@ class RendererTests(unittest.IsolatedAsyncioTestCase):
             invalid_seed = await LocalRenderer().render("pass", -1)
             self.assertEqual(invalid_seed["failureKind"], "invalid_code")
 
-    async def test_artcanvas_runtime_is_seeded_and_recovers_after_bad_output(self):
+    async def test_pycairo_runtime_is_seeded_and_recovers_after_bad_output(self):
         source = (Path(__file__).resolve().parents[1] / "examples" / "transforms.py").read_text()
-        renderer = LocalRenderer()
+        source = "import cairo\nassert hasattr(cairo, 'CAPI')\n" + source
+        renderer = LocalRenderer(seconds=1)
         first = await renderer.render(source, 42)
         second = await renderer.render(source, 42)
         other_seed = await renderer.render(source, 43)
@@ -76,8 +77,8 @@ class RendererTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((await renderer.render("while True: pass", 0))["ok"])
         self.assertFalse((await renderer.render(
             "open('output.png','wb').write(b'x' * (8*1024*1024 + 1))", 0))["ok"])
-        self.assertFalse((await renderer.render("from artcanvas import ArtCanvas\nArtCanvas(5000,5000)", 0))["ok"])
-        good = "from artcanvas import ArtCanvas\nwith ArtCanvas(32,32) as c:\n c.draw_circle(16,16,8,True)"
+        self.assertFalse((await renderer.render('import cairo\ncairo.ImageSurface(cairo.FORMAT_RGB24,5000,5000).write_to_png("output.png")', 0))["ok"])
+        good = 'import cairo\nsurface = cairo.ImageSurface(cairo.FORMAT_RGB24, 32, 32)\nc = cairo.Context(surface)\nc.arc(16,16,8,0,6.283185307179586)\nc.fill()\nsurface.write_to_png("output.png")'
         self.assertTrue((await renderer.render(good, 0))["ok"])
 
     async def test_renderer_rejects_symlinks_and_handles_repeated_saves(self):
@@ -88,8 +89,7 @@ class RendererTests(unittest.IsolatedAsyncioTestCase):
         symlink = await LocalRenderer().render(code, 0)
         self.assertFalse(symlink["ok"])
         repeated_saves = (
-            "from artcanvas import ArtCanvas\n"
-            "with ArtCanvas(32,32) as c:\n c.save()\n c.save()\n"
+            'import cairo\nsurface = cairo.ImageSurface(cairo.FORMAT_RGB24, 32, 32)\nc = cairo.Context(surface)\nsurface.write_to_png("output.png")\nsurface.write_to_png("output.png")\nsurface.write_to_png("output.png")\n'
         )
         result = await LocalRenderer().render(repeated_saves, 0)
         self.assertTrue(result["ok"], result)

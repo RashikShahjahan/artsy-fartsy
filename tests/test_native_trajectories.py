@@ -1,4 +1,6 @@
 """Native Inspect drawing trajectories remain trainable without preference learning."""
+
+from drawing.documentation import api_documentation
 import copy
 import json
 from pathlib import Path
@@ -28,8 +30,8 @@ class NativeTrajectoryTests(unittest.TestCase):
         record = {
             'id': 'drawing', 'status': 'accepted',
             'spec': {'prompt': 'Draw a red circle', 'seed': 1},
-            'runtimeVersion': 'artcanvas-v2',
-            'apiDocHash': digest((ROOT / 'docs/artcanvas.md').read_bytes()),
+            'runtimeVersion': 'pycairo-v1',
+            'apiDocHash': digest(api_documentation().encode()),
             'artifacts': {'directory': 'drawing', 'source': 'drawing/program.py',
                           'image': 'drawing/image.png'},
             'code': code, 'sourceHash': digest(code.strip().encode()),

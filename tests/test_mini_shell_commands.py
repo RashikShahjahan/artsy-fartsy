@@ -1,5 +1,7 @@
 """Exercise executable commands, shell composition and binary recovery."""
 
+from drawing.documentation import api_documentation
+
 import asyncio
 import base64
 import json
@@ -42,7 +44,6 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
             # Generate an image in the shell, then view that PNG directly.
             run = (shlex.quote(__import__('sys').executable) + ' -c ' +
                    shlex.quote("from PIL import Image; Image.new('RGB',(1920,1200),'red').save('output.png')"))
-            workspace.env['PYTHONPATH'] = str(Path('runtime').resolve())
             viewed = await session.execute(run + ' && artsy-preview output.png')
             self.assertEqual(viewed['returncode'], 0, viewed)
             self.assertEqual(sum(p['type'] == 'image_url' for p in viewed['content']), 1)
@@ -89,6 +90,10 @@ class DockerShellTests(unittest.IsolatedAsyncioTestCase):
         try:
             code = "cat > /tmp/scene.py <<'PY'\n" + CODE + 'PY\n'
             shell = lambda c: asyncio.to_thread(workspace.execute, {'command': c})
+            docs = await shell("rg -n -A 12 'def set_source_rgb' /opt/artsy/pycairo-api.pyi")
+            self.assertEqual(docs['returncode'], 0, docs)
+            self.assertIn('set_source_rgb', docs['output'])
+            self.assertIn(':param red:', docs['output'])
             async def read(entrypoint):
                 c = 'python -c ' + shlex.quote(READ_SOURCE) + (' ' + shlex.quote(entrypoint) if entrypoint else '')
                 result = await shell(c)
@@ -135,7 +140,7 @@ class DockerShellTests(unittest.IsolatedAsyncioTestCase):
             options = {'output': directory, 'teacher': teacher, 'agentImage': image,
                        'renderer': DockerRenderer(image=image)}
             spec = {'id': 'recovery', 'prompt': 'Draw red', 'seed': 7}
-            docs = Path('docs/artcanvas.md').read_text()
+            docs = api_documentation()
             interrupted = await candidate(options, spec, 0, docs)
             self.assertEqual(interrupted['status'], 'infrastructure_error')
             self.assertIn('workspaceCheckpoint', interrupted['artifacts'])

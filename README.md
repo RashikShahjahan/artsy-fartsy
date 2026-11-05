@@ -1,6 +1,6 @@
 # Artsy
 
-Train and evaluate models that draw with Python. An agent writes ArtCanvas code,
+Train and evaluate models that draw with Python. An agent writes pycairo code,
 inspects PNG previews, repairs its work, and submits an image with editable source.
 The project includes a local web UI, teacher dataset generation, hosted LoRA SFT,
 GRPO training, and an independent Inspect evaluation harness.
@@ -63,10 +63,10 @@ an image automatically. For explicitly trusted programs, `--renderer local` on
 
 ```sh
 # macOS
-brew install cairo
+brew install cairo pkg-config
 
 # Debian/Ubuntu
-sudo apt-get install libcairo2 fonts-dejavu-core
+sudo apt-get install build-essential pkg-config libcairo2-dev fonts-dejavu-core
 ```
 
 ## Draw and review in the UI
@@ -143,7 +143,7 @@ those modules in a fresh directory and runs the selected entrypoint. Non-Python
 workspace assets are not included. The backend stores this snapshot as its own
 `program.py` artifact; that name is not imposed on the agent's source files.
 The system prompt reuses mini's built-in opening with brief drawing-specific
-instructions. ArtCanvas documentation is available at `/opt/artsy/artcanvas.md`
+instructions. Pycairo’s installed API reference is available at `/opt/artsy/pycairo-api.pyi`
 inside the container instead of being pasted into every system prompt.
 
 This is trajectory contract v4. Use `--harness drawing-tools` to run historical
@@ -529,14 +529,19 @@ reference, use `--continue-from` with `--additional-steps`; see
 [continuation and checkpoint selection](docs/grpo-continuation.md). Evaluate
 checkpoints separately with Inspect and human review.
 
-## ArtCanvas and local episodes
+## Pycairo and local episodes
 
-Generated programs import `ArtCanvas` from `artcanvas` and save `output.png`.
-The versioned `artcanvas-v2` runtime supports composable paths and transforms,
-dimension validation, and idempotent saving through Cairo-compatible `cairocffi`
-bindings. Default output is 1920×1200. Standalone rendering supports explicit
+Generated programs use the full pycairo API through `import cairo` and explicitly
+save the relative path `output.png` with `surface.write_to_png("output.png")`.
+Python previews and final validation rerun the program in a fresh directory;
+absolute output paths and previously copied PNGs do not satisfy that contract. The versioned
+`pycairo-v1` runtime uses native pycairo bindings. Programs create their own surface,
+context, and background. Default output is 1920×1200. Standalone rendering accepts
 sizes up to 4096×4096; Inspect and RL require the fixed default dimensions.
-See the [drawing API](docs/artcanvas.md).
+The installed pycairo package includes its full API reference in `cairo/__init__.pyi`.
+The sandbox exposes it at `/opt/artsy/pycairo-api.pyi`, searchable with `rg`; no
+separate documentation download is needed. Existing ArtCanvas programs and recordings
+must be migrated or regenerated before use with this runtime.
 
 Render an existing program without a model server or Docker:
 

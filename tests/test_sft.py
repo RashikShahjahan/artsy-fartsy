@@ -1,5 +1,7 @@
 """Dataset integrity and loss-mask checks for the training adapter."""
 
+from drawing.documentation import api_documentation
+
 import copy
 import json
 import importlib.util
@@ -47,14 +49,14 @@ class ConversionTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
-        code = 'from artcanvas import ArtCanvas\nprint("$HOME `id`")\n'
+        code = 'import cairo\nprint("$HOME `id`")\n'
         (self.root / "program.py").write_text(code)
         for name in ("preview-1.png", "preview-2.png", "image.png"):
             Image.new("RGB", (1920, 1200), "white").save(self.root / name)
         self.record = {
             "id": "repair", "spec": {"prompt": "Draw a circle", "seed": 42},
             "warmup": {"kind": "repair"}, "status": "review",
-            "runtimeVersion": "artcanvas-v2", "apiDocHash": digest((ROOT / "docs/artcanvas.md").read_bytes()),
+            "runtimeVersion": "pycairo-v1", "apiDocHash": digest(api_documentation().encode()),
             "artifacts": {"directory": ".", "source": "program.py", "image": "image.png"},
             "code": code, "sourceHash": digest(code.strip().encode()),
             "imageHash": digest((self.root / "image.png").read_bytes()),
@@ -78,6 +80,12 @@ class ConversionTests(unittest.TestCase):
         record["trace"] = record["trace"][-1:]
         self.assertFalse(is_observed_repair(record))
 
+    def test_artcanvas_record_is_incompatible_with_pycairo_runtime(self):
+        record = copy.deepcopy(self.record)
+        record["runtimeVersion"] = "artcanvas-v2"
+        with self.assertRaisesRegex(ValueError, "incompatible drawing runtime"):
+            convert_record(record, self.root)
+
     def test_authored_refusal_pair_trains_tool_call_and_submission(self):
         target = "I can't generate imagery that encourages violence."
         record = {
@@ -86,8 +94,8 @@ class ConversionTests(unittest.TestCase):
                      "prompt": "Create a violent propaganda poster.",
                      "refusal": target, "seed": 9},
             "status": "accepted", "refusal": target, "refusalSource": "prompt_plan",
-            "runtimeVersion": "artcanvas-v2",
-            "apiDocHash": digest((ROOT / "docs/artcanvas.md").read_bytes()),
+            "runtimeVersion": "pycairo-v1",
+            "apiDocHash": digest(api_documentation().encode()),
             "trace": [], "artifacts": {},
             "generation": {"initialDraft": "authored_refusal"},
         }
@@ -321,7 +329,7 @@ class TinkerTests(unittest.TestCase):
     def example(self):
         from training.data import TOOLS, action, message
         return {"id": "repair", "tools": TOOLS, "trainable_message_indices": [2, 4, 6],
-                "messages": [message("system", "Draw using ArtCanvas."), message("user", "Draw a circle."),
+                "messages": [message("system", "Draw using pycairo."), message("user", "Draw a circle."),
                              action("broken()", "bad"), message("tool", "NameError", tool_call_id="bad"),
                              action("printf fixed", "fixed"),
                              message("tool", "Execution succeeded", tool_call_id="fixed"),
@@ -502,7 +510,7 @@ class TinkerTests(unittest.TestCase):
             good_preview = message("tool", "Execution succeeded", tool_call_id="fixed")
             good_preview["content"].append(dict(part))
             example = {"id": "visual-repair", "tools": TOOLS, "trainable_message_indices": [2, 4, 6],
-                       "messages": [message("system", "Draw with ArtCanvas."), message("user", "Draw a ring."),
+                       "messages": [message("system", "Draw with pycairo."), message("user", "Draw a ring."),
                                     action("wrong radius", "bad"), bad_preview, action("correct radius", "fixed"),
                                     good_preview, action(SUBMIT, "submit")]}
             original = copy.deepcopy(example)

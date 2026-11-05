@@ -9,7 +9,12 @@ from PIL import Image
 class RenderBackend(Protocol):
     async def render(self, code: str, seed: int) -> dict[str, Any]: ...
 
-RUNTIME_VERSION = "artcanvas-v2"
+RUNTIME_VERSION = "pycairo-v1"
+OUTPUT_PATH_GUIDANCE = (
+    'Save to the relative path output.png in the current working directory. '
+    'Python previews and final validation rerun your program in a fresh directory; '
+    'an absolute output path or a PNG copied beforehand will not satisfy this requirement.'
+)
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 MAX_PNG_BYTES = 8 * 1024 * 1024
 MAX_LOG_BYTES = 8192

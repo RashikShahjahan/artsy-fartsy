@@ -169,7 +169,7 @@ class ToolProtocolTest(unittest.TestCase):
         self.assertEqual(messages[0]["role"], "developer")
 
     def test_multiline_source_and_transcript_replay(self):
-        source = 'from artcanvas import ArtCanvas\nif 1 < 2:\n    print("hi & bye")\n'
+        source = 'import cairo\nif 1 < 2:\n    print("hi & bye")\n'
         text, calls = parse_tools(tool_call("write_code", parameter("source", source)) + "<|im_end|>", TOOLS)
         self.assertEqual(text, "")
         self.assertEqual(calls[0]["function"]["name"], "write_code")

@@ -176,7 +176,7 @@ See [reward architecture](rlhf-architecture.md).
 ## Shared execution boundary
 
 Dataset generation uses the model-independent `DrawingEnvironment` and the
-local ArtCanvas/Cairo renderer. SFT converts its recorded artifacts without
+local pycairo renderer. SFT converts its recorded artifacts without
 re-rendering them. Benchmark evaluation uses the host-side Inspect agent with bash tools and image
 previews in a fresh Docker sandbox, then invokes its own trusted renderer
 for final scoring. The base-model serving endpoint is separate from the hosted

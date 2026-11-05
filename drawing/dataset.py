@@ -1,6 +1,8 @@
-"""Checkpointed generation of unfiltered ArtCanvas drawing candidates."""
+"""Checkpointed generation of unfiltered pycairo drawing candidates."""
 
 from __future__ import annotations
+
+from drawing.documentation import api_documentation
 
 import asyncio
 import json
@@ -110,8 +112,8 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     try:
         os.write(fd, compact_json({"pid": os.getpid(), "started": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z")}).encode())
         root = Path(__file__).resolve().parent.parent
-        api_doc = (root / "docs" / "artcanvas.md").read_text(encoding="utf-8")
-        runtime_hashes = {name: sha256((root / "runtime" / name).read_bytes()) for name in ("artcanvas.py", "cairo.py", "requirements.txt")}
+        api_doc = api_documentation()
+        runtime_hashes = {name: sha256((root / "runtime" / name).read_bytes()) for name in ("requirements.txt",)}
         config = options.get("config") or _default_config()
         teacher = _provenance(options["teacher"]) if options.get("teacher") else None
         manifest: dict[str, Any] = {"version": DATASET_VERSION, "promptVersion": "artsy-specs-v1", "specs": specs,

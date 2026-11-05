@@ -6,7 +6,7 @@
   }
   function feedback(message) {
     const value = text(message.content);
-    // ArtCanvas returns a JSON feedback line inside the bash tool response.
+    // The renderer returns a JSON feedback line inside the bash tool response.
     for (const line of value.split('\n')) {
       try {
         const data = JSON.parse(line);

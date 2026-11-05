@@ -1,4 +1,4 @@
-"""Local subprocess renderer for ArtCanvas Python programs."""
+"""Local subprocess renderer for pycairo Python programs."""
 
 from __future__ import annotations
 
@@ -16,8 +16,6 @@ from typing import Any
 from .config import LIMITS
 
 from .render_contract import RUNTIME_VERSION, MAX_PNG_BYTES, MAX_LOG_BYTES, validate_png, RenderBackend
-
-RUNTIME_DIR = Path(__file__).resolve().parent.parent / "runtime"
 
 def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
     # The leader can exit while children remain in its session.
@@ -74,8 +72,6 @@ class LocalRenderer:
             runner += f"random.seed({seed}); runpy.run_path('program.py', run_name='__main__')"
             env = os.environ.copy()
             env.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONHASHSEED": str(seed % (2**32))})
-            existing = env.get("PYTHONPATH")
-            env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(RUNTIME_DIR), existing]))
             if sys.platform == "darwin":
                 env.setdefault("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib:/usr/local/lib:/usr/lib")
             try:

@@ -24,7 +24,7 @@ def main(*, progress=None, approval=None) -> int:
     parser.add_argument("--model", default=os.getenv("ARTSY_MODEL", BASE_MODEL))
     parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_TURNS)
     parser.add_argument("--reference-source", type=Path,
-                        help="Completed ArtCanvas source to use as the basis for an edit")
+                        help="Completed pycairo source to use as the basis for an edit")
     args = parser.parse_args()
     if not 0 <= args.seed <= 2**53 - 1:
         parser.error("seed must be a nonnegative safe integer")

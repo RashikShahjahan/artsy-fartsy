@@ -86,12 +86,12 @@ class ContinuationTests(unittest.TestCase):
         self.assertEqual(before, {p: p.read_bytes() for p in self.origin.iterdir()})
 
     def test_runtime_and_dataset_drift_rejected(self):
-        self.config['source_sha256']['runtime/artcanvas.py'] = 'changed'
+        self.config['source_sha256']['runtime/requirements.txt'] = 'changed'
         self.write_source()
         with self.assertRaisesRegex(ValueError, 'dependencies changed'):
             grpo.load_continuation(self.args)
-        self.config['source_sha256']['runtime/artcanvas.py'] = grpo.digest(
-            (grpo.ROOT / 'runtime/artcanvas.py').read_bytes())
+        self.config['source_sha256']['runtime/requirements.txt'] = grpo.digest(
+            (grpo.ROOT / 'runtime/requirements.txt').read_bytes())
         self.write_source()
         self.dataset.write_text(self.dataset.read_text() + '\n')
         with self.assertRaisesRegex(ValueError, 'dataset changed'):

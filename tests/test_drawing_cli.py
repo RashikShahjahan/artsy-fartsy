@@ -15,10 +15,7 @@ from drawing.renderer import validate_png
 
 ROOT = Path(__file__).resolve().parents[1]
 CODE = (
-    "from artcanvas import ArtCanvas\n"
-    "with ArtCanvas(1920, 1200) as canvas:\n"
-    "    canvas.set_color(0.1, 0.3, 0.8)\n"
-    "    canvas.draw_circle(960, 600, 240, True)\n"
+    'import cairo\nsurface = cairo.ImageSurface(cairo.FORMAT_RGB24, 1920, 1200)\ncanvas = cairo.Context(surface)\ncanvas.set_source_rgb(0.1, 0.3, 0.8)\ncanvas.arc(960, 600, 240,0,6.283185307179586)\ncanvas.fill()\nsurface.write_to_png("output.png")\n'
 )
 
 

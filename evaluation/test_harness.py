@@ -27,9 +27,7 @@ from evaluation.harness import (ROOT, DEFAULT_MAX_TOKENS, drawing_score, drawing
                                 preview_attempts, trajectory_metrics)
 from evaluation.render import render
 
-GOOD = ('from artcanvas import ArtCanvas\n'
-        'with ArtCanvas(1920, 1200) as c:\n'
-        ' c.set_color(0, 0, 1)\n c.draw_circle(960, 600, 200, True)\n')
+GOOD = ('import cairo\nsurface = cairo.ImageSurface(cairo.FORMAT_RGB24, 1920, 1200)\nc = cairo.Context(surface)\nc.set_source_rgb(0, 0, 1)\nc.arc(960, 600, 200,0,6.283185307179586)\nc.fill()\nsurface.write_to_png("output.png")\n')
 
 
 class FileSandbox:
@@ -522,18 +520,24 @@ class EvaluationTest(unittest.TestCase):
     def test_fresh_render_code_errors_dimensions_symlinks_and_timeouts(self):
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
-            valid = render(GOOD, 42, output, ROOT / "runtime")
+            valid = render(GOOD, 42, output)
             self.assertTrue(valid["ok"], valid)
             with Image.open(output / "image.png") as image:
                 self.assertEqual(image.size, (1920, 1200))
+            # A pre-existing workspace PNG cannot satisfy a fresh Python preview.
+            misplaced = render(GOOD.replace('"output.png"', repr(str(output / 'elsewhere.png'))), 42, output)
+            self.assertFalse(misplaced['ok'])
+            self.assertEqual(misplaced['exitCode'], 0)
+            self.assertIn('relative path output.png', misplaced['error'])
+            self.assertIn('fresh directory', misplaced['error'])
             cases = ['raise RuntimeError("repair me")',
-                     'from artcanvas import ArtCanvas\nArtCanvas(32,32).save()',
+                     'import cairo\ncairo.ImageSurface(cairo.FORMAT_RGB24,32,32).write_to_png("output.png")',
                      "import os; os.symlink('/etc/passwd', 'output.png')",
                      'while True: pass']
             for source in cases:
                 with self.subTest(source=source):
-                    self.assertFalse(render(source, 42, output, ROOT / "runtime", seconds=1)["ok"])
-            self.assertFalse(render("x" * (64 * 1024 + 1), 0, output, ROOT / "runtime")["ok"])
+                    self.assertFalse(render(source, 42, output, seconds=1)["ok"])
+            self.assertFalse(render("x" * (64 * 1024 + 1), 0, output)["ok"])
 
     def test_actual_inspect_scoring_exports_final_artifacts_and_aggregates_metrics(self):
         @solver
