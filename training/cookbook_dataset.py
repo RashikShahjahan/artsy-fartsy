@@ -16,7 +16,8 @@ from training.sft import batches
 class ArtsyRLDataset(RLDataset):
     def __init__(self, specs, root, batch_size, group_size, epochs, seed,
                  max_tokens, max_length, normalize_rewards, judge, model, renderer,
-                 revision):
+                 revision, harness="drawing-tools"):
+        self.harness = harness
         self.batches = list(batches(list(specs), batch_size, epochs, seed))
         self.root, self.group_size, self.judge = Path(root), group_size, judge
         self.max_tokens, self.max_length = max_tokens, max_length
@@ -27,7 +28,7 @@ class ArtsyRLDataset(RLDataset):
         return [
             ArtsyGroupBuilder(spec, self.group_size, index + 1, self.root, self.judge,
                               self.max_tokens, self.max_length, self.normalize_rewards,
-                              self.model, self.renderer, self.revision)
+                              self.model, self.renderer, self.revision, harness=self.harness)
             for spec in self.batches[index]
         ]
 
@@ -53,6 +54,7 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
     hpsv3_url: str
     hpsv3_center: float = 0.0
     hpsv3_scale: float = 5.0
+    harness: str = "drawing-tools"
 
     async def __call__(self):
         judges = {"hpsv3": HPSv3Client(
@@ -62,4 +64,4 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
                               self.group_size, self.epochs, self.seed,
                               self.max_tokens, self.max_length,
                               self.normalize_rewards, judges, self.model, self.renderer,
-                              self.revision), None
+                              self.revision, harness=self.harness), None
