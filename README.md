@@ -373,15 +373,21 @@ trusted programs. All outcomes remain
 in `candidates.jsonl`; no train/validation/test splits are assigned automatically.
 
 For the local PartiPrompts dataset, reproduce the prompt assignments with
-`python3 scripts/prepare_parti_prompts.py --preference-count 228 --preference-to-evaluation`.
-This keeps 914 SFT and 327 RL prompts and moves the 228 former preference prompts
-into evaluation, expanding it from 163 to **391**. The original 163 remain first;
-`evaluation/original.prompts.jsonl` preserves that subset, and
-`evaluation/added-from-preference.prompts.jsonl` contains only the new 228 so they
-can be evaluated without regenerating historical outputs. The preference split
-is now empty; these prompts must stay out of SFT, RL, and preference training.
+`python3 scripts/prepare_parti_prompts.py`.
+The canonical SFT dataset is `datasets/parti-prompts/sft/`: **1,142 prompts**,
+2,284 generated candidates in `candidates.jsonl`, and 2,219 previously validated
+trajectories in `training-ready.jsonl` (1,134 unique prompts; visual review pending).
+This includes the 228 prompts restored from the historical extended evaluation.
+Evaluation uses the original **163** prompts; RL has **327**, and preference is empty.
+Review the combined dataset with
+`make ui ARGS="--dataset datasets/parti-prompts/sft/prompts.jsonl --candidates datasets/parti-prompts/sft/candidates.jsonl"`.
+The preserved trajectories use `artcanvas-v2`; current `pycairo-v1` training
+requires regenerating with mini-SWE into a fresh output directory.
+Original batch directories remain as historical sources. The 391-prompt evaluation
+belongs to Experiment 2 and is not held out for models trained on the restored prompts.
 Assignments are deterministic and stratified by upstream Category and Challenge.
-Omit `--preference-to-evaluation` only to reproduce the historical four-way split.
+Use `--preference-count 228` to reproduce the historical four-way split, adding
+`--preference-to-evaluation` only to reproduce Experiment 2's extended evaluation.
 Dataset files and their manifest are local,
 Git-ignored artifacts; the preparation script reproduces them from the pinned TSV.
 

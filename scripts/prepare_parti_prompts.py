@@ -51,7 +51,7 @@ def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def prepare(source: Path, output: Path, seed: int, preference_count: int | None = None,
+def prepare(source: Path, output: Path, seed: int, preference_count: int | None = 0,
             preference_to_evaluation: bool = False) -> dict:
     if digest(source.read_bytes()) != SOURCE_SHA256:
         raise ValueError("Source TSV does not match the pinned Hugging Face revision")
@@ -109,8 +109,10 @@ def prepare(source: Path, output: Path, seed: int, preference_count: int | None 
     original_sft_count = targets["sft"]
     if preference_count is None:
         preference_count = (original_sft_count * 20 + 50) // 100
-    if not 1 <= preference_count < original_sft_count:
-        raise ValueError("Preference count must reserve at least one prompt and leave SFT nonempty")
+    if not 0 <= preference_count < original_sft_count:
+        raise ValueError("Preference count must be nonnegative and leave SFT nonempty")
+    if preference_to_evaluation and not preference_count:
+        raise ValueError("Moving preference prompts to evaluation requires a positive preference count")
     sft_strata = defaultdict(list)
     for row in splits["sft"]:
         sft_strata[(row["source"]["category"], row["source"]["challenge"])].append(row)
@@ -130,7 +132,8 @@ def prepare(source: Path, output: Path, seed: int, preference_count: int | None 
     # Keep the source order out of the training order as well as the assignment.
     for rows in splits.values():
         rows.sort(key=lambda row: digest(f"{seed}:order:{row['id']}".encode()))
-        validate_specs(rows)
+        if rows:
+            validate_specs(rows)
     original_evaluation = list(splits['evaluation'])
     added_evaluation = list(splits['preference']) if preference_to_evaluation else []
     if preference_to_evaluation:
@@ -173,6 +176,15 @@ def prepare(source: Path, output: Path, seed: int, preference_count: int | None 
                       "rl": "Compatible with training.grpo --dataset; requires an SFT checkpoint and configured judges."},
         "splits": {},
     }
+    if not preference_count:
+        manifest['format_version'] = 3
+        manifest['method'] = 'Original 70/10/20 allocation with no preference reservation. All original SFT prompts, including the formerly reserved 228, belong to SFT. Final ordering uses SHA-256 with split seed.'
+        manifest['preference_reservation']['current_purpose'] = 'sft'
+        manifest['readiness']['preference'] = 'Empty; former preference prompts restored to SFT.'
+        manifest['historical_evaluation'] = {
+            'experiment': 2,
+            'archive': 'eval-results/experiment-2-extended-prompts',
+            'warning': 'Restored prompts are eligible for SFT. Historical extended evaluations are not held-out evaluation for models trained on these prompts.'}
     if preference_to_evaluation:
         manifest['format_version'] = 3
         manifest['method'] += ' The complete preference reserve is then reassigned to evaluation, appended after the original evaluation prompts; SFT and RL remain unchanged.'
@@ -214,8 +226,8 @@ def main() -> None:
     parser.add_argument("--source", type=Path, default=ROOT / "datasets/parti-prompts/raw/PartiPrompts.tsv")
     parser.add_argument("--output", type=Path, default=ROOT / "datasets/parti-prompts")
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--preference-count", type=int,
-                        help="Prompts to reserve from original SFT (default: 20%% of SFT, rounded)")
+    parser.add_argument("--preference-count", type=int, default=0,
+                        help="Prompts to reserve from original SFT (default: 0; all original SFT prompts retained)")
     parser.add_argument('--preference-to-evaluation', action='store_true',
                         help='Move the full preference reserve into evaluation; preserve original and added eval subsets')
     args = parser.parse_args()

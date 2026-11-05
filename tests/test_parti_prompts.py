@@ -22,12 +22,15 @@ class PartiPromptsTest(unittest.TestCase):
                     writer.writerow([f"Draw scene {i}", f"category-{i % 4}",
                                      f"challenge-{i % 3}", ""])
             with patch("scripts.prepare_parti_prompts.SOURCE_SHA256", digest(source.read_bytes())):
-                first = prepare(source, root / "first", 42)
-                second = prepare(source, root / "second", 42)
+                first = prepare(source, root / "first", 42, preference_count=14)
+                second = prepare(source, root / "second", 42, preference_count=14)
                 smaller = prepare(source, root / "smaller", 42, preference_count=7)
-                expanded = prepare(source, root / 'expanded', 42, preference_to_evaluation=True)
-                expanded_again = prepare(source, root / 'expanded-again', 42, preference_to_evaluation=True)
-                for invalid in (0, -1, 70, 71):
+                expanded = prepare(source, root / 'expanded', 42, preference_count=14, preference_to_evaluation=True)
+                expanded_again = prepare(source, root / 'expanded-again', 42, preference_count=14, preference_to_evaluation=True)
+                restored = prepare(source, root / 'restored', 42)
+                with self.assertRaises(ValueError):
+                    prepare(source, root / 'invalid', 42, preference_to_evaluation=True)
+                for invalid in (-1, 70, 71):
                     with self.subTest(count=invalid), self.assertRaises(ValueError):
                         prepare(source, root / "invalid", 42, preference_count=invalid)
 
@@ -57,6 +60,13 @@ class PartiPromptsTest(unittest.TestCase):
             self.assertEqual(pools["sft"] | pools["preference"], smaller_pool)
             self.assertEqual(len(all_ids), 100)
             self.assertEqual(len(all_prompts), 100)
+            self.assertEqual({name: entry['records'] for name, entry in restored['splits'].items()},
+                             {'sft': 70, 'evaluation': 10, 'rl': 20, 'preference': 0})
+            restored_ids = {json.loads(line)['id'] for line in
+                            (root / 'restored/sft/prompts.jsonl').read_text().splitlines()}
+            self.assertEqual(restored_ids, pools['sft'] | pools['preference'])
+            for name in ('evaluation', 'rl'):
+                self.assertEqual(restored['splits'][name], first['splits'][name])
             self.assertEqual(expanded, expanded_again)
             self.assertEqual({name: entry['records'] for name, entry in expanded['splits'].items()},
                              {'sft': 56, 'evaluation': 24, 'rl': 20, 'preference': 0})
