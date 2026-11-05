@@ -180,5 +180,23 @@ class MiniHarnessTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(config["trajectory_contract_version"], 4)
 
 
+    def test_pre_metadata_sft_manifest_identifies_mini_swe(self):
+        from training.grpo import checkpoint_tool_contract
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            path = root / "final.json"
+            source = {"model": "Qwen/Qwen3.5-4B"}
+            manifest = {"config": source, "records": 3, "mini_swe_trajectories": 3}
+            (root / "training-manifest.json").write_text(json.dumps(manifest))
+            self.assertEqual(checkpoint_tool_contract(path, source), "mini-swe")
+            manifest["mini_swe_trajectories"] = 0
+            (root / "training-manifest.json").write_text(json.dumps(manifest))
+            self.assertEqual(checkpoint_tool_contract(path, source), "drawing-tools")
+            manifest["mini_swe_trajectories"] = 1
+            (root / "training-manifest.json").write_text(json.dumps(manifest))
+            self.assertEqual(checkpoint_tool_contract(path, source), "mixed-or-legacy")
+
+
+
 if __name__ == "__main__":
     unittest.main()
