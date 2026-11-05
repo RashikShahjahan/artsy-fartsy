@@ -449,6 +449,18 @@ supervised only with their associated action. Judge labels/critiques are exclude
 Native trajectories require recognized separate write and preview commands for
 the default mask; ambiguous shell actions require the assistant-only policy.
 
+**Experiment 6 (mini-SWE only):** pass `--loss-policy error-aware` to exclude
+code-writing tool calls from the SFT loss when their shell operation failed or
+a subsequent source-hashed `artsy-preview` recorded a render failure. Edits
+since the last successful source preview are considered unverified and masked
+on such a failure; successful intermediate edits, debugging commands, preview
+calls, corrective edits, and submission remain supervised. All actions and
+feedback remain in the causal context. Detection uses conservative shell-source
+write patterns; it is not a general static analyzer and cannot identify visual
+bugs or edits with no observed failure. The standard default is unchanged,
+so control and treatment can train on the **same accepted mini-SWE JSONL**.
+This policy is rejected for legacy drawing-tool/bash records.
+
 Sequences are neither packed nor truncated. Preflight validates complete
 trajectories before creating a hosted training client. `--dry-run --export PATH`
 exports converted conversations, and `--max-steps 1` limits a hosted smoke run.
