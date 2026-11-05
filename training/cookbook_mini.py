@@ -5,6 +5,7 @@ workspace, one bash(command) tool, optional artsy-preview image observations,
 and an explicit artsy-submit or native mini completion.
 """
 
+import asyncio
 import base64
 import io
 import json
@@ -81,9 +82,12 @@ class MiniDockerSession(DockerSession):
     async def _snapshot(self, entrypoint=None):
         if not self.container:
             raise ValueError("No active mini-SWE workspace")
-        result = await _docker(
-            ["exec", "-w", "/workspace", self.container, "python", "-c", READ_SOURCE]
-            + ([entrypoint] if entrypoint else []), timeout=12)
+        try:
+            result = await _docker(
+                ["exec", "-w", "/workspace", self.container, "python", "-c", READ_SOURCE]
+                + ([entrypoint] if entrypoint else []), timeout=12)
+        except subprocess.TimeoutExpired as error:
+            raise TimeoutError("Mini-SWE submission snapshot timed out") from error
         if result.returncode or len(result.stdout) > 512 * 1024:
             raise ValueError("Cannot snapshot mini-SWE workspace: " + result.stderr.decode(errors="replace")[-2048:])
         return json.loads(result.stdout)
@@ -97,7 +101,6 @@ class MiniDockerSession(DockerSession):
         self.tool_calls.append({"name": "bash", "arguments": {"command": command}})
         self.previews.extend(result.get("previewEvents", []))
         self.submitted = self.drawing.submitted
-        import asyncio
         observation = await asyncio.to_thread(
             _observation, result["content"], self.model, self.renderer, self.max_length, self.revision)
         return observation, self.submitted
