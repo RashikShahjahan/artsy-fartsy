@@ -117,19 +117,19 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
     async def test_experiment6_masks_observed_buggy_source_but_preserves_repair(self):
         from training.mini_data import edits_python_source
 
-        self.assertTrue(edits_python_source("cat > /workspace/program.py <<'EOF'\\ncode\\nEOF"))
+        self.assertTrue(edits_python_source("cat > /workspace/program.py <<'EOF'\ncode\nEOF"))
         self.assertTrue(edits_python_source("python -c \"from pathlib import Path; Path('scene.py').write_text('x')\""))
         self.assertTrue(edits_python_source("sed -i s/red/blue/ scene.py"))
         self.assertFalse(edits_python_source("rg 'set_source_rgb' /opt/artsy/pycairo-api.pyi"))
         self.assertFalse(edits_python_source("python -m py_compile scene.py"))
         self.assertFalse(edits_python_source("artsy-preview scene.py"))
 
-        broken = 'import cairo\\nraise RuntimeError("broken source")\\n'
+        broken = 'import cairo\nraise RuntimeError("broken source")\n'
         commands = [
-            "cat > /workspace/program.py <<'EOF'\\n" + broken + "EOF",
+            "cat > /workspace/program.py <<'EOF'\n" + broken + "EOF",
             "artsy-preview program.py",
             "python -c 'raise RuntimeError(\"diagnostic failure\")'",
-            "cat > /workspace/program.py <<'EOF'\\n" + CODE + "EOF",
+            "cat > /workspace/program.py <<'EOF'\n" + CODE + "EOF",
             "artsy-preview program.py",
             "artsy-submit program.py",
         ]
@@ -160,7 +160,7 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_experiment6_does_not_blame_code_for_preview_usage_error(self):
         commands = [
-            "cat > /workspace/program.py <<'EOF'\\n" + CODE + "EOF",
+            "cat > /workspace/program.py <<'EOF'\n" + CODE + "EOF",
             "artsy-preview does-not-exist.py",
             "artsy-submit program.py",
         ]
