@@ -241,6 +241,7 @@ def main() -> int:
     # Read endpoint/judge settings before constructing defaults and model clients.
     load_dotenv(ROOT / ".env")
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--harness", choices=("mini-swe", "drawing-tools"), default="mini-swe")
     parser.add_argument("--dataset", type=Path, help="Defaults to the validated frozen evaluation suite")
     parser.add_argument("--model", default=os.getenv("ARTSY_MODEL", BASE_MODEL), help="Model ID served by ARTSY_MODEL_URL")
     parser.add_argument("--output", type=Path, default=Path("eval-results") / datetime.now(timezone.utc).strftime("base-%Y%m%dT%H%M%S%fZ"))
@@ -293,7 +294,7 @@ def main() -> int:
     args.dataset = args.dataset or dataset_path()
     specs = load_specs(args.dataset)
     selected = specs[:args.limit] if args.limit else specs
-    plan = {"model": args.model, "base_url": model_url(),
+    plan = {"model": args.model, "harness": args.harness, "base_url": model_url(),
             "dataset": str(args.dataset.resolve()), "samples": len(selected), "epochs": args.epochs,
             "max_connections": args.max_connections, "max_samples": args.max_samples,
             "max_sandboxes": args.max_sandboxes or args.max_samples,
@@ -376,7 +377,7 @@ def main() -> int:
                      hpsv3_url=args.hpsv3_url, hpsv3_model=args.hpsv3_model,
                      max_connections=args.max_connections, max_tokens=args.max_tokens,
                      token_limit=args.token_limit, token_limit_type=args.token_limit_type,
-                     time_limit=args.time_limit, max_turns=args.max_turns),
+                     time_limit=args.time_limit, max_turns=args.max_turns, harness=args.harness),
         model=model_from_env(args.model, timeout=args.time_limit), model_roles=roles,
         log_dir=str(args.output / "logs"), epochs=args.epochs, max_samples=args.max_samples,
         max_sandboxes=args.max_sandboxes or args.max_samples,

@@ -102,7 +102,7 @@ class DrawingCliTests(unittest.TestCase):
             args = (
                 "--output", str(output), "--input", str(prompts), "--candidates", "1",
                 "--teacher-model", "fake", "--teacher-url", teacher.url,
-                "--renderer", "local",
+                "--renderer", "local", "--harness", "drawing-tools",
             )
             first = self.run_cli(*args)
             self.assertEqual(first.returncode, 0, first.stderr + first.stdout)

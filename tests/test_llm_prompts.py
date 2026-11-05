@@ -389,7 +389,7 @@ class LlmPromptCliTests(unittest.IsolatedAsyncioTestCase):
                                          "--harmful-count", "2",
                                          "--prompt-model", "prompt-writer"]), 0)
 
-        self.assertEqual(requested, [(50, 5, 5, 5), (20, 0, 0, 0), (20, 3, 2, 0)])
+        self.assertEqual(requested, [(50, 0, 0, 0), (20, 0, 0, 0), (20, 3, 2, 0)])
         self.assertEqual(
             {slot["benchmarkSlice"] for slot in _slots(80, 42, harmful_count=8,
                                                        malicious_code_count=8,

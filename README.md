@@ -121,20 +121,37 @@ make draw ARGS='"Draw a blue circle centered on a white background."'
   --episode episodes/squares --seed 42
 ```
 
-The host-side Inspect agent exposes five drawing tools: `update_drawing(source)`,
-`read_drawing()`, `preview_drawing()`, `submit_drawing()`, and `refuse_drawing(reason)`.
-Source is written directly to `/workspace/program.py` in a fresh network-isolated
-Docker sandbox. Previewing invokes the trusted renderer with fixed arguments and
-returns execution feedback plus the actual PNG image. Submission asks the scorer
-to render the latest source afresh and validate the final 1920×1200 PNG. Refusal
-removes any earlier source, records the reason, and ends the request. A stale
-preview or textual completion claim cannot pass.
+The drawing and evaluation CLIs now default to **mini-SWE-agent 2.2.3**
+(`--harness mini-swe`). The model gets a general `bash(command)` tool and a
+persistent `/workspace`, with Python, `sed`, `patch`, `diff`, and `rg` available.
+It can inspect files and apply targeted edits instead of replacing the entire
+program. When editing an existing drawing, its source is placed directly in
+`/workspace/program.py` before the first model turn.
 
-This is harness/trajectory contract v3. Historical bash traces remain readable.
-New SFT generation, exports, and GRPO rollouts use the named drawing tools.
-Historical SFT datasets retain their bash contract; saved checkpoints have not
-been retrained for the new tool schema. Use a compatible drawing-tool SFT checkpoint
-when initializing a new RL run.
+The agent chooses its Python filenames and can create helper modules. Submit with
+`artsy-submit PATH_TO_ENTRYPOINT`. The native mini completion command also works
+when there is only one Python file or an entrypoint was selected by a preview.
+Previews are optional: `artsy-preview PATH_TO_ENTRYPOINT` renders Python, while
+`artsy-preview output.png` views an existing PNG. Both return actual image feedback.
+`artsy-preview` and `artsy-submit` are installed shell executables and work inside
+compound commands and scripts. Python entrypoints may live anywhere
+readable in the container; external entrypoints snapshot their sibling modules. No preview is
+required to submit, including after an edit.
+
+Submission snapshots the Python files in the workspace. Final scoring recreates
+those modules in a fresh directory and runs the selected entrypoint. Non-Python
+workspace assets are not included. The backend stores this snapshot as its own
+`program.py` artifact; that name is not imposed on the agent's source files.
+The system prompt reuses mini's built-in opening with brief drawing-specific
+instructions. ArtCanvas documentation is available at `/opt/artsy/artcanvas.md`
+inside the container instead of being pasted into every system prompt.
+
+This is trajectory contract v4. Use `--harness drawing-tools` to run historical
+checkpoints trained on `update_drawing`, `read_drawing`, `preview_drawing`,
+`submit_drawing`, and `refuse_drawing` (contract v3). Existing SFT/GRPO checkpoints
+retain their original tool contract; the new mini interface needs a new SFT run.
+The programmatic task and dataset APIs retain their historical default for
+existing training callers; pass `harness="mini-swe"` to select the new harness.
 
 Episodes retain Inspect logs, scored artifacts, and final `program.py`,
 `image.png`, and `result.json` with hashes. Completed matching requests can be
@@ -286,7 +303,7 @@ Configure the prompt writer and vision-capable teacher using `.env.example`:
 make dataset ARGS="--prompts-only --count 20 --difficulty mixed --output datasets/my-prompts"
 
 # Collect two teacher candidates per ordinary prompt, with isolated Docker rendering.
-make dataset ARGS="--count 100 --harmful-count 10 --malicious-code-count 10 --output datasets/my-run"
+make dataset ARGS="--harness drawing-tools --count 100 --harmful-count 10 --malicious-code-count 10 --output datasets/my-run"
 
 # Inspect all prompts and candidates, then export approved SFT records.
 make ui ARGS="--dataset datasets/my-run/prompts.jsonl --candidates datasets/my-run/candidates.jsonl"
@@ -310,16 +327,40 @@ seed alone does not reproduce it. Repeat the original command to resume missing
 work; `--retry-errors` retries candidate infrastructure failures. Changed settings
 or incompatible generator formats require a fresh output directory.
 
-For ordinary drawings, the teacher uses `update_drawing`, `read_drawing`,
-`preview_drawing`, `submit_drawing`, and `refuse_drawing`. It writes Python, sees
-runtime feedback and actual PNG previews, and revises before submission triggers
-a fresh final render. Writes and previews must occur on separate model turns.
-Every teacher response counts toward a hard 12-turn limit, including malformed
-replies. Submission on turn 12 is allowed; unfinished episodes are rejected
-without requesting turn 13. Export and SFT loading also reject conversations
-longer than 12 assistant turns, including historical imports. Refusal prompts
-produce one authored `refuse_drawing` target each without rendering the unsafe request.
-Provider-exposed reasoning is retained when available.
+For new experiment-5 trajectories, generation defaults to mini-SWE-agent and
+50 drawing prompts, with no refusal pairs. It omits unsolicited image text and
+exposes no refusal tool. Use drawing-only input specs; explicit refusal specs
+require `--harness drawing-tools`. Mini generation requires Docker, including
+when a renderer is supplied programmatically.
+
+Build the persistent editing workspace before collecting trajectories:
+
+```sh
+docker build -f evaluation/Dockerfile -t artsy-editing-agent:latest .
+make dataset ARGS="--harness mini-swe --input datasets/my-prompts/prompts.jsonl --output datasets/experiment-5 --candidates 2"
+```
+
+The existing renderer image is still required for independent preview and final
+renders (see Docker setup above). `ARTSY_AGENT_IMAGE` can select a different
+editing image; its value and image ID are recorded in the dataset manifest.
+The editing container has no network, host mounts, or credentials. Its files
+persist within one candidate. Interrupted collection saves a bounded, hashed
+checkpoint of generated files in `/workspace`, `/tmp`, and `/home/artsy`, including
+PNGs and other binary artifacts. Recovery restores those files before continuing
+the same conversation through `--retry-errors`, retaining its original turn budget. Empty provider replies consume a turn and receive normal
+missing-tool feedback instead of terminating collection.
+
+Each response counts toward the 12-turn SFT limit, including malformed replies.
+Saved trajectories retain the actual shell commands, tool results, source hashes,
+and PNG observations. SFT export validates the final source and image hashes and
+supervises every executed action in mini trajectories: targeted edits accumulate,
+so only supervising the last patch would omit earlier work. Images and tool
+feedback remain context. Historical records keep their existing loss policy.
+A dataset manifest records the pinned harness, schemas, prompts, and source hashes;
+changed configuration requires a new output directory.
+
+`--harness drawing-tools` retains the previous complete-source generation flow,
+including authored refusal pairs and optional trusted `--renderer local` execution.
 
 Generation performs no automated content, safety, quality, or duplicate filtering.
 Parsing, execution budgets, PNG validity, and artifact integrity checks still apply.

@@ -19,6 +19,7 @@ def main(*, progress=None, approval=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("prompt", nargs="+")
     parser.add_argument("--episode", type=Path, default=Path("episodes") / str(uuid4()))
+    parser.add_argument("--harness", choices=("mini-swe", "drawing-tools"), default="mini-swe")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--model", default=os.getenv("ARTSY_MODEL", BASE_MODEL))
     parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_TURNS)
@@ -33,7 +34,7 @@ def main(*, progress=None, approval=None) -> int:
     if not prompt:
         parser.error("prompt must not be empty")
     request = {"prompt": prompt, "seed": args.seed, "model": args.model,
-               "base_url": model_url()}
+               "base_url": model_url(), "harness": args.harness}
     if args.max_turns != DEFAULT_MAX_TURNS:
         request['max_turns'] = args.max_turns
     reference = None
@@ -68,7 +69,7 @@ def main(*, progress=None, approval=None) -> int:
     if reference is not None:
         spec['reference_source'] = reference
     logs = eval(drawing_task([spec], str(directory / "artifacts"),
-                            max_turns=args.max_turns, progress=progress, approval=approval),
+                            max_turns=args.max_turns, progress=progress, approval=approval, harness=args.harness),
                 model=model_from_env(args.model), log_dir=str(directory / "logs"), max_samples=1)
     artifact = directory / "artifacts/drawing-1"
     for name in ("program.py", "image.png", "result.json"):

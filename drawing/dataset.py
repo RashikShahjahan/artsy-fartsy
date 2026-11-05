@@ -74,6 +74,19 @@ def _refusal_candidate(spec: dict[str, Any], api_doc: str, config: dict[str, Any
 
 async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
     specs = validate_specs(options["specs"])
+    harness = options.get('harness', 'drawing-tools')
+    candidate, trajectory_format = _candidate, FORMAT
+    if harness == 'mini-swe':
+        if any(s.get('kind') == 'refusal' for s in specs):
+            raise ValueError('mini-swe has no refusal tool; use drawing-only specs for experiment 5')
+        if options.get('executionBackend') == 'local':
+            raise ValueError('mini-swe requires a Docker editing workspace')
+        from .mini_dataset import candidate, inspect_image
+        editing_image = await asyncio.to_thread(inspect_image)
+        options = {**options, 'agentImage': editing_image['id']}
+        from .mini_agent import FORMAT as trajectory_format
+    elif harness != 'drawing-tools':
+        raise ValueError('Unknown coding harness')
     teacher_client = options.get("teacher")
     if (teacher_client and any(s.get("kind") != "refusal" for s in specs)
             and not supports_image_input(teacher_client.model, teacher_client.baseUrl)):
@@ -103,9 +116,16 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         teacher = _provenance(options["teacher"]) if options.get("teacher") else None
         manifest: dict[str, Any] = {"version": DATASET_VERSION, "promptVersion": "artsy-specs-v1", "specs": specs,
             "candidates": candidates, "maxTokens": max_tokens, "maxTurns": SFT_MAX_TURNS,
-            "trajectoryFormat": FORMAT,
+            "trajectoryFormat": trajectory_format,
             "teacher": teacher,
             "config": config, "apiDocHash": sha256(api_doc), "runtimeHashes": runtime_hashes}
+        if harness == 'mini-swe':
+            from .mini_agent import TOOLS, VERSION, system_prompt
+            manifest['harness'] = {'name': 'mini-swe-agent', 'version': VERSION, 'tools': TOOLS,
+                                   'editingImage': editing_image,
+                                   'prompts': {s['id']: system_prompt(s['seed']) for s in specs},
+                                   'sourceHashes': {name: sha256((root / name).read_bytes()) for name in
+                                       ('drawing/mini_agent.py', 'drawing/mini_dataset.py', 'drawing/mini_session.py', 'drawing/mini_protocol.py', 'evaluation/agent_commands.py')}}
         if options.get("executionBackend"):
             manifest["executionBackend"] = options["executionBackend"]
         if options.get("promptGenerator"):
@@ -135,9 +155,15 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             for index, saved in enumerate(saved_records):
                 filename = f"{spec['id']}-c{index}.json"
                 retry = saved and saved.get("status") == "infrastructure_error" and options.get("retryErrors")
+                candidate_options = {**options, "output": str(output), "maxTokens": max_tokens}
+                if retry and harness == 'mini-swe':
+                    from .mini_dataset import resume_options
+                    recovery = resume_options(saved, output)
+                    if recovery:
+                        candidate_options['resume'] = recovery
                 record = saved if saved and not retry else (
                     _refusal_candidate(spec, api_doc, config) if spec.get("kind") == "refusal"
-                    else await _candidate({**options, "output": str(output), "maxTokens": max_tokens}, spec, index, api_doc)
+                    else await candidate(candidate_options, spec, index, api_doc)
                 )
                 if retry:
                     record["previousAttempts"] = [*(saved.get("previousAttempts", [])), {k: v for k, v in saved.items() if k != "previousAttempts"}]
@@ -174,6 +200,9 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         completions = []
         for record in records:
             for row in [record, *record.get("previousAttempts", [])]:
+                if (row is not record and record.get('generation', {}).get('continuation')
+                        and row.get('trace') == record.get('trace', [])[:len(row.get('trace', []))]):
+                    continue  # The resumed trace already contains these requests.
                 completions.extend(t["completion"] for t in row.get("trace", []) if not t.get("reusedDraft"))
                 if row.get("submission", {}).get("completion"):
                     completions.append(row["submission"]["completion"])

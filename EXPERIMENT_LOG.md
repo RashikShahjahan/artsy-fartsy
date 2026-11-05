@@ -1,6 +1,6 @@
 # Experiment log
 
-Record completed experiments here with their setup, results, interpretation, and supporting artifacts. Append future entries with sequential experiment numbers; retain the scope and caveats of earlier results.
+Record experiments here with their setup, results, interpretation, and supporting artifacts. Mark planned runs explicitly and append future entries with sequential experiment numbers; retain the scope and caveats of earlier results.
 
 ## Experiment 1 — Original 163-prompt LoRA rank evaluation
 
@@ -234,7 +234,7 @@ Datasets, checkpoints, and raw eval artifacts are Git-ignored local files. This 
 ## Experiment 3 — LoRA rank comparison with the expanded SFT dataset
 
 - **Recorded:** 2026-11-04 (America/Toronto).
-- **Status:** Training complete for ranks 32, 64, and 128: all 70 optimizer updates, final optimizer checkpoints, and final sampler exports are saved. All recorded losses are finite. Saved training configurations are identical except for LoRA rank. Evaluation is pending.
+- **Status:** Training complete for ranks 32, 64, and 128: all 70 optimizer updates, final optimizer checkpoints, and final sampler exports are saved. All recorded losses are finite. Saved training configurations are identical except for LoRA rank. HPSv3 evaluation is complete for all 489 episodes, with zero unresolved sample errors.
 - **Question:** How do ranks 32, 64, and 128 perform after adding the restored 228 SFT prompts to the original training data?
 - **Initialization:** Three independent fresh adapters from `Qwen/Qwen3.5-4B`; no continuation from Experiment 1/2 adapters.
 - **Training data:** 2,219 complete trajectories from 1,134 unique prompts: the exact original 1,763-trajectory training file (906 prompts), plus 456 new Luna teacher trajectories (228 prompts, two candidates each). Eight of the original SFT prompt inputs still lack a structurally trainable trajectory in the selected original file.
@@ -274,7 +274,7 @@ The active 163 evaluation prompts and 327 RL prompts have no exact ID or normali
 | 64 | [Run directory](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank64-2026-11-04/) | [Log](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank64-2026-11-04.console.log) |
 | 128 | [Run directory](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank128-2026-11-04/) | [Log](checkpoints/sft-experiment3-parti-qwen3.5-4b-rank128-2026-11-04.console.log) |
 
-All three runs completed on 2026-11-04 around 15:25 America/Toronto. Final-batch training losses were 0.59334 (rank 32), 0.59269 (rank 64), and 0.59230 (rank 128). These are training losses on the same final batch, not held-out quality measurements. Final checkpoint and sampler metadata are in each run’s `final.json`. HPSv3 Inspect evaluation is running on the original 163 held-out prompts for all three checkpoints (489 episodes). Temperature 0, 25-turn limit, 32,768 output tokens per response, and ten concurrent samples per rank match the earlier generation setup. The scorer uses the same MLX 4-bit language / bfloat16 vision / float32 reward-head pipeline as Experiment 1; its HTTP service reproduced a saved Experiment 1 reward exactly. LLM judges are disabled for these runs. Raw HPSv3 rewards are reported only for valid final images, with zero normalized preference for invalid or missing submissions. One seed per rank does not establish a general rank effect.
+All three runs completed on 2026-11-04 around 15:25 America/Toronto. Final-batch training losses were 0.59334 (rank 32), 0.59269 (rank 64), and 0.59230 (rank 128). These are training losses on the same final batch, not held-out quality measurements. Final checkpoint and sampler metadata are in each run’s `final.json`. HPSv3 evaluation completed on the original 163 held-out prompts for all three checkpoints (489 episodes). Temperature 0, 25-turn limit, 32,768 output tokens per response, and ten concurrent samples per rank match the earlier generation setup. The scorer uses the same MLX 4-bit language / bfloat16 vision / float32 reward-head pipeline as Experiment 1; its HTTP service reproduced a saved Experiment 1 reward exactly. LLM judges are disabled for these runs. Raw HPSv3 rewards are reported only for valid final images, with zero normalized preference for invalid or missing submissions. One seed per rank does not establish a general rank effect.
 
 - [HPSv3 service verification](eval-results/experiment3-hpsv3/service-validation.json).
 - [Evaluation launch commands](eval-results/experiment3-hpsv3/launches.json).
@@ -286,6 +286,26 @@ All three runs completed on 2026-11-04 around 15:25 America/Toronto. Final-batch
 - Deferred scoring writes separate checkpoints under `eval-results/experiment3-hpsv3/records/`, plus `comparison.json` and `scores.csv`; Inspect generation logs remain the execution record. Current run launch commands predate this migration; live runner status and retry logs record the generation-only resumes.
 
 
+
+### Completed HPSv3 evaluation
+
+Completed 2026-11-04 at 17:26 America/Toronto. All 489 generation episodes finished with zero unresolved sample errors; 462 valid final images were scored and 27 episodes delivered no valid final image. Batch scoring reused 402 saved matching scores and has exited.
+
+| Rank | Valid images /163 | Raw HPSv3 mean, delivered images | Normalized preference, all episodes |
+|---|---:|---:|---:|
+| 32 | 153 | -0.70873 | 0.44349 |
+| 64 | 156 | -0.83126 | 0.44670 |
+| 128 | 153 | -0.60805 | 0.44588 |
+
+Matched delivered-image wins: rank 64 over rank 32, 76–71 (147 pairs); rank 128 over rank 32, 75–72 (147 pairs); rank 128 over rank 64, 81–65 (146 pairs). These are descriptive comparisons without significance tests or training-seed replication. Raw means use different delivered-image subsets; the paired comparisons use shared prompts.
+
+[Comparison summary](eval-results/experiment3-hpsv3/comparison.json), [per-episode scores](eval-results/experiment3-hpsv3/scores.csv), and [completed pipeline status](eval-results/experiment3-hpsv3/pipeline.json).
+
+### Invalid-output inspection
+
+The 27 missing final images comprise 16 submitted programs that failed final rendering, 9 episodes that exhausted 25 model turns without submitting, and 2 benign requests ended with `refuse_drawing` containing visual-quality self-critiques. Breakdown by rank (render failure / turn limit / refusal): 32 = 7/3/0; 64 = 5/1/1; 128 = 4/5/1. Repeated identical source writes occurred in 26/27 episodes. Only three had any valid intermediate preview; two ended in refusal-tool misuse and one introduced a later code regression. No scores or evaluation outcomes were changed.
+
+[Full inspection and preview images](eval-results/experiment3-hpsv3/invalid-review/report.md), [structured per-episode evidence](eval-results/experiment3-hpsv3/invalid-review/failures.json).
 
 ## Experiment 4 — Blinded human preferences versus HPSv3
 
@@ -322,3 +342,67 @@ Human preference tests are two-sided exact sign tests excluding human ties, with
 The reviewer's preference scores and mean HPSv3 rewards have the same observed ordering, rank 128 > rank 64 > rank 32. HPSv3's pairwise-win Bradley–Terry fit instead places rank 64 first. This difference reflects how reward magnitudes and win frequencies are aggregated. Human preference and HPSv3 pairwise tests remain inconclusive; the mean-reward ordering is descriptive and has not been significance-tested. HPSv3 shows useful but incomplete agreement with this reviewer's decisive image preferences. This is one reviewer on a previously examined prompt set, and uncertainty covers prompt sampling only. It does not establish agreement across other people, training seeds or unquantized HPSv3.
 
 Artifacts: [sealed UI score export](eval-results/experiment-1-human-preferences/4dec3b7eb9e26fdea0644c07f56d059afbbbe0b2eeebe51c6f7e0f375a1b4bc1.scores.json), [analysis summary and source hashes](eval-results/experiment4-human-hpsv3/summary.json), [per-prompt pair comparisons](eval-results/experiment4-human-hpsv3/comparisons.csv), and [reproducible analysis](eval-results/experiment4-human-hpsv3/analyze.py).
+
+## Experiment 5 — Rank-128 SFT with revised trajectory generation and coding harness
+
+- **Recorded:** 2026-11-04 (America/Toronto).
+- **Status:** Planned; trajectory generation and training have not started for this experiment.
+- **Decision:** Keep LoRA rank 128 for the next SFT run. This is Rashik's choice based on the previous experiments, including the observed human-preference and mean HPSv3 reward results; it does not establish statistically significant rank-128 superiority or revise earlier results.
+- **Question:** Does a new rank-128 SFT run with revised teacher prompts and tooling improve drawing quality and final-image reliability?
+
+### Planned changes
+
+1. **Avoid unsolicited image text:** In the trajectory-generation prompts, instruct the teacher not to include text in images unless specifically required by the drawing request.
+2. **Use a proper coding harness:** Replace the small set of custom drawing tools with a general coding harness for trajectory generation and the resulting SFT tool interface. Selected mini-SWE-agent 2.2.3 with a persistent Docker editing workspace; see the harness selection notes below.
+3. **Remove the refusal tool:** Remove `refuse_drawing` from the tool interface used for the new trajectories and SFT run. Experiment 3's invalid-output inspection found two benign requests terminated through this tool with visual-quality self-critiques.
+
+### Run details and evaluation
+
+Teacher model, trajectory count, adapter initialization, training settings other than rank, and harness configuration remain to be recorded before launch. Save the final prompt and tool schemas, dataset hashes, and training configuration with the run artifacts.
+
+Use the original 163 held-out evaluation prompts for comparison with the previous rank-128 checkpoints. The restored 228 SFT prompts remain training inputs and must not be counted as held-out evaluation. Report image quality, valid final-image rate, rendering failures, turn-limit outcomes, and token/turn usage, with the generation settings and tool interface recorded for each comparison. Because all three changes are introduced together, this experiment measures their combined effect and cannot isolate each change's contribution.
+
+### Experiment 5 harness selection — mini-SWE-agent
+
+Selected mini-SWE-agent 2.2.3 with a persistent Docker editing workspace and the
+native `bash(command)` tool. Editing utilities include Python, sed, patch, diff,
+and ripgrep. `artsy-preview ENTRYPOINT` optionally returns a PNG observation.
+`artsy-submit ENTRYPOINT` snapshots freely named Python modules without requiring
+a preview. Final rendering remains independent. CLI generation/drawing/evaluation select this
+harness by default; historical drawing-tool callers retain their contract.
+
+New SFT records use `mini-swe-bash-v1` and preserve cumulative editing actions,
+PNG observations, source hashes, and independent final render results. All
+executed editing actions receive supervision. No refusal tool is exposed; use
+drawing-only prompts. The teacher is instructed to omit unrequested image text.
+Two single-trajectory smoke tests have been collected with the configured teacher;
+the full experiment dataset and training run have not been launched.
+
+Single-trajectory smoke-test artifacts: `datasets/mini-swe-single-demo-2026-11-04/`.
+The teacher was `openai/gpt-6-luna` through OpenRouter, using the SFT prompt
+"a mountain and its reflection in a lake". The recovered trajectory contains
+11 assistant turns and 12 total requests, including one provider interruption.
+Final independent rendering and SFT conversion passed; human review is pending.
+No successful preview occurred. The trace preserves the workspace-path and
+standalone-preview interface errors encountered by the teacher.
+
+Harness follow-up: installed `artsy-preview` and `artsy-submit` as real shell
+executables. They support compound commands; preview accepts existing PNGs or
+Python entrypoints outside `/workspace`. Native completion markers are recognized
+inside scripts. Added `file` to the image. Interrupted collection now checkpoints
+binary artifacts and Python files; `--retry-errors` restores them and retains the
+request budget. Empty replies use normal missing-tool recovery. The focused
+157-test suite passed with three skips, and two explicit Docker integration tests
+passed, including interrupted collection, PNG restoration, final rendering and
+SFT conversion. Default editing and rendering Docker images were rebuilt. These
+checks used stubbed model responses and made no additional teacher requests.
+
+A second approved single-trajectory smoke test used the SFT prompt "an owl with
+its wings spread out swooping over a tree" with `openai/gpt-6-luna` through
+OpenRouter. It completed in four model turns with no infrastructure or tool
+errors: read API documentation, create `/tmp/draw.py`, preview that entrypoint,
+and submit it inside a compound shell command. Independent final rendering and
+SFT conversion passed; human review is pending. Artifacts are in
+`datasets/mini-swe-second-demo-2026-11-04/`, including `trajectory.md`, `draw.py`,
+and `sft-example.json`. Recorded usage: 15,342 prompt tokens and 4,861 completion
+tokens. No training was launched.

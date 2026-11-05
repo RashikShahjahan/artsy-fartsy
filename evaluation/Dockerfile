@@ -1,11 +1,18 @@
 FROM python:3.12-slim-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash which libcairo2 fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
+    bash which file patch diffutils ripgrep libcairo2 fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 COPY runtime/requirements.txt /opt/artsy/requirements.txt
 RUN pip install --no-cache-dir -r /opt/artsy/requirements.txt
 COPY runtime/ /opt/artsy/runtime/
+COPY docs/artcanvas.md /opt/artsy/artcanvas.md
 COPY evaluation/render.py /opt/artsy/render.py
+COPY evaluation/agent_commands.py /opt/artsy/agent_commands.py
+COPY drawing/mini_protocol.py /opt/artsy/mini_protocol.py
+RUN chmod 755 /opt/artsy/agent_commands.py && ln -s /opt/artsy/agent_commands.py /usr/local/bin/artsy-preview && ln -s /opt/artsy/agent_commands.py /usr/local/bin/artsy-submit
 COPY drawing/render_contract.py /opt/artsy/render_contract.py
 COPY training/score_rl.py /opt/artsy/score_rl.py
 RUN python -c "import site; from pathlib import Path; Path(site.getsitepackages()[0], 'artsy.pth').write_text('/opt/artsy/runtime\\n')"
 WORKDIR /workspace
+
+RUN useradd --create-home --uid 1000 artsy && chown artsy:artsy /workspace
+USER artsy

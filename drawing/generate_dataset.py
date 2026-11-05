@@ -13,7 +13,7 @@ from .config import MAX_RESPONSE_TOKENS, MODEL_REQUEST_SECONDS
 
 HELP = """Python dataset generation
   --output DIR          Dataset directory (default: datasets/pilot)
-  --count N             Total prompts (default: 50 with a 35/5/5/5 mix)
+  --count N             Total prompts (default: 50 drawings with mini-swe)
   --benign-boundary-count N  Permitted safety-adjacent drawings within the total
   --harmful-count N     Harmful-image refusal pairs within the total
   --malicious-code-count N  Malicious-code refusal pairs within the total
@@ -23,6 +23,7 @@ HELP = """Python dataset generation
   --drafts-from DIR     Legacy option; not supported with drawing-tool collection
   --candidates N        Programs per prompt (default: 2)
   --workers N           Independent prompts processed concurrently, 1–128
+  --harness NAME        mini-swe (default), or drawing-tools for historical checkpoints
   --renderer BACKEND    docker (default), or local for explicitly trusted code
   --max-tokens N        Teacher output tokens per response (default: 32768)
   --prompt-model ID     Prompt-writing LLM (defaults to teacher model)
@@ -39,14 +40,14 @@ HELP = """Python dataset generation
   --retry-errors        Retry checkpointed infrastructure failures on resume
   --help, -h            Show this help
 
-Without --count, the default is 35 drawings, 5 benign boundary drawings,
-5 harmful-image refusals, and 5 malicious-code refusals (50 total).
+Mini defaults to 50 drawings with no refusal pairs. With --harness drawing-tools,
+the default is 35 drawings plus 5 each of boundary, harmful-image and malicious-code prompts.
 With --count, omitted slice counts default to zero. Explicit slice flags override.
 
 Credentials: ARTSY_PROMPT_API_KEY, ARTSY_TEACHER_API_KEY.
 Generation writes every candidate to candidates.jsonl without automated content filtering;
 manually inspect and export accepted.jsonl before SFT.
-Teachers use native drawing tools; unfinished episodes are rejected after 12 model turns.
+Teachers use mini-SWE-agent bash editing; unfinished episodes are rejected after 12 turns.
 Repeating the same command resumes checkpointed prompts and candidate records.
 Generated Python runs in isolated Docker containers unless --renderer local is selected.
 The prompt plan is saved before rendering and reused on resume."""
@@ -87,6 +88,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", default="42")
     parser.add_argument("--input")
     parser.add_argument("--workers")
+    parser.add_argument("--harness", choices=("mini-swe", "drawing-tools"), default="mini-swe")
     parser.add_argument("--renderer", choices=("docker", "local"), default="docker")
     parser.add_argument("--drafts-from", action="append")
     parser.add_argument("--candidates")
@@ -122,6 +124,8 @@ async def _main(argv: list[str] | None = None) -> int:
     if args.help:
         print(HELP)
         return 0
+    if not args.prompts_only and args.harness == 'mini-swe' and args.renderer == 'local':
+        raise ValueError('mini-swe requires Docker; --renderer local requires --harness drawing-tools')
     _load_env_file()
     from .dataset_specs import compact_json, sha256, validate_specs
     from .llm_prompts import AUTHOR_SYSTEM, GENERATOR_VERSION, generate_llm_prompts
@@ -133,7 +137,7 @@ async def _main(argv: list[str] | None = None) -> int:
     # Apply the curated four-way mix only when the CLI owns the prompt count.
     # An explicit --count retains the existing all-drawing default; --input
     # supplies its own slice composition.
-    default_slice_count = 5 if args.count is None and not args.input else 0
+    default_slice_count = 5 if args.harness == "drawing-tools" and args.count is None and not args.input else 0
     harmful_count = int(args.harmful_count) if args.harmful_count is not None else default_slice_count
     malicious_code_count = int(args.malicious_code_count) if args.malicious_code_count is not None else default_slice_count
     benign_boundary_count = int(args.benign_boundary_count) if args.benign_boundary_count is not None else default_slice_count
@@ -246,6 +250,11 @@ async def _main(argv: list[str] | None = None) -> int:
                     os.close(lock_fd)
                     lock_path.unlink(missing_ok=True)
         prompt_generation = {**prompt_config, "specsHash": sha256(compact_json(specs))}
+    if not args.prompts_only and args.harness == 'mini-swe':
+        if args.renderer == 'local':
+            raise ValueError('mini-swe requires Docker; --renderer local requires --harness drawing-tools')
+        if any(spec.get('kind') == 'refusal' for spec in specs):
+            raise ValueError('mini-swe requires drawing-only specs; refusal pairs require --harness drawing-tools')
     if args.prompts_only:
         from .dataset import _write_jsonl_atomic
         Path(output).mkdir(parents=True, exist_ok=True)
@@ -269,7 +278,7 @@ async def _main(argv: list[str] | None = None) -> int:
     teacher = chat_client({"model": model, "baseUrl": base_url, "apiKey": teacher_key, "timeoutMs": timeout_ms,
                            "maxConnections": max(16, workers),
                            "reasoningEnabled": args.teacher_thinking == "enabled"}) if model else None
-    options = {"output": output, "candidates": int(args.candidates or 2),
+    options = {"output": output, "harness": args.harness, "candidates": int(args.candidates or 2),
         "maxTokens": int(args.max_tokens) if args.max_tokens is not None else None,
         "workers": workers,
         "retryErrors": args.retry_errors,

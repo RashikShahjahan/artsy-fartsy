@@ -9,3 +9,7 @@
 !training/score_rl.py
 !drawing/
 !drawing/render_contract.py
+!docs/
+!docs/artcanvas.md
+!evaluation/agent_commands.py
+!drawing/mini_protocol.py

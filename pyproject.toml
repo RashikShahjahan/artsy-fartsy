@@ -12,6 +12,7 @@ dependencies = [
     "inspect-ai==0.3.283",
     "inspect-swe==0.2.72",
     "Jinja2==3.1.6",
+    "mini-swe-agent==2.2.3",
     "openai==3.37.0",
     "Pillow==12.0.0",
     "pycparser==3.12",
@@ -31,9 +32,9 @@ tts-dependencies = ["kokoro-onnx==0.4.9"]
 
 [tool.artsy-fartsy.roles]
 "runtime/requirements.txt" = ["cairocffi", "cffi", "pycparser", "Pillow"]
-"drawing/requirements.txt" = ["cairocffi", "cffi", "pycparser", "Pillow", "httpx"]
-"evaluation/requirements.txt" = ["inspect-ai", "inspect-swe", "openai", "Pillow", "python-dotenv", "PyYAML", "httpx"]
+"drawing/requirements.txt" = ["cairocffi", "cffi", "pycparser", "Pillow", "httpx", "mini-swe-agent"]
+"evaluation/requirements.txt" = ["inspect-ai", "inspect-swe", "openai", "Pillow", "python-dotenv", "PyYAML", "httpx", "mini-swe-agent"]
 "inference/requirements-tinker.txt" = ["fastapi", "uvicorn", "python-dotenv", "Jinja2", "tinker", "tinker-cookbook", "transformers", "torchvision", "pydantic", "httpx"]
-"training/requirements.txt" = ["tinker", "tinker-cookbook", "torchvision", "python-dotenv", "transformers", "Pillow", "PyYAML", "httpx"]
-"training/requirements-grpo.txt" = ["tinker", "tinker-cookbook", "torchvision", "python-dotenv", "transformers", "Pillow", "PyYAML", "httpx"]
+"training/requirements.txt" = ["tinker", "tinker-cookbook", "torchvision", "python-dotenv", "transformers", "Pillow", "PyYAML", "httpx", "mini-swe-agent"]
+"training/requirements-grpo.txt" = ["tinker", "tinker-cookbook", "torchvision", "python-dotenv", "transformers", "Pillow", "PyYAML", "httpx", "mini-swe-agent"]
 "ui/requirements-tts.txt" = ["kokoro-onnx"]

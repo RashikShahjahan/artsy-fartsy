@@ -28,7 +28,7 @@ TOOLS = [{"type": "function", "function": {
 }}]
 SUBMIT = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 INPUT_MODE = "multimodal-previews"
-CONVERSION = "drawing-tools-v16-max-12-turns"
+CONVERSION = "drawing-tools-v17-mini-swe-edits"
 LOSS_POLICY = "final-write-final-preview-submit"
 LOSS_POLICIES = (LOSS_POLICY, "assistant-only")
 
@@ -332,6 +332,9 @@ def _convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) ->
         raise ValueError(f"{rid}: incompatible drawing runtime")
     if record.get("apiDocHash") != digest((ROOT / "docs/artcanvas.md").read_bytes()):
         raise ValueError(f"{rid}: API documentation changed since generation")
+    if record.get('trajectoryFormat') == 'mini-swe-bash-v1':
+        from training.mini_data import convert_mini_record
+        return convert_mini_record(record, root, loss_policy)
     if record.get('trajectoryFormat') == 'drawing-tools-v1':
         from training.tool_data import convert_drawing_record
         return convert_drawing_record(record, root, loss_policy)
@@ -448,6 +451,10 @@ def _convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) ->
 
 def is_observed_repair(record: dict) -> bool:
     """A revised source recovered from a recorded execution or visual failure."""
+    if record.get('trajectoryFormat') == 'mini-swe-bash-v1':
+        return bool(record.get('submission') and any(t.get('feedback', {}).get('ok') is False
+                    and (t.get('executedCodeHash') != record.get('sourceHash') if t.get('executedCodeHash')
+                         else t.get('executedCode') != record.get('code')) for t in record.get('trace', [])))
     if record.get('trajectoryFormat') == 'drawing-tools-v1':
         source, failed_sources = None, set()
         for step in record.get('trace', []):
@@ -490,13 +497,15 @@ def load_examples(path: Path, loss_policy: str = LOSS_POLICY) -> tuple[list[dict
         "records": len(records), "examples": len(examples),
         "batch_unit": "trajectory",
         "loss_policy": loss_policy,
+        "editing_supervision": "all executed actions for cumulative mini-SWE edits",
+        "mini_swe_trajectories": sum(r.get('trajectoryFormat') == 'mini-swe-bash-v1' for r in records),
         "masked_actions": sum(masked),
         "trajectories_with_masked_actions": sum(n > 0 for n in masked),
         "supervised_actions": sum(len(e["trainable_message_indices"]) for e in examples),
         "omitted_unexecuted_replies": sum(t.get("feedback") is None for r in records
-                                         if r.get('trajectoryFormat') != 'drawing-tools-v1' for t in r.get("trace", [])),
+                                         if r.get('trajectoryFormat') not in ('drawing-tools-v1', 'mini-swe-bash-v1') for t in r.get("trace", [])),
         "trajectories_with_omitted_replies": sum(any(t.get("feedback") is None for t in r.get("trace", []))
-                                               for r in records if r.get('trajectoryFormat') != 'drawing-tools-v1'),
+                                               for r in records if r.get('trajectoryFormat') not in ('drawing-tools-v1', 'mini-swe-bash-v1')),
         "one_shot": sum(r["spec"].get("kind") != "refusal"
                         and (sum(op['tool'] == 'preview_drawing' for t in r.get('trace', []) for op in t.get('operations', []))
                              if r.get('trajectoryFormat') == 'drawing-tools-v1' else

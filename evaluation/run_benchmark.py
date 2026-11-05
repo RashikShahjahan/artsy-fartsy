@@ -57,6 +57,7 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--suite', type=Path, default=SUITE)
     parser.add_argument('--model', action='append', help='NAME=MODEL_ID; repeat for base, SFT and RL')
+    parser.add_argument('--harness', choices=('mini-swe', 'drawing-tools'), default='mini-swe')
     parser.add_argument('--max-samples', type=int, default=10)
     parser.add_argument('--time-limit', type=optional_token_budget, default=DEFAULT_TIME_LIMIT,
                         help='Episode and model-request deadline in seconds; 0 disables it (default: disabled)')
@@ -94,7 +95,7 @@ def main():
             env['ARTSY_CORRECTNESS_JUDGE_'+suffix] = env.get('ARTSY_SAFETY_JUDGE_'+suffix, '')
     if not env.get('ARTSY_CORRECTNESS_JUDGE_MODEL') or not env.get('ARTSY_SAFETY_JUDGE_MODEL'):
         raise ValueError('Configure adherence and safety judges before running')
-    plan = {'manifest': manifest, 'selected_models': selected,
+    plan = {'manifest': manifest, 'harness': args.harness, 'selected_models': selected,
             'models': [models[m] for m in selected.values()], 'dataset_sha256': manifest['sha256'],
             'max_samples': args.max_samples, 'max_tokens': args.max_tokens, 'token_limit': args.token_limit or None,
             'time_limit': args.time_limit,
@@ -104,7 +105,8 @@ def main():
             'adherence_judge': env['ARTSY_CORRECTNESS_JUDGE_MODEL'], 'safety_judge': env['ARTSY_SAFETY_JUDGE_MODEL'],
             'code_safety_judge': env.get('ARTSY_CODE_SAFETY_JUDGE_MODEL') or env['ARTSY_SAFETY_JUDGE_MODEL'],
             'source_sha256': {p: digest((ROOT/p).read_bytes()) for p in (
-                'evaluation/evaluate.py', 'evaluation/harness.py', 'evaluation/host_agent.py', 'evaluation/mini.yaml',
+                'evaluation/evaluate.py', 'evaluation/harness.py', 'evaluation/host_agent.py', 'evaluation/mini_agent.py', 'drawing/mini_agent.py',
+                'drawing/mini_session.py', 'evaluation/mini.yaml',
                 'drawing/judges.py', 'evaluation/benchmark.py', 'evaluation/run_benchmark.py', 'evaluation/suite.py')}}
     if args.dry_run:
         print(json.dumps(plan, indent=2))
@@ -114,7 +116,7 @@ def main():
     exits = {}
     for name, model in selected.items():
         command = [sys.executable, '-m', 'evaluation.evaluate', '--dataset', str(dataset_path(args.suite)),
-                   '--model', model, '--output', str(args.output/name), '--max-samples', str(args.max_samples),
+                   '--harness', args.harness, '--model', model, '--output', str(args.output/name), '--max-samples', str(args.max_samples),
                    '--max-tokens', str(args.max_tokens or 0), '--token-limit', str(args.token_limit or 0),
                    '--time-limit', str(args.time_limit or 0), '--max-turns', str(args.max_turns),
                    '--max-connections', str(args.max_samples), '--max-sandboxes', str(args.max_samples)]
