@@ -25,20 +25,23 @@ from drawing.config import IMAGE_SIZE, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
 from training.hpsv3 import REWARD_VERSION, normalized_reward
 from drawing.agent_contract import DRAWING_TOOLS_CONTRACT_VERSION
+from drawing.mini_agent import CONTRACT_VERSION as MINI_SWE_CONTRACT_VERSION
 from training.data import ROOT, digest
 from training.sft import batches
 from training.run_store import atomic_json, atomic_text, contents, recover_jsonl_tail, run_lock
 
-ALGORITHM = "tinker-cookbook-rlhf-v7"
+ALGORITHM = "tinker-cookbook-rlhf-v8"
 PROVENANCE_FILES = (
     "drawing/documentation.py", "drawing/config.py", "drawing/judges.py",
     "drawing/agent_contract.py", "drawing/eval_specs.py", "drawing/visual_judge.py",
+    "drawing/mini_agent.py", "drawing/mini_session.py", "drawing/mini_protocol.py",
+    "evaluation/agent_commands.py",
     "drawing/render_contract.py", "drawing/model_profiles.py", "drawing/vision.py",
     "training/run_store.py", "training/hpsv3.py", "training/hpsv3_server.py",
     "runtime/requirements.txt",
     "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/mini.yaml",
     "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
-    "evaluation/requirements.txt", "training/cookbook_env.py",
+    "evaluation/requirements.txt", "training/cookbook_env.py", "training/cookbook_mini.py",
     "training/cookbook_dataset.py", "training/score_rl.py", "training/grpo.py",
     "training/sft.py", "training/requirements.txt", "training/requirements-grpo.txt",
     "drawing/dataset_client.py", "drawing/tinker_client.py",
@@ -49,6 +52,8 @@ def load_run(args):
     specs = load_specs(args.dataset)
     if args.limit:
         specs = specs[:args.limit]
+    if args.harness == "mini-swe" and any(spec.get("kind") == "refusal" for spec in specs):
+        raise ValueError("mini-SWE GRPO requires drawing-only prompts; refusal examples have no positive reward")
     initial = json.loads(args.init_checkpoint.read_text())
     source = initial.get("config", {})
     checkpoint_model = source.get("model")
@@ -64,9 +69,16 @@ def load_run(args):
             or any(not isinstance(initial.get(key), str) or not initial[key].startswith("tinker://")
                    for key in ("state_path", "sampler_path"))):
         raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
+    recorded_contract = source.get("tool_contract")
+    if recorded_contract is not None and recorded_contract != args.harness:
+        raise ValueError(
+            f"SFT checkpoint uses {recorded_contract}, not {args.harness}; select the matching --harness")
     config = {
         "algorithm": ALGORITHM, "model": checkpoint_model,
-        "trajectory_contract_version": DRAWING_TOOLS_CONTRACT_VERSION,
+        "harness": args.harness,
+        "trajectory_contract_version": (
+            MINI_SWE_CONTRACT_VERSION if args.harness == "mini-swe"
+            else DRAWING_TOOLS_CONTRACT_VERSION),
         "tokenizer_revision": source.get("tokenizer_revision"),
         "renderer": source["renderer"], "image_size": IMAGE_SIZE,
         "lora_rank": source["lora_rank"],
@@ -104,7 +116,7 @@ def load_run(args):
 INHERITED_PARAMETERS = (
     "batch_size", "group_size", "learning_rate", "clip_epsilon", "kl_coef",
     "normalize_rewards", "temperature", "max_tokens", "max_length",
-    "max_samples", "seed",
+    "max_samples", "seed", "harness",
 )
 
 
@@ -227,6 +239,7 @@ def make_cookbook_config(args, specs, plan, total):
             hpsv3_center=plan["hpsv3_center"], hpsv3_scale=plan["hpsv3_scale"],
             model=plan["model"],
             renderer=plan["renderer"],
+            harness=plan.get("harness", "drawing-tools"),
         ),
         learning_rate=args.learning_rate,
         # Cookbook requires an integer ceiling. Without an explicit cap, use
@@ -307,6 +320,8 @@ def parser():
     p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     p.add_argument("--dataset", type=Path, default=ROOT / "datasets/parti-prompts/rl/prompts.jsonl")
     p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json")
+    p.add_argument("--harness", choices=("mini-swe", "drawing-tools"), default="mini-swe",
+                   help="Coding environment; must match the SFT checkpoint tool interface")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v4")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
