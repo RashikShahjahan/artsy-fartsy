@@ -45,6 +45,7 @@ OPTIONS = {
         "dry_run": ("--dry-run", "bool"),
     },
     "rl": {
+        "harness": ("--harness", "harness"),
         "dataset": ("--dataset", "file"),
         "init_checkpoint": ("--init-checkpoint", "file"),
         "continue_from": ("--continue-from", "directory"),
@@ -161,6 +162,10 @@ def _value(name, kind, value):
         return value
     if kind in ("file", "directory"):
         return _path(value, directory=kind == "directory")
+    if kind == "harness":
+        if value not in ("mini-swe", "drawing-tools"):
+            raise ValueError("Unknown RL harness")
+        return value
     if kind == "model":
         if not isinstance(value, str) or not MODEL.fullmatch(value) or value.startswith("-"):
             raise ValueError(f"Invalid {name} model ID.")
