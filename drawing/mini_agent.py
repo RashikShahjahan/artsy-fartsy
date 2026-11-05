@@ -42,6 +42,7 @@ def system_prompt(seed):
             'Do not add text to the image unless requested. Use bash tool calls; files persist, shell state does not. '
             'Submit with artsy-submit ENTRYPOINT, or echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT '
             'when the Python entrypoint is unambiguous. '
+            'Submission is mandatory; without a successful submission, the task is incomplete. '
             'View rendered images with artsy-preview ENTRYPOINT. '
             + OUTPUT_PATH_GUIDANCE + ' ' + DOCUMENTATION_LOCATION)
 
