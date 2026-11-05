@@ -49,6 +49,16 @@ class LauncherTests(unittest.TestCase):
                                            "dry_run": True}, "b" * 32)
             self.assertIn("--dataset", sft)
             self.assertIn("--dry-run", sft)
+            aware, _ = launch.command("sft", {
+                "dataset": "accepted.jsonl", "loss_policy": "error-aware",
+            }, "b" * 32)
+            self.assertEqual(aware[aware.index("--loss-policy") + 1], "error-aware")
+            for invalid in ("--help", "unknown", 123):
+                with self.subTest(loss_policy=invalid), self.assertRaisesRegex(
+                        ValueError, "Unknown SFT loss policy"):
+                    launch.command("sft", {
+                        "dataset": "accepted.jsonl", "loss_policy": invalid,
+                    }, "b" * 32)
             variant = "Qwen/Qwen3.6-35B-A3B:peft:262144"
             variant_command, _ = launch.command("sft", {
                 "dataset": "accepted.jsonl", "model": variant
