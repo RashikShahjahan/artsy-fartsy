@@ -111,7 +111,7 @@ def convert_mini_record(record, root, loss_policy):
                 if edits_python_source(command):
                     unverified_edits.append(assistant_index)
                     # A failed shell write may already have modified the workspace.
-                    if extra.get('returncode') != 0:
+                    if type(extra.get('returncode')) is int and extra['returncode'] != 0:
                         masked_edits.add(assistant_index)
                 for feedback in extra.get('previewEvents') or []:
                     # Only a renderer event tied to an actual source snapshot
