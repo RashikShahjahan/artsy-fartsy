@@ -491,3 +491,48 @@ rendering and SFT conversion passed, retaining all seven assistant actions. Usag
 `datasets/mini-swe-output-path-demo-2026-11-04/`, including `trajectory.md`, source,
 `sft-example.json`, raw trajectory, and final PNG. Human review is pending;
 no training was launched.
+## Experiment 6 — Error-aware SFT on cumulative mini-SWE edits
+
+- **Recorded:** 2026-11-05 (America/Toronto).
+- **Status:** Implementation on `experiment-6-error-aware-sft`; training **not launched**. Experiment 5 has no completed, reviewed mini-SWE training set in the tracked repository as of this entry.
+- **Question:** Does removing supervised loss on code edits implicated in observed execution failures improve final-image reliability or quality, while retaining learning from corrective edits?
+- **Hypothesis:** Baseline SFT rewards every executed bash action, including code subsequently shown to fail. A targeted loss mask could reduce imitation of those mistakes without discarding useful error/repair context.
+
+### Intervention
+
+`training.mini_data.convert_mini_record` adds `--loss-policy error-aware` for `mini-swe-bash-v1` demonstrations only. The baseline `final-write-final-preview-submit` policy is unchanged (all executed actions are supervised for mini-SWE). The new policy:
+
+1. Identifies unambiguous Python-source writes from shell redirection, Python file-writing APIs, patch/sed, or Python-file copy/move.
+2. Masks a source-writing assistant action when its shell command exits nonzero.
+3. On a source-hashed failed render event from `artsy-preview`, masks source-writing actions since the last successful source-hashed preview. Only the recorded render event—not an arbitrary nonzero shell result—can retrospectively implicate preceding edits.
+4. Keeps diagnostics, failed preview calls, later repair edits, and successful submission trainable; retains **all** previous assistant actions, tool output, and PNG previews as causal context.
+5. Does not mask visually poor but successfully rendered code, undetected edits, or ambiguous shell mutations; source attribution is conservative and may include some good edits in a failed interval.
+
+A distinct conversion version and loss-policy field in checkpoint manifests distinguish the experiment from the control. The Runs UI also exposes the policy.
+
+### Matched study protocol
+
+Use the **same human-approved mini-SWE JSONL**, Qwen3.5 4B base, LoRA rank 128, seed 42, one epoch, batch size 8, cosine LR schedule, initial LR 2e-4, and identical prompt distribution for both arms. Do not copy old drawing-tools demonstrations into this new mini-SWE-only treatment. Preflight both arms and record counts of supervised/masked actions and tokens:
+
+```bash
+# Point to the reviewed mini-SWE training export when available.
+export DATASET=/absolute/path/to/accepted.jsonl
+
+python -m training.sft --dataset "$DATASET" --model Qwen/Qwen3.5-4B --loss-policy final-write-final-preview-submit --check-batch
+python -m training.sft --dataset "$DATASET" --model Qwen/Qwen3.5-4B --loss-policy error-aware --check-batch
+
+# Train independent adapters using identical hyperparameters; do not reuse an optimizer state.
+python -m training.sft --dataset "$DATASET" --model Qwen/Qwen3.5-4B \
+  --loss-policy final-write-final-preview-submit --lora-rank 128 --batch-size 8 \
+  --epochs 1 --learning-rate 2e-4 --seed 42 \
+  --output-dir checkpoints/experiment6-control
+
+python -m training.sft --dataset "$DATASET" --model Qwen/Qwen3.5-4B \
+  --loss-policy error-aware --lora-rank 128 --batch-size 8 \
+  --epochs 1 --learning-rate 2e-4 --seed 42 \
+  --output-dir checkpoints/experiment6-error-aware
+```
+
+Evaluate both checkpoints using mini-SWE on the same original **163 held-out Parti prompts**, with matching inference settings/seeds. Primary measures: valid-submission/render rate and paired human image preference. Secondary measures: HPSv3 reward, correction rate, turns/tokens, and refusal/failure counts. Report treatment-mask coverage and any examples where good earlier edits were mistakenly masked. The restored 228 training prompts are not held out. GRPO follow-up can be a separate matched second stage after SFT quality is measured.
+
+**Launch gate:** An approved dataset and accessible Tinker/Docker runtime are required; these commands have not been executed.
