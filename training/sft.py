@@ -151,7 +151,16 @@ def _train_locked(args, data: list, manifest: dict):
     total_steps = math.ceil(len(data) / args.batch_size) * args.epochs
     if args.max_steps != -1:
         total_steps = min(total_steps, args.max_steps)
+    # Save the actual SFT tool contract so RL cannot silently switch the
+    # interface when it loads these weights. Mixed/legacy bash datasets are
+    # not equivalent to the mini-SWE editing harness.
+    records = manifest.get("records", len(data))
+    tool_contract = (
+        "mini-swe" if manifest.get("mini_swe_trajectories", 0) == records
+        else "drawing-tools" if manifest.get("drawing_tool_trajectories", 0) == records
+        else "mixed-or-legacy")
     config = {"dataset_sha256": manifest["dataset_sha256"], "api_doc_sha256": manifest["api_doc_sha256"],
+              "tool_contract": tool_contract,
               "conversion": manifest["conversion"], "renderer": renderer_for_model(args.model), "input_mode": manifest["input_mode"],
               "model": args.model, "tokenizer_revision": resolve_model(args.model)["revision"],
               "processor_revision": resolve_model(args.model)["revision"],
