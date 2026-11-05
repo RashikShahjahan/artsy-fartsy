@@ -47,6 +47,33 @@ PROVENANCE_FILES = (
     "drawing/dataset_client.py", "drawing/tinker_client.py",
 )
 
+def checkpoint_tool_contract(path: Path, source: dict) -> str | None:
+    """Recover the tool contract for checkpoints created before SFT tagged it.
+
+    Older SFT manifests retained the number of mini-SWE records, even though
+    their final.json lacked an explicit tool_contract field.
+    """
+    tagged = source.get("tool_contract")
+    if tagged is not None:
+        return tagged
+    manifest_file = path.parent / "training-manifest.json"
+    if not manifest_file.is_file():
+        return None
+    manifest = json.loads(manifest_file.read_text())
+    if manifest.get("config") != source:
+        raise ValueError("SFT manifest and checkpoint configuration do not match")
+    total = manifest.get("records")
+    mini = manifest.get("mini_swe_trajectories")
+    if type(total) is not int or total < 1 or type(mini) is not int:
+        return None
+    if mini == total:
+        return "mini-swe"
+    if mini == 0 and manifest.get("drawing_tool_trajectories") == total:
+        return "drawing-tools"
+    # A checkpoint trained on heterogeneous or historical bash demonstrations
+    # must not be assumed compatible with the new mini-SWE tool interface.
+    return "mixed-or-legacy"
+
 
 def load_run(args):
     specs = load_specs(args.dataset)
@@ -69,13 +96,13 @@ def load_run(args):
             or any(not isinstance(initial.get(key), str) or not initial[key].startswith("tinker://")
                    for key in ("state_path", "sampler_path"))):
         raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
-    recorded_contract = source.get("tool_contract")
+    recorded_contract = checkpoint_tool_contract(args.init_checkpoint, source)
     if recorded_contract is not None and recorded_contract != args.harness:
         raise ValueError(
             f"SFT checkpoint uses {recorded_contract}, not {args.harness}; select the matching --harness")
     config = {
         "algorithm": ALGORITHM, "model": checkpoint_model,
-        "harness": args.harness,
+        "harness": args.harness, "checkpoint_tool_contract": recorded_contract,
         "trajectory_contract_version": (
             MINI_SWE_CONTRACT_VERSION if args.harness == "mini-swe"
             else DRAWING_TOOLS_CONTRACT_VERSION),
