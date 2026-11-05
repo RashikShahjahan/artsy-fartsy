@@ -1,30 +1,59 @@
 # Artsy training architecture
 
-Training proceeds through **SFT → RL**. GRPO defaults to the latest completed SFT checkpoint, `checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json` (`Qwen/Qwen3.8-27B`), and derives its model and renderer from the checkpoint. Inspect remains the independent evaluation harness.
+Artsy trains drawing agents with **SFT → GRPO**, while Inspect remains the
+independent evaluation harness. Training initializes from an SFT state and
+retains the frozen SFT sampler for optional reference-policy KL regularization.
 
-## SFT: learn the agent workflow
+## SFT: learn the mini-SWE drawing workflow
 
-Supervise complete drawing trajectories, including source-writing tool calls, previews, repairs and submission. `training.sft` exports state and sampler paths in the selected output directory's `final.json`. Current SFT and RL prompt assignments come from `datasets/parti-prompts/`; keep its 391 evaluation prompts out of training.
+The current SFT dataset records actual mini-SWE-agent 2.2.3 trajectories:
+a system prompt, a drawing request, `bash(command)` edits in a persistent
+workspace, optional PNG previews via `artsy-preview`, and explicit submission
+via `artsy-submit ENTRYPOINT` or native completion. Multi-file workspaces are
+serialized as validated Python bundles before final rendering. The final
+checkpoint includes `state_path`, `sampler_path`, and, on newly produced SFT
+runs, a `config.tool_contract` identifying `mini-swe` or `drawing-tools`.
 
-## RL: improve adherence and visual quality
+## GRPO: improve final-image preference
 
-`training.grpo` initializes from the selected SFT state and keeps that SFT sampler as its frozen reference. It optimizes complete drawing-tool trajectories, including optional visual repairs. RL uses the shared `update_drawing`, `read_drawing`, `preview_drawing`, `submit_drawing`, and `refuse_drawing` schemas and drawing prompt from `drawing/agent_contract.py`. Tools run sequentially; successful submission or refusal ends the episode and prevents later tool mutations. Model arguments enter fixed Docker commands as stdin, without a model-facing shell.
+`training.grpo` defaults to `--harness mini-swe`. Cookbook still controls
+sampling, PPO updates, KL, grouped advantages, and checkpoints. Its model-facing
+tool is now the same `bash(command)` schema used for SFT and evaluation, with
+the same mini system prompt and a maximum of 12 model turns per episode.
 
-One vision judge grades only the trusted final render using the absolute rubric shared with the latest paired evals in `drawing/visual_judge.py`:
+Each independent rollout has its own network-disabled Docker workspace.
+The agent can create and modify Python modules and run ordinary shell commands.
+`artsy-preview` returns execution feedback plus a native model-visible PNG;
+`artsy-submit` freezes a validated snapshot of the submitted Python modules.
+A successful explicit submission terminates the episode. Without submission,
+no workspace code is eligible for positive reward.
 
-- **Adherence (0–4):** from no meaningful requested content to all material constraints fulfilled.
-- **Visual quality (0–4):** from unusable/blank to exceptionally polished and visually effective, judged within the requested style. Simple drawings can score highly.
+Final scoring runs that snapshot as a bundled Python source in a **fresh**,
+network-isolated Docker container. Only the independently rendered valid
+1920×1200 PNG reaches HPSv3. The configured scorer returns a raw score and a
+normalized `preference` reward using
+`sigmoid((hpsv3_score - ARTSY_HPSV3_CENTER) / ARTSY_HPSV3_SCALE)`.
+Invalid renders, missing submissions, refusals and budget-limit terminations
+earn zero. Source, final PNG, judge response, reward and tool-call history are
+saved per rollout. Group rewards are mean-centered by Cookbook, without
+standard-deviation scaling.
 
-The judge returns both integer scores and concrete comments in one response. RL uses absolute judgments per output, rather than model comparisons or position-dependent preferences. Terminal reward is `(adherence_score + visual_quality_score) / 8`. Artifacts retain the raw judgment, normalized `adherence` and `visual_quality` components, and the final reward.
+The historical `--harness drawing-tools` option retains the older named tools
+(`update_drawing`, `read_drawing`, `preview_drawing`, `submit_drawing`,
+`refuse_drawing`) for matching SFT checkpoints. A mismatched *declared*
+checkpoint tool contract is rejected. Checkpoints created before this
+metadata was added must be checked manually against their training dataset.
 
-Missing submissions, invalid renders, refusals, and budget-limit terminations earn zero. The previous code-safety, image-safety, and refusal rewards are removed from RL. Prefer drawing-only datasets: refusal examples from older datasets cannot earn positive reward under this objective. Independent evaluation still supports its safety and refusal metrics.
-
-The final source is rerendered in a fresh Docker container without network access. Agent previews cannot substitute for the final image. Only a successful explicit submission reaches rendering and judging. Configure the single judge through `ARTSY_CORRECTNESS_JUDGE_*`; the policy and judge use separate clients. Invalid, truncated, or failed judge responses stop scoring instead of creating zero rewards.
-
-`compute_group_rewards` combines the normalized components and adjusts terminal rewards. Cookbook subtracts the group mean without dividing by standard deviation. There is no efficiency or intermediate-render reward. Optional KL regularization uses the initial SFT sampler. The algorithm version is `tinker-cookbook-rlhf-v6` and rollout artifacts record drawing-tool trajectory contract v3; older RL runs cannot resume or continue under this setup.
+The updated algorithm is `tinker-cookbook-rlhf-v8`: mini-SWE rollouts record
+trajectory contract v4; legacy drawing-tool rollouts retain v3. Older GRPO
+runs are not resumable or continuable across this implementation change,
+because optimizer and trajectory provenance must remain pinned.
 
 ## Independent validation
 
-Keep held-out eval prompts out of SFT and RL training. Track independent human visual preference, adherence, visual quality, render validity, safety, and refusal behavior against the SFT checkpoint. Reward gains still need held-out evaluation to detect judge overfitting.
-
-Before large runs, validate checkpoint compatibility and reward calculation offline, then run small live Docker/RL smoke tests.
+Keep held-out evaluation prompts separate from SFT and RL prompts.
+Compare checkpoints with Inspect using the **matching** harness, prompt set,
+seed, and budgets; track human visual preference, adherence, render validity,
+safety, and refusals. Run a one-update Docker/Tinker pilot before a longer
+GRPO run to validate the model's bash calls, preview images, submission
+snapshots, and terminal HPSv3 reward.
