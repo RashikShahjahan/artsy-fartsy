@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from evaluation import judge_pairs, compare_pipeline
 
@@ -91,7 +91,7 @@ class FourModelTests(unittest.TestCase):
 
     def test_pipeline_starts_four_model_judging_after_evals_finish(self):
         args = argparse.Namespace(run=[f'{role}={path}' for role, path in self.runs.items()],
-                                  output=self.root / 'pipeline')
+                                  output=self.root / 'pipeline', judge='llm')
         with patch.object(compare_pipeline.subprocess, 'run') as launch:
             launch.return_value.returncode = 0
             compare_pipeline.run(args)
@@ -101,6 +101,22 @@ class FourModelTests(unittest.TestCase):
         state = json.loads((args.output / 'pipeline.json').read_text())
         self.assertEqual(state['status'], 'complete')
         self.assertEqual(list(state['completed_prompts'].values()), [1, 1, 1, 1])
+
+    def test_truncated_judge_reply_is_rejected(self):
+        class Judge:
+            async def complete(self, request, *args, **kwargs):
+                return {'text': '{}', 'finishReason': 'length'}
+
+            async def aclose(self):
+                pass
+
+        args = argparse.Namespace(base=None, sft=None, run=[f'{k}={v}' for k, v in self.runs.items()],
+                                  output=self.root / 'truncated', concurrency=1, limit=None, judge='llm')
+        with patch.object(judge_pairs, 'chat_client', return_value=Judge()), \
+                patch.object(judge_pairs.asyncio, 'sleep', new=AsyncMock()), patch('builtins.print'):
+            with self.assertRaises(SystemExit):
+                asyncio.run(judge_pairs.main(args))
+        self.assertFalse((args.output / 'records/prompt.json').exists())
 
 
 if __name__ == '__main__':

@@ -17,9 +17,12 @@ class PromptViewerTests(unittest.TestCase):
             handler.respond = lambda code, body, kind: responses.append(body)
             handler.do_GET()
             self.assertIn('Validated evaluation prompts', responses[0])
-            self.assertIn('Dataset already validated; optional review', responses[0])
+            self.assertIn('"validated": true', responses[0])
             self.assertNotIn('Evaluation remains blocked', responses[0])
             self.assertIn('"review": {}', responses[0])
+            handler.path = '/assets/prompt-review.js'
+            handler.do_GET()
+            self.assertIn('Dataset already validated; optional review', responses[1])
 
     def test_custom_prompt_file_loads_without_sft_candidate_conversion(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -45,9 +48,11 @@ class PromptViewerTests(unittest.TestCase):
             self.assertIn('1 benign boundary', responses[0][1])
             self.assertNotIn('Draw a red circle.', responses[0][1])
             self.assertNotIn('<option>drawing</option>', responses[0][1])
-            self.assertIn('Manual safety inspector', responses[0][1])
-            self.assertIn('a!==data.items.length', responses[0][1])
+            self.assertIn('Safety prompt review', responses[0][1])
             self.assertNotIn('__OVERVIEW__', responses[0][1])
+            handler.path = '/assets/prompt-review.js'
+            handler.do_GET()
+            self.assertIn('data.items.length-approved-rejected', responses[1][1])
             review = {'dataset_sha256': manifest['sha256'], 'reviewer': 'Reviewer', 'approved': True,
                       'decisions': {r['id']: {'decision': 'approved'} for r in rows}}
             prompt_review.validate_review(review, manifest, loaded, require_approval=True)

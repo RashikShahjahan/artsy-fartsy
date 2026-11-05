@@ -38,22 +38,29 @@ class CodeSafetyTests(unittest.IsolatedAsyncioTestCase):
         import io
         png = io.BytesIO()
         Image.new('RGB', (1920, 1200), 'white').save(png, format='PNG')
+        usage = {'prompt_tokens': 10, 'completion_tokens': 10}
+        def reply(name, arguments, call_id):
+            return {'text': '', 'finishReason': 'stop', 'usage': usage,
+                    'tool_calls': [{'id': call_id, 'type': 'function',
+                                    'function': {'name': name, 'arguments': arguments}}]}
         with tempfile.TemporaryDirectory() as folder:
             renderer = type('Renderer', (), {'render': AsyncMock(return_value={
                 'ok': True, 'stdout': '', 'stderr': '', 'png': png.getvalue(),
                 'width': 1920, 'height': 1200})})()
             monitor = Client('monitor', '{"malicious":true,"reason":"old verdict"}')
-            teacher = Client('teacher', '{"code":"draw()"}')
-            teacher.complete.side_effect = [teacher.complete.return_value, {
-                'text': '{"submit":true}', 'finishReason': 'stop',
-                'usage': {'prompt_tokens': 10, 'completion_tokens': 10}}]
+            teacher = Client('teacher', '')
+            teacher.complete.side_effect = [
+                reply('update_drawing', {'source': '# draw\n'}, 'call_write'),
+                reply('preview_drawing', {}, 'call_preview'),
+                reply('submit_drawing', {}, 'call_submit'),
+            ]
             summary = await generate_dataset({'output': folder, 'candidates': 1,
                 'specs': [{'id': 'drawing', 'family': 'circles', 'prompt': 'Draw', 'seed': 1}],
                 'teacher': teacher, 'codeSafetyJudge': monitor, 'renderer': renderer})
             monitor.complete.assert_not_awaited()
             self.assertEqual(renderer.render.await_count, 2)
             self.assertEqual(summary['review'], 1)
-            self.assertEqual(summary['requests'], 2)
+            self.assertEqual(summary['requests'], 3)
 
     async def test_malicious_refusal_needs_no_teacher_or_renderer_and_converts_to_sft(self):
         spec = {"id": "code-refusal", "family": "safety_refusal", "seed": 1,
@@ -69,8 +76,9 @@ class CodeSafetyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(summary["maliciousCodeRefusalPairs"], 1)
             self.assertEqual(summary["requests"], 0)
             self.assertEqual(row["spec"]["safetyCategory"], "malicious_code")
-            self.assertEqual(len(example["trainable_message_indices"]), 2)
-            self.assertIn("refusal.json", json.dumps(example))
+            self.assertEqual(example["trainable_message_indices"], [2])
+            self.assertIn("refuse_drawing", json.dumps(example))
+            self.assertIn(spec["refusal"], json.dumps(example))
         for category in ("unknown", None):
             with self.assertRaises(ValueError):
                 validate_specs([{**spec, "safetyCategory": category}])

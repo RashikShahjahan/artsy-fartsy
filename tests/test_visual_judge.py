@@ -1,14 +1,10 @@
 """Final-image scoring contract, independent of hosted judge services."""
 
 import json
-from pathlib import Path
 import unittest
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 from drawing.visual_judge import VISUAL_RUBRIC, parse_visual_judgment, visual_judge_prompt
 from evaluation.judge_pairs import RUBRIC
-from training.cookbook_env import DockerSession
 
 
 class VisualJudgeTests(unittest.TestCase):
@@ -34,13 +30,3 @@ class VisualJudgeTests(unittest.TestCase):
                 parse_visual_judgment(json.dumps({**valid, 'comments': value}))
         with self.assertRaises(ValueError):
             parse_visual_judgment('{"score":4,"reason":"Old adherence schema"}')
-
-
-class TruncationTests(unittest.IsolatedAsyncioTestCase):
-    async def test_truncated_valid_json_is_rejected(self):
-        client = SimpleNamespace(complete=AsyncMock(return_value={
-            'text': '{"adherence_score":4,"visual_quality_score":4,"comments":"Evidence"}',
-            'finishReason': 'length'}))
-        session = DockerSession({}, Path('/tmp'), {'visual': client})
-        with self.assertRaisesRegex(ValueError, 'truncated'):
-            await session._judge('visual', 'Grade', parse_visual_judgment, b'png')
