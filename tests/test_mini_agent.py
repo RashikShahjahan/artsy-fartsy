@@ -114,6 +114,75 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ValueError, 'snapshot mismatch'):
                 convert_record(tampered, Path(root))
 
+    async def test_experiment6_masks_observed_buggy_source_but_preserves_repair(self):
+        from training.mini_data import edits_python_source
+
+        self.assertTrue(edits_python_source("cat > /workspace/program.py <<'EOF'\ncode\nEOF"))
+        self.assertTrue(edits_python_source("python -c \"from pathlib import Path; Path('scene.py').write_text('x')\""))
+        self.assertTrue(edits_python_source("sed -i s/red/blue/ scene.py"))
+        self.assertFalse(edits_python_source("rg 'set_source_rgb' /opt/artsy/pycairo-api.pyi"))
+        self.assertFalse(edits_python_source("python -m py_compile scene.py"))
+        self.assertFalse(edits_python_source("artsy-preview scene.py"))
+
+        broken = 'import cairo\nraise RuntimeError("broken source")\n'
+        commands = [
+            "cat > /workspace/program.py <<'EOF'\n" + broken + "EOF",
+            "artsy-preview program.py",
+            "python -c 'raise RuntimeError(\"diagnostic failure\")'",
+            "cat > /workspace/program.py <<'EOF'\n" + CODE + "EOF",
+            "artsy-preview program.py",
+            "artsy-submit program.py",
+        ]
+        with tempfile.TemporaryDirectory() as root:
+            teacher = Teacher(commands)
+            with patch('drawing.mini_dataset.Workspace', TestWorkspace):
+                record = await candidate(
+                    {'output': root, 'teacher': teacher, 'renderer': LocalRenderer()},
+                    {'id': 'experiment6', 'prompt': 'Draw a red background', 'seed': 7},
+                    0, api_documentation())
+            self.assertEqual(record['status'], 'review', record.get('reason'))
+            tool_results = [m for m in record['miniTrajectory']['messages'] if m['role'] == 'tool']
+            self.assertTrue(any(p.get('ok') is False and p.get('sourceHash')
+                                for p in tool_results[1]['extra']['previewEvents']))
+            self.assertEqual(tool_results[2]['extra']['returncode'], 1)
+            baseline = convert_record(record, Path(root))
+            treatment = convert_record(record, Path(root), loss_policy='error-aware')
+            self.assertEqual(baseline['messages'], treatment['messages'])
+            self.assertEqual(baseline['trainable_message_indices'], [2, 4, 6, 8, 10, 12])
+            self.assertEqual(treatment['trainable_message_indices'], [4, 6, 8, 10, 12])
+            from training.data import ERROR_AWARE_CONVERSION, CONVERSION, load_examples
+            dataset = Path(root) / 'accepted.jsonl'
+            dataset.write_text(json.dumps(record) + '\n')
+            _, control_manifest = load_examples(dataset)
+            _, masked_manifest = load_examples(dataset, loss_policy='error-aware')
+            self.assertEqual(control_manifest['conversion'], CONVERSION)
+            self.assertEqual(masked_manifest['conversion'], ERROR_AWARE_CONVERSION)
+            self.assertEqual(control_manifest['supervised_actions'], 6)
+            self.assertEqual(masked_manifest['supervised_actions'], 5)
+            self.assertIn('broken source', json.dumps(treatment['messages']))
+            self.assertIn('diagnostic failure', json.dumps(treatment['messages']))
+            self.assertIn('artsy-submit', json.dumps(
+                [treatment['messages'][i] for i in treatment['trainable_message_indices']]))
+            self.assertEqual(
+                convert_record(record, Path(root), loss_policy='assistant-only')['trainable_message_indices'],
+                baseline['trainable_message_indices'])
+
+    async def test_experiment6_does_not_blame_code_for_preview_usage_error(self):
+        commands = [
+            "cat > /workspace/program.py <<'EOF'\n" + CODE + "EOF",
+            "artsy-preview does-not-exist.py",
+            "artsy-submit program.py",
+        ]
+        with tempfile.TemporaryDirectory() as root:
+            with patch('drawing.mini_dataset.Workspace', TestWorkspace):
+                record = await candidate(
+                    {'output': root, 'teacher': Teacher(commands), 'renderer': LocalRenderer()},
+                    {'id': 'preview-usage', 'prompt': 'Draw a red background', 'seed': 7},
+                    0, api_documentation())
+            self.assertEqual(record['status'], 'review', record.get('reason'))
+            treatment = convert_record(record, Path(root), loss_policy='error-aware')
+            self.assertEqual(treatment['trainable_message_indices'], [2, 4, 6])
+
     async def test_arbitrary_entrypoint_and_helper_module_with_optional_previews(self):
         from drawing.mini_agent import system_prompt
         self.assertTrue(system_prompt(7).startswith('You are a helpful assistant'))

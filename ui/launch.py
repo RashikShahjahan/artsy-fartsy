@@ -40,6 +40,7 @@ OPTIONS = {
         "batch_size": ("--batch-size", "positive"),
         "learning_rate": ("--learning-rate", "rate"),
         "lora_rank": ("--lora-rank", "positive"),
+        "loss_policy": ("--loss-policy", "loss_policy"),
         "save_every": ("--save-every", "positive"),
         "allow_unreviewed": ("--allow-unreviewed", "bool"),
         "dry_run": ("--dry-run", "bool"),
@@ -165,6 +166,11 @@ def _value(name, kind, value):
     if kind == "harness":
         if value not in ("mini-swe", "drawing-tools"):
             raise ValueError("Unknown RL harness")
+        return value
+    if kind == "loss_policy":
+        if type(value) is not str or value not in (
+                "final-write-final-preview-submit", "assistant-only", "error-aware"):
+            raise ValueError("Unknown SFT loss policy")
         return value
     if kind == "model":
         if not isinstance(value, str) or not MODEL.fullmatch(value) or value.startswith("-"):
