@@ -501,6 +501,7 @@ def load_examples(path: Path, loss_policy: str = LOSS_POLICY) -> tuple[list[dict
         "loss_policy": loss_policy,
         "editing_supervision": "all executed actions for cumulative mini-SWE edits",
         "mini_swe_trajectories": sum(r.get('trajectoryFormat') == 'mini-swe-bash-v1' for r in records),
+        "drawing_tool_trajectories": sum(r.get('trajectoryFormat') == 'drawing-tools-v1' for r in records),
         "masked_actions": sum(masked),
         "trajectories_with_masked_actions": sum(n > 0 for n in masked),
         "supervised_actions": sum(len(e["trainable_message_indices"]) for e in examples),

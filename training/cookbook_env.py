@@ -24,7 +24,7 @@ from PIL import Image
 from drawing.config import MODEL_ID, MODEL_CONTEXT_WINDOW
 from drawing.model_profiles import resolve_model
 from drawing.vision import prepare_image
-from drawing.agent_contract import (DRAWING_TOOLS, DRAWING_TOOLS_CONTRACT_VERSION,
+from drawing.agent_contract import (DRAWING_TOOLS, DRAWING_TOOLS_CONTRACT_VERSION, SFT_MAX_TURNS,
                                     drawing_tools_prompt, host_user_prompt, turn_countdown)
 from training.hpsv3 import REWARD_VERSION
 from training.data import ROOT
@@ -199,6 +199,7 @@ class DockerSession:
         self._owns_slot = False
         self._resources: RolloutResources | None = None
         self.submitted = False
+        self.trajectory_contract_version = DRAWING_TOOLS_CONTRACT_VERSION
         self.result = None
         self.png = None
 
@@ -344,7 +345,7 @@ class DockerSession:
         result = {"prompt": self.spec["prompt"], "seed": self.spec["seed"],
                   "outcome": "incomplete", "agent": "artsy-cookbook",
                   "toolCalls": self.tool_calls, "previewAttempts": len(self.previews),
-                  "trajectoryContractVersion": DRAWING_TOOLS_CONTRACT_VERSION,
+                  "trajectoryContractVersion": self.trajectory_contract_version,
                   "scores": {"render_valid": 0.0, "preference": 0.0},
                   "judgeVersion": REWARD_VERSION,
                   "refused": refusal is not None, "refusalCorrect": False,
@@ -446,12 +447,15 @@ class ArtsyGroupBuilder:
 
     def __init__(self, spec: dict, group_size: int, step: int, root: Path, judge, max_tokens: int,
                  max_length: int, normalize_rewards: bool, model=MODEL_ID, renderer=RENDERER,
-                 revision=None):
+                 revision=None, harness="drawing-tools"):
         self.spec, self.group_size, self.step = spec, group_size, step
         self.root, self.judge = root, judge
         self.max_tokens, self.max_length = max_tokens, max_length
         self.normalize_rewards = normalize_rewards
         self.model, self.renderer, self.revision = model, renderer, revision
+        if harness not in ("mini-swe", "drawing-tools"):
+            raise ValueError("Unknown GRPO harness")
+        self.harness = harness
         self.sessions: list[DockerSession] = []
         self._owns_group_slot = False
         self._resources: RolloutResources | None = None
@@ -486,6 +490,25 @@ class ArtsyGroupBuilder:
                     self._countdown()
                 return result
 
+        class MiniMessageEnv(AgentToolMessageEnv):
+            """Match mini-SWE's single-bash action protocol without legacy countdowns."""
+
+            async def step(self, message):
+                calls = message.get("tool_calls") or []
+                malformed = len(calls) != 1 or bool(message.get("unparsed_tool_calls"))
+                if malformed:
+                    # Mini-SWE sends a user correction rather than executing
+                    # malformed replies. Never execute multiple commands per turn.
+                    clean = {k: v for k, v in message.items()
+                             if k not in ("tool_calls", "unparsed_tool_calls")}
+                    if self._turn_count + 1 < self.max_turns:
+                        self._turn_count += 1
+                        self.history.extend([clean, {"role": "user", "content":
+                            "Use exactly one bash tool call per response."}])
+                        return MessageStepResult(0.0, False, self.history)
+                    message = clean
+                return await super().step(message)
+
         # Admit whole groups so partially started groups cannot exhaust slots
         # while waiting for trajectories needed before group cleanup.
         resources = _resources
@@ -497,25 +520,36 @@ class ArtsyGroupBuilder:
         self._resources = resources
         self._owns_group_slot = True
         try:
-            return self._make_environments(DrawingMessageEnv, EnvFromMessageEnv, RolloutLimits)
+            return self._make_environments(
+                MiniMessageEnv if self.harness == "mini-swe" else DrawingMessageEnv,
+                EnvFromMessageEnv, RolloutLimits)
         except BaseException:
             await self.cleanup()
             raise
 
     def _make_environments(self, DrawingMessageEnv, EnvFromMessageEnv, RolloutLimits):
         environments = []
+        if self.harness == "mini-swe":
+            from training.cookbook_mini import MiniDockerSession, MiniBashTool, mini_initial_messages
         for _ in range(self.group_size):
-            session = DockerSession(self.spec,
+            session_class = MiniDockerSession if self.harness == "mini-swe" else DockerSession
+            session = session_class(self.spec,
                 self.root / f"step-{self.step:06d}" / self.spec["id"] / uuid4().hex,
                 self.judge, self.model, self.renderer, self.max_length, self.revision)
             session._resources = self._resources
             self.sessions.append(session)
 
-            tools = [DrawingTool(session, tool["function"]) for tool in DRAWING_TOOLS]
-            messages = initial_messages(self.spec, [tool.to_spec() for tool in tools], self.model,
-                                        self.renderer, self.max_length, self.revision)
+            if self.harness == "mini-swe":
+                tools = [MiniBashTool(session)]
+                messages = mini_initial_messages(
+                    self.spec, self.model, self.renderer, self.max_length, self.revision)
+            else:
+                tools = [DrawingTool(session, tool["function"]) for tool in DRAWING_TOOLS]
+                messages = initial_messages(self.spec, [tool.to_spec() for tool in tools], self.model,
+                                            self.renderer, self.max_length, self.revision)
             agent = DrawingMessageEnv(tools=tools, initial_messages=messages,
-                                      max_turns=agent_settings()["agent"]["step_limit"],
+                                      max_turns=(SFT_MAX_TURNS if self.harness == "mini-swe"
+                                                 else agent_settings()["agent"]["step_limit"]),
                                       reward_fn=session.grade,
                                       tool_execution="sequential",
                                       failed_parse_reward=0.0,
@@ -531,7 +565,8 @@ class ArtsyGroupBuilder:
                 max_generation_tokens=1,
                 context_overflow_reward=0.0,
                 rollout_limits=RolloutLimits(
-                    max_turns=agent_settings()["agent"]["step_limit"],
+                    max_turns=(SFT_MAX_TURNS if self.harness == "mini-swe"
+                               else agent_settings()["agent"]["step_limit"]),
                     max_trajectory_tokens=self.max_length,
                     max_turn_tokens=self.max_tokens)))
         return environments

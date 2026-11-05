@@ -27,6 +27,7 @@ const fields = {
     ["dry_run", "Dry run (no model calls)", "bool", false, "", "", true],
   ],
   rl: [
+    ["harness", "Rollout harness", "select", "mini-swe", "", "Match the harness used to train the SFT checkpoint.", true, ["mini-swe", "drawing-tools"]],
     ["dataset", "RL prompt dataset", "text", "datasets/grpo-v2/prompts.jsonl", "", ""],
     ["init_checkpoint", "Initial SFT checkpoint", "catalog", "", "checkpoints/run/final.json", "Choose a completed SFT checkpoint; GRPO uses its optimizer and sampler state."],
     ["continue_from", "Continue from previous RL run (optional)", "text", "", "checkpoints/previous-run", "Forks an existing completed run with optimizer state.", true],
@@ -135,6 +136,19 @@ function makeField(spec, value) {
       updateContinuation();
     });
     manual.addEventListener("input", () => { saveFields(); updateContinuation(); });
+  } else if (type === "select") {
+    const select = document.createElement("select");
+    select.id = input.id;
+    select.dataset.option = name;
+    for (const item of spec[7]) {
+      const option = document.createElement("option");
+      option.value = item;
+      option.textContent = item === "mini-swe" ? "mini-SWE (bash)" : "Historical drawing tools";
+      select.append(option);
+    }
+    select.value = value || defaultValue;
+    wrapper.append(labelEl, select);
+    select.addEventListener("change", () => { saveFields(); updateContinuation(); });
   } else if (type === "bool") {
     input.type = "checkbox";
     input.checked = Boolean(value);
@@ -153,7 +167,7 @@ function makeField(spec, value) {
     note.textContent = help;
     wrapper.append(note);
   }
-  if (type !== "catalog") {
+  if (type !== "catalog" && type !== "select") {
     input.addEventListener("input", () => { saveFields(); updateContinuation(); });
     input.addEventListener("change", () => { saveFields(); updateContinuation(); });
   }
@@ -166,11 +180,11 @@ function updateContinuation() {
   for (const wrapper of document.querySelectorAll("[data-field]")) {
     if (!allowed.has(wrapper.dataset.field)) {
       wrapper.hidden = continuing;
-      wrapper.querySelector("input").disabled = continuing;
+      wrapper.querySelector("input, select").disabled = continuing;
     }
     if (wrapper.dataset.field === "additional_steps") {
       wrapper.hidden = !continuing;
-      wrapper.querySelector("input").disabled = !continuing;
+      wrapper.querySelector("input, select").disabled = !continuing;
       wrapper.querySelector("input").required = continuing;
     }
   }

@@ -25,30 +25,63 @@ from drawing.config import IMAGE_SIZE, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
 from training.hpsv3 import REWARD_VERSION, normalized_reward
 from drawing.agent_contract import DRAWING_TOOLS_CONTRACT_VERSION
+from drawing.mini_agent import CONTRACT_VERSION as MINI_SWE_CONTRACT_VERSION
 from training.data import ROOT, digest
 from training.sft import batches
 from training.run_store import atomic_json, atomic_text, contents, recover_jsonl_tail, run_lock
 
-ALGORITHM = "tinker-cookbook-rlhf-v7"
+ALGORITHM = "tinker-cookbook-rlhf-v8"
 PROVENANCE_FILES = (
     "drawing/documentation.py", "drawing/config.py", "drawing/judges.py",
     "drawing/agent_contract.py", "drawing/eval_specs.py", "drawing/visual_judge.py",
+    "drawing/mini_agent.py", "drawing/mini_session.py", "drawing/mini_protocol.py",
+    "evaluation/agent_commands.py",
     "drawing/render_contract.py", "drawing/model_profiles.py", "drawing/vision.py",
     "training/run_store.py", "training/hpsv3.py", "training/hpsv3_server.py",
     "runtime/requirements.txt",
     "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/mini.yaml",
     "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
-    "evaluation/requirements.txt", "training/cookbook_env.py",
+    "evaluation/requirements.txt", "training/cookbook_env.py", "training/cookbook_mini.py",
     "training/cookbook_dataset.py", "training/score_rl.py", "training/grpo.py",
     "training/sft.py", "training/requirements.txt", "training/requirements-grpo.txt",
     "drawing/dataset_client.py", "drawing/tinker_client.py",
 )
+
+def checkpoint_tool_contract(path: Path, source: dict) -> str | None:
+    """Recover the tool contract for checkpoints created before SFT tagged it.
+
+    Older SFT manifests retained the number of mini-SWE records, even though
+    their final.json lacked an explicit tool_contract field.
+    """
+    tagged = source.get("tool_contract")
+    if tagged is not None:
+        return tagged
+    manifest_file = path.parent / "training-manifest.json"
+    if not manifest_file.is_file():
+        return None
+    manifest = json.loads(manifest_file.read_text())
+    if manifest.get("config") != source:
+        raise ValueError("SFT manifest and checkpoint configuration do not match")
+    total = manifest.get("records")
+    mini = manifest.get("mini_swe_trajectories")
+    if type(total) is not int or total < 1 or type(mini) is not int:
+        return None
+    if mini == total:
+        return "mini-swe"
+    if mini == 0 and manifest.get("drawing_tool_trajectories") in (None, total):
+        # Pre-metadata SFT manifests did not record named-tool counts.
+        return "drawing-tools"
+    # A checkpoint trained on heterogeneous or historical bash demonstrations
+    # must not be assumed compatible with the new mini-SWE tool interface.
+    return "mixed-or-legacy"
 
 
 def load_run(args):
     specs = load_specs(args.dataset)
     if args.limit:
         specs = specs[:args.limit]
+    if args.harness == "mini-swe" and any(spec.get("kind") == "refusal" for spec in specs):
+        raise ValueError("mini-SWE GRPO requires drawing-only prompts; refusal examples have no positive reward")
     initial = json.loads(args.init_checkpoint.read_text())
     source = initial.get("config", {})
     checkpoint_model = source.get("model")
@@ -64,9 +97,19 @@ def load_run(args):
             or any(not isinstance(initial.get(key), str) or not initial[key].startswith("tinker://")
                    for key in ("state_path", "sampler_path"))):
         raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
+    recorded_contract = checkpoint_tool_contract(args.init_checkpoint, source)
+    if recorded_contract is None:
+        print("Warning: SFT tool contract is unknown; verify its training dataset matches "
+              f"--harness {args.harness} before training.", file=sys.stderr)
+    if recorded_contract is not None and recorded_contract != args.harness:
+        raise ValueError(
+            f"SFT checkpoint uses {recorded_contract}, not {args.harness}; select the matching --harness")
     config = {
         "algorithm": ALGORITHM, "model": checkpoint_model,
-        "trajectory_contract_version": DRAWING_TOOLS_CONTRACT_VERSION,
+        "harness": args.harness, "checkpoint_tool_contract": recorded_contract,
+        "trajectory_contract_version": (
+            MINI_SWE_CONTRACT_VERSION if args.harness == "mini-swe"
+            else DRAWING_TOOLS_CONTRACT_VERSION),
         "tokenizer_revision": source.get("tokenizer_revision"),
         "renderer": source["renderer"], "image_size": IMAGE_SIZE,
         "lora_rank": source["lora_rank"],
@@ -104,7 +147,7 @@ def load_run(args):
 INHERITED_PARAMETERS = (
     "batch_size", "group_size", "learning_rate", "clip_epsilon", "kl_coef",
     "normalize_rewards", "temperature", "max_tokens", "max_length",
-    "max_samples", "seed",
+    "max_samples", "seed", "harness",
 )
 
 
@@ -227,6 +270,7 @@ def make_cookbook_config(args, specs, plan, total):
             hpsv3_center=plan["hpsv3_center"], hpsv3_scale=plan["hpsv3_scale"],
             model=plan["model"],
             renderer=plan["renderer"],
+            harness=plan.get("harness", "drawing-tools"),
         ),
         learning_rate=args.learning_rate,
         # Cookbook requires an integer ceiling. Without an explicit cap, use
@@ -307,6 +351,8 @@ def parser():
     p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     p.add_argument("--dataset", type=Path, default=ROOT / "datasets/parti-prompts/rl/prompts.jsonl")
     p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json")
+    p.add_argument("--harness", choices=("mini-swe", "drawing-tools"), default="mini-swe",
+                   help="Coding environment; must match the SFT checkpoint tool interface")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v4")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
