@@ -665,12 +665,12 @@ conditional on delivery.
 - 16-turn retry HPSv3: `eval-results/experiment6-control-mini-swe-16-turn-retry-hpsv3-2026-11-05/` and `eval-results/experiment6-error-aware-mini-swe-16-turn-retry-hpsv3-2026-11-05/`
 - Combined per-prompt report and scores: `eval-results/experiment6-hpsv3-all-retries-2026-11-06/`
 
-## Experiment 7 — Revised mini-SWE prompts for SFT
+## Experiment 7 — Prompt-only mini-SWE evaluation
 
 - **Recorded:** 2026-11-06 (America/Toronto).
-- **Status:** Planned. Experiment 7 trajectory generation, training, and evaluation are pending.
+- **Status:** Planned. Evaluation is pending.
 - **Question:** Does the revised mini-SWE task prompt improve timely preview and valid submission while preserving visual quality and prompt adherence?
-- **Loss policy:** Use the Experiment 6 control policy, `final-write-final-preview-submit`. At the fixed 12-turn cap, both Experiment 6 arms delivered 56/163 valid images. Of the 107 control failures, 62 never attempted a preview and 45 had a valid initial preview but reached the cap without submitting.
+- **Checkpoint:** Reuse the Experiment 6 control checkpoint. At the fixed 12-turn cap, both Experiment 6 arms delivered 56/163 valid images. Of the 107 control failures, 62 never attempted a preview and 45 had a valid initial preview but reached the cap without submitting.
 
 ### Prompt change
 
@@ -684,21 +684,14 @@ the request. The templates are in `drawing/mini_agent.py`.
 Experiment 6's teacher trajectories were generated before the mandatory
 submission sentence was added. The Experiment 6 training export received that
 sentence through a system-message migration that preserved the teacher actions.
-Generate the Experiment 7 additions under the revised prompt in a fresh output
-directory so their recorded messages reflect what the teacher actually saw.
 
-### Data and evaluation plan
+### Evaluation plan
 
-- Reserve 200 of the 327 PartiPrompts RL prompts. The other 127 would bring SFT
-  to 1,269 prompt IDs before screening for near-duplicate prompt families
-  across SFT, RL, and evaluation.
-- Consider four accepted trajectories per SFT prompt across the full set
-  (5,076 at the nominal prompt count). Pilot the extra candidates and check
-  whether they add correct, distinct renderings or useful editing and submission
-  behavior before committing to that target.
-- Compare on the original 163 evaluation prompts with the same 12-turn cap
-  and inference settings. Track the first successful preview, valid submission
-  and render rate, and visual quality and adherence on delivered images.
-- A fixed-checkpoint comparison of the two prompt versions on the Experiment 6
-  control would isolate the inference-time prompt effect. An SFT run that also
-  expands the dataset measures the combined change.
+Evaluate the Experiment 6 control checkpoint with the previous and revised
+prompts on the original 163 evaluation prompts. Use the same 12-turn cap and
+inference settings in both arms. Track the turn of the first successful preview,
+valid submission and render rates, and visual quality and adherence on delivered
+images. The prompt is the only experimental variable.
+
+Defer reallocating RL prompts, generating additional trajectories, and running
+another SFT job to a later experiment.
