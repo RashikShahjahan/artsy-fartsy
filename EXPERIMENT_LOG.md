@@ -495,7 +495,7 @@ no training was launched.
 ## Experiment 6 — Error-aware SFT on cumulative mini-SWE edits
 
 - **Recorded:** 2026-11-05 (America/Toronto).
-- **Status:** Both matched batch-32 SFT arms completed all 71 updates. Held-out evaluation and human image review remain pending. The prompt-migrated export is still pending human review; this training used `--allow-unreviewed` under the user's explicit instruction.
+- **Status:** Both matched batch-32 SFT arms completed all 71 updates. Held-out generation and HPSv3 scoring are complete; human image review remains pending. The prompt-migrated export is still pending human review; this training used `--allow-unreviewed` under the user's explicit instruction.
 - **Question:** Does removing supervised loss on code edits implicated in observed execution failures improve final-image reliability or quality, while retaining learning from corrective edits?
 - **Hypothesis:** Baseline SFT rewards every executed bash action, including code subsequently shown to fail. A targeted loss mask could reduce imitation of those mistakes without discarding useful error/repair context.
 
@@ -579,3 +579,88 @@ saved their final sampler metadata.
   completed at step 71 with final-batch loss 0.888025.
 - Each run's `training-manifest.json` records the full configuration; `metrics.jsonl`
   contains all 71 step metrics, and `final.json` records the sampler path.
+
+### Held-out evaluation and HPSv3 (2026-11-05)
+
+Both checkpoints were evaluated on the same 163 held-out prompts with the
+mini-SWE harness, a 12-turn cap, and concurrency caps of 50 samples, model
+connections, and sandboxes. Each arm produced 56 valid rendered images
+(34.4% of expected prompts); both summaries report 163 completed samples and no
+remaining sample errors. One error-aware sample initially failed because the
+Docker daemon socket was unavailable; it was retried after the daemon recovered.
+
+- Control generation: `eval-results/experiment6-control-mini-swe-12-turns-2026-11-05/`
+- Error-aware generation: `eval-results/experiment6-error-aware-mini-swe-12-turns-2026-11-05/`
+- HPSv3 comparison: `eval-results/experiment6-hpsv3-mini-swe-12-turns-2026-11-05/`
+- Scorer: `MizzenAI/HPSv3`, pinned by weights hash, using the MLX 4-bit, group-64
+  implementation (`mlx-4bit-g64-v1`). These quantized rewards are descriptive
+  and are not equivalent to full-precision HPSv3 scores.
+
+| Measure | Control | Error-aware |
+| --- | ---: | ---: |
+| Valid renders | 56/163 (34.4%) | 56/163 (34.4%) |
+| Mean raw HPSv3 reward on valid images | -2.6262 | -4.0995 |
+| Mean normalized preference across all episodes | 0.1328 | 0.1130 |
+
+Among 22 prompts where both arms delivered valid images, control won 14 HPSv3
+pairwise comparisons and error-aware won 8 (no ties). This is a descriptive
+single-seed result; human image preference review is still pending.
+
+### 16-turn retry of missing renders (2026-11-05)
+
+The 107 non-rendering prompts in each arm were rerun with the same mini-SWE
+harness and inference settings, increasing only the turn cap from 12 to 16.
+Completed images from the original evals were kept; retries are stored in
+separate output directories. Because successful original episodes were not
+rerun, the combined rates below are recovery totals, not a fully matched
+16-turn comparison.
+
+| Measure | Control | Error-aware |
+| --- | ---: | ---: |
+| Renders among retried prompts | 35/107 (32.7%) | 40/107 (37.4%) |
+| Combined valid renders | 91/163 (55.8%) | 96/163 (58.9%) |
+| Still incomplete at 16 turns | 72/107 | 67/107 |
+
+Every remaining retry failure reached the 16-turn cap without submitting.
+Among those failures, 48 control and 45 error-aware episodes never attempted a
+preview; the others attempted previews but did not complete a successful
+submission. No final-render error or infrastructure error remained in the retry
+results. The retry evaluations were execution-only. The original HPSv3
+comparison was limited to the 12-turn images; later batch scoring is recorded
+below.
+
+- Control retry: `eval-results/experiment6-control-mini-swe-16-turn-retry-2026-11-05/`
+- Error-aware retry: `eval-results/experiment6-error-aware-mini-swe-16-turn-retry-2026-11-05/`
+
+### 25-turn retry and HPSv3 follow-up (2026-11-06)
+
+The prompts still missing after the 16-turn retries were rerun with a 25-turn
+cap. Control retried 72 prompts and rendered 31 (43.1%); error-aware retried 67
+and rendered 17 (25.4%). Generation summaries completed with no sample errors.
+Including valid images from the original and 16-turn stages, the final per-prompt
+render totals are 122/163 (74.8%) for control and 113/163 (69.3%) for
+error-aware. Final totals select the latest attempt for each prompt, so turn
+limits vary by prompt.
+
+HPSv3 scored the valid images from both retry stages with the same pinned
+quantized MLX scorer as the original evaluation
+(`MizzenAI/HPSv3@sha256:6a859ef3ced4dbccf123b8441cd6c426d6b04af9f396fea2b24d6a64eb6d3a2c:mlx-4bit-g64-v1`).
+The combined per-prompt scores include the original 12-turn results, updated by
+the 16-turn retry where needed and then by the 25-turn retry where that ran.
+
+| Combined measure | Control | Error-aware |
+| --- | ---: | ---: |
+| Valid images | 122/163 (74.8%) | 113/163 (69.3%) |
+| Mean raw HPSv3 on valid images | −2.849 | −3.748 |
+| Mean normalized preference across all prompts | 0.2824 | 0.2383 |
+
+On the 89 prompts where both final outcomes had valid images, HPSv3 preferred
+control on 52 and error-aware on 37 (no ties). These are descriptive results
+from single checkpoints; there is no significance test or training-seed
+replication. The turn cap is mixed across prompts, and raw reward means are
+conditional on delivery.
+
+- Control 25-turn generation and HPSv3: `eval-results/experiment6-control-mini-swe-25-turn-retry-2026-11-05/` and `eval-results/experiment6-control-mini-swe-25-turn-retry-hpsv3-2026-11-05/`
+- Error-aware 25-turn generation and HPSv3: `eval-results/experiment6-error-aware-mini-swe-25-turn-retry-2026-11-05/` and `eval-results/experiment6-error-aware-mini-swe-25-turn-retry-hpsv3-2026-11-05/`
+- 16-turn retry HPSv3: `eval-results/experiment6-control-mini-swe-16-turn-retry-hpsv3-2026-11-05/` and `eval-results/experiment6-error-aware-mini-swe-16-turn-retry-hpsv3-2026-11-05/`
+- Combined per-prompt report and scores: `eval-results/experiment6-hpsv3-all-retries-2026-11-06/`
