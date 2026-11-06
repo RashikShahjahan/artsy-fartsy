@@ -5,7 +5,9 @@ import json
 import re
 
 from drawing.agent_contract import SFT_MAX_TURNS
+from drawing.documentation import DOCUMENTATION_LOCATION
 from drawing.mini_agent import TOOLS, VERSION, system_prompt, task_prompt
+from drawing.render_contract import OUTPUT_PATH_GUIDANCE
 from drawing.tool_dataset import trajectory_hash
 
 
@@ -33,6 +35,48 @@ _LEGACY_SYSTEM_PROMPTS = tuple(
         _LEGACY_SUBMISSION + 'Before submission, view rendered images with artsy-preview ENTRYPOINT. ',
     )
 )
+
+
+def _historical_task_prompt(prompt, workflow_version):
+    output_guidance = OUTPUT_PATH_GUIDANCE
+    if workflow_version == 5:
+        workflow = f"""1. Identify the requested subjects, composition, style, and constraints. {DOCUMENTATION_LOCATION.strip()}
+2. Before submission, view rendered images with `artsy-preview ENTRYPOINT`.
+3. Make focused edits to fix the most important issues you observed, then preview again to verify the changes.
+4. Submit promptly once the drawing meets the request. Submission is mandatory."""
+        submit = 'Submit with `artsy-submit ENTRYPOINT`, or use `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` when the Python entrypoint is unambiguous.'
+    elif workflow_version == 6:
+        workflow = """1. Your first tool call must only inspect the installed pycairo API reference at `/opt/artsy/pycairo-api.pyi`. Search for the methods you plan to use and wait for the tool result.
+2. Use the returned signatures when you write the drawing code in a later tool call.
+3. Run `artsy-preview ENTRYPOINT` on the exact Python entrypoint you intend to submit and wait for the result. If the preview fails, fix the reported error and preview again. If you edit the source after a successful preview, preview the updated source.
+4. Once you have seen a successful preview of the current source and it meets the request, submit that entrypoint. Submission is mandatory."""
+        submit = 'Submit with `artsy-submit ENTRYPOINT`.'
+    else:
+        output_guidance = ('Save to the relative path output.png in the current working directory. '
+                           'Final validation reruns your program in a fresh directory.')
+        workflow = """1. Your first tool call must only inspect the installed pycairo API reference at `/opt/artsy/pycairo-api.pyi`. Search for the methods you plan to use and wait for the tool result.
+2. Use the returned signatures when you write the drawing code in a later tool call.
+3. Run the Python entrypoint you intend to submit with `rm -f output.png && python ENTRYPOINT` and wait for the result. If execution fails, fix the error and rerun the script.
+4. After the script succeeds, use a separate tool call, `artsy-preview output.png`, to view the generated image. If you edit the source, run it again and view the new PNG before submitting.
+5. Once you have viewed the image from the current source and it meets the request, submit that entrypoint. Submission is mandatory."""
+        submit = 'Submit with `artsy-submit ENTRYPOINT`.'
+
+    return f"""Please create this drawing:
+
+{prompt}
+
+Create the drawing using pycairo and save a 1920×1200 PNG. Do not add text to the image unless requested.
+{output_guidance}
+
+## Recommended Workflow
+
+{workflow}
+
+## Command Execution Rules
+
+- Use exactly one bash tool call per response, with a single string argument in the form `{{"command": "..."}}`.
+- Each command runs in a fresh subshell. Files persist, while directory and environment changes do not.
+- {submit} Run the submission command by itself. A successful submission ends the task."""
 
 
 def edits_python_source(command: str) -> bool:
@@ -69,6 +113,9 @@ def convert_mini_record(record, root, loss_policy):
     expected = [
         [{'role': 'system', 'content': system_prompt(spec['seed'])},
          {'role': 'user', 'content': task_prompt(spec['prompt'])}],
+        *([{'role': 'system', 'content': system_prompt(spec['seed'])},
+           {'role': 'user', 'content': _historical_task_prompt(spec['prompt'], version)}]
+          for version in (7, 6, 5)),
         *([{'role': 'system', 'content': system}, {'role': 'user', 'content': spec['prompt']}]
           for system in _LEGACY_SYSTEM_PROMPTS),
     ]

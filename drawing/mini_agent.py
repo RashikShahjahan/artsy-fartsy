@@ -11,8 +11,6 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor
 from contextlib import suppress
 
 from .agent_contract import ROOT
-from .documentation import DOCUMENTATION_LOCATION
-from .render_contract import OUTPUT_PATH_GUIDANCE
 
 # Use a project-local config directory; the adapters use Artsy's credentials,
 # and mini must not print a startup banner into CLI JSON output.
@@ -28,7 +26,7 @@ FORMAT = 'mini-swe-bash-v1'
 TOOLS = [BASH_TOOL]
 SUBMIT = 'echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'
 PREVIEW = 'artsy-preview'
-CONTRACT_VERSION = 5
+CONTRACT_VERSION = 8
 
 
 def system_prompt(seed):
@@ -45,20 +43,22 @@ def task_prompt(prompt):
 {prompt}
 
 Create the drawing using pycairo and save a 1920×1200 PNG. Do not add text to the image unless requested.
-{OUTPUT_PATH_GUIDANCE}
+Save to the relative path output.png in the current working directory. Final validation reruns your program in a fresh directory.
+If your drawing uses randomness, call `random.seed(42)` before the first random draw. Explicitly seed any separate random number generators as well so both runs produce the same image.
 
 ## Recommended Workflow
 
-1. Identify the requested subjects, composition, style, and constraints. {DOCUMENTATION_LOCATION.strip()}
-2. Before submission, view rendered images with `artsy-preview ENTRYPOINT`.
-3. Make focused edits to fix the most important issues you observed, then preview again to verify the changes.
-4. Submit promptly once the drawing meets the request. Submission is mandatory.
+1. Your first tool call must only inspect the installed pycairo API reference at `/opt/artsy/pycairo-api.pyi`. Search for the methods you plan to use and wait for the tool result.
+2. Use the returned signatures when you write the drawing code in a later tool call.
+3. Run the Python entrypoint you intend to submit with `rm -f output.png && python ENTRYPOINT` and wait for the result. If execution fails, fix the error and rerun the script.
+4. After the script succeeds, use a separate tool call, `artsy-preview output.png`, to view the generated image. If you edit the source, run it again and view the new PNG before submitting.
+5. Once you have viewed the image from the current source and it meets the request, submit that entrypoint. Submission is mandatory.
 
 ## Command Execution Rules
 
 - Use exactly one bash tool call per response, with a single string argument in the form `{{"command": "..."}}`.
 - Each command runs in a fresh subshell. Files persist, while directory and environment changes do not.
-- Submit with `artsy-submit ENTRYPOINT`, or use `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` when the Python entrypoint is unambiguous. Run the submission command by itself. A successful submission ends the task."""
+- Submit with `artsy-submit ENTRYPOINT`. Run the submission command by itself. A successful submission ends the task."""
 
 
 async def run_agent(complete, execute, prompt, seed, *, max_turns, progress=None, output_path=None, resume=None):
