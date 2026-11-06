@@ -13,7 +13,7 @@ import subprocess
 
 from PIL import Image
 
-from drawing.mini_agent import CONTRACT_VERSION, TOOLS, system_prompt
+from drawing.mini_agent import CONTRACT_VERSION, TOOLS, system_prompt, task_prompt
 from drawing.mini_session import DrawingSession, READ_SOURCE
 from drawing.model_profiles import resolve_model
 from drawing.vision import prepare_image
@@ -28,7 +28,7 @@ def mini_tool_spec():
 def mini_initial_messages(spec, model, renderer, max_length, revision):
     prefix = encoder(model, renderer, max_length, revision).renderer.create_conversation_prefix_with_tools(
         [mini_tool_spec()], system_prompt=system_prompt(spec["seed"]))
-    return [*prefix, {"role": "user", "content": spec["prompt"]}]
+    return [*prefix, {"role": "user", "content": task_prompt(spec["prompt"])}]
 
 
 def _observation(content, model, renderer, max_length, revision):

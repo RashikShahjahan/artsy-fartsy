@@ -24,7 +24,7 @@ def response(code=0, output=b"", stderr=b""):
 @unittest.skipUnless(HAS_MINI, "Install the pinned mini-swe-agent dependency")
 class MiniHarnessTests(unittest.IsolatedAsyncioTestCase):
     def test_mini_tool_and_sft_framing_match_the_training_export(self):
-        from drawing.mini_agent import TOOLS, system_prompt
+        from drawing.mini_agent import TOOLS, system_prompt, task_prompt
         from training.cookbook_mini import mini_initial_messages, mini_tool_spec
         spec = {"id": "a", "seed": 7, "prompt": "Draw a spiral"}
         renderer = Mock()
@@ -39,7 +39,7 @@ class MiniHarnessTests(unittest.IsolatedAsyncioTestCase):
                          {"system_prompt": system_prompt(7)})
         self.assertEqual(renderer.create_conversation_prefix_with_tools.call_args.args[0],
                          [mini_tool_spec()])
-        self.assertEqual(messages[-1], {"role": "user", "content": spec["prompt"]})
+        self.assertEqual(messages[-1], {"role": "user", "content": task_prompt(spec["prompt"])})
 
     async def test_shell_executes_in_isolated_workspace_with_seed(self):
         from training.cookbook_mini import MiniDockerSession
@@ -153,6 +153,7 @@ class MiniHarnessTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(environments[0].options["rollout_limits"].max_turns, 12)
 
     def test_wrong_sft_harness_is_rejected(self):
+        from drawing.mini_agent import CONTRACT_VERSION
         from drawing.documentation import api_documentation
         from training.data import digest
         from training.grpo import load_run, parser
@@ -177,7 +178,7 @@ class MiniHarnessTests(unittest.IsolatedAsyncioTestCase):
                 "state_path": "tinker://state", "sampler_path": "tinker://sampler"}))
             args.harness = "mini-swe"
             _, config, _ = load_run(args)
-            self.assertEqual(config["trajectory_contract_version"], 4)
+            self.assertEqual(config["trajectory_contract_version"], CONTRACT_VERSION)
 
 
     def test_pre_metadata_sft_manifest_identifies_mini_swe(self):

@@ -28,27 +28,37 @@ FORMAT = 'mini-swe-bash-v1'
 TOOLS = [BASH_TOOL]
 SUBMIT = 'echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT'
 PREVIEW = 'artsy-preview'
-CONTRACT_VERSION = 4
+CONTRACT_VERSION = 5
 
 
 def system_prompt(seed):
-    # DefaultAgent receives templates explicitly; its constructor does not load
-    # the CLI's mini.yaml. Reuse the installed harness's system prompt here.
+    # DefaultAgent receives templates explicitly; its constructor does not load mini.yaml.
     from importlib.resources import files
     import yaml
     settings = yaml.safe_load(files('minisweagent').joinpath('config/mini.yaml').read_text())
-    return (settings['agent']['system_template'].strip() + '\n\n'
-            'Create the requested drawing using pycairo. Save output.png at 1920×1200. '
-            'Do not add text to the image unless requested. Use bash tool calls; files persist, shell state does not. '
-            'Submit with artsy-submit ENTRYPOINT, or echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT '
-            'when the Python entrypoint is unambiguous. '
-            'Submission is mandatory; without a successful submission, the task is incomplete. '
-            'View rendered images with artsy-preview ENTRYPOINT. '
-            + OUTPUT_PATH_GUIDANCE + ' ' + DOCUMENTATION_LOCATION)
+    return settings['agent']['system_template'].strip()
 
 
 def task_prompt(prompt):
-    return prompt
+    return f"""Please create this drawing:
+
+{prompt}
+
+Create the drawing using pycairo and save a 1920×1200 PNG. Do not add text to the image unless requested.
+{OUTPUT_PATH_GUIDANCE}
+
+## Recommended Workflow
+
+1. Identify the requested subjects, composition, style, and constraints. {DOCUMENTATION_LOCATION.strip()}
+2. Before submission, view rendered images with `artsy-preview ENTRYPOINT`.
+3. Make focused edits to fix the most important issues you observed, then preview again to verify the changes.
+4. Submit promptly once the drawing meets the request. Submission is mandatory.
+
+## Command Execution Rules
+
+- Use exactly one bash tool call per response, with a single string argument in the form `{{"command": "..."}}`.
+- Each command runs in a fresh subshell. Files persist, while directory and environment changes do not.
+- Submit with `artsy-submit ENTRYPOINT`, or use `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` when the Python entrypoint is unambiguous. Run the submission command by itself. A successful submission ends the task."""
 
 
 async def run_agent(complete, execute, prompt, seed, *, max_turns, progress=None, output_path=None, resume=None):

@@ -15,7 +15,7 @@ from inspect_ai.model import (ChatCompletionChoice, ChatMessageAssistant, Conten
                               GenerateConfig, ModelOutput, ModelUsage, get_model)
 from inspect_ai.tool import ToolCall
 
-from drawing.mini_agent import PREVIEW, SUBMIT
+from drawing.mini_agent import CONTRACT_VERSION, PREVIEW, SUBMIT
 from drawing.renderer import LocalRenderer
 from evaluation.mini_agent import mini_drawing_agent
 from tests.test_mini_agent import CODE, EDIT, TestWorkspace
@@ -60,7 +60,7 @@ class MiniInspectTests(unittest.TestCase):
             sample = read_eval_log(logs[0].location, resolve_attachments=True).samples[0]
             self.assertIsNone(sample.error)
             self.assertTrue(sample.metadata['submitted'])
-            self.assertEqual(sample.metadata['trajectoryContractVersion'], 4)
+            self.assertEqual(sample.metadata['trajectoryContractVersion'], CONTRACT_VERSION)
             self.assertEqual(sample.metadata['harnessTiming']['model_calls'], 3)
             self.assertEqual(sum(e.event == 'tool' for e in sample.events), 3)
             from evaluation.harness import trajectory_metrics

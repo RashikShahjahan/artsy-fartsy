@@ -183,13 +183,50 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
             treatment = convert_record(record, Path(root), loss_policy='error-aware')
             self.assertEqual(treatment['trainable_message_indices'], [2, 4, 6])
 
+    def test_drawing_task_prompt(self):
+        from importlib.resources import files
+
+        import yaml
+
+        from drawing.mini_agent import system_prompt, task_prompt
+
+        upstream = yaml.safe_load(files('minisweagent').joinpath('config/mini.yaml').read_text())
+        self.assertEqual(system_prompt(7), upstream['agent']['system_template'].strip())
+        prompt = task_prompt('Draw blue')
+        self.assertTrue(prompt.startswith('Please create this drawing:\n\nDraw blue'))
+        for guidance in (
+            '## Recommended Workflow',
+            '2. Before submission, view rendered images with `artsy-preview ENTRYPOINT`',
+            'Before writing code, search the installed API reference',
+            'Save to the relative path output.png', '## Command Execution Rules',
+            'Use exactly one bash tool call', 'artsy-submit ENTRYPOINT',
+            'echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT',
+        ):
+            self.assertIn(guidance, prompt)
+        self.assertNotIn('/workspace/program.py', prompt)
+        self.assertNotIn('from artcanvas import', prompt)
+
+    async def test_legacy_mini_headers_are_preserved_and_must_match_as_a_pair(self):
+        from drawing.mini_agent import task_prompt
+        from training.mini_data import _LEGACY_SYSTEM_PROMPTS
+
+        with tempfile.TemporaryDirectory() as root:
+            record, _ = await self.collect(root)
+            trajectory = record['miniTrajectory']
+            prompt = record['spec']['prompt']
+            for system in _LEGACY_SYSTEM_PROMPTS:
+                trajectory['messages'][:2] = [
+                    {'role': 'system', 'content': system}, {'role': 'user', 'content': prompt}]
+                record['miniTrajectoryHash'] = trajectory_hash(trajectory)
+                example = convert_record(record, Path(root))
+                self.assertEqual([m['content'][0]['text'] for m in example['messages'][:2]],
+                                 [system, prompt])
+            trajectory['messages'][1]['content'] = task_prompt(prompt)
+            record['miniTrajectoryHash'] = trajectory_hash(trajectory)
+            with self.assertRaisesRegex(ValueError, 'mini prompt mismatch'):
+                convert_record(record, Path(root))
+
     async def test_arbitrary_entrypoint_and_helper_module_with_optional_previews(self):
-        from drawing.mini_agent import system_prompt
-        self.assertTrue(system_prompt(7).startswith('You are a helpful assistant'))
-        self.assertIn('Before writing code, search the installed API reference for the operations you plan to use.',
-                      system_prompt(7))
-        self.assertNotIn('/workspace/program.py', system_prompt(7))
-        self.assertNotIn('from artcanvas import', system_prompt(7))
         for preview in (False, True):
             with self.subTest(preview=preview), tempfile.TemporaryDirectory() as root:
                 main = ('import cairo\nfrom palette import BLUE\nsurface = cairo.ImageSurface(cairo.FORMAT_RGB24, 1920, 1200)\nc = cairo.Context(surface)\nc.set_source_rgb(*BLUE)\nc.paint()\nsurface.write_to_png("output.png")\n')
@@ -222,7 +259,9 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
             result = await generate_dataset(options)
             self.assertEqual(result['review'], 1)
             manifest = json.loads((Path(root) / 'manifest.json').read_text())
+            from drawing.mini_agent import task_prompt
             self.assertEqual(manifest['harness']['editingImage'], image)
+            self.assertEqual(manifest['harness']['taskPrompts'], {'drawing': task_prompt('Draw')})
             self.assertEqual(manifest['trajectoryFormat'], 'mini-swe-bash-v1')
             await generate_dataset(options)
             self.assertEqual(len(teacher.inputs), 3)

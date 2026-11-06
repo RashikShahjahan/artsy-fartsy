@@ -122,10 +122,11 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
             "teacher": teacher,
             "config": config, "apiDocHash": sha256(api_doc), "runtimeHashes": runtime_hashes}
         if harness == 'mini-swe':
-            from .mini_agent import TOOLS, VERSION, system_prompt
+            from .mini_agent import TOOLS, VERSION, system_prompt, task_prompt
             manifest['harness'] = {'name': 'mini-swe-agent', 'version': VERSION, 'tools': TOOLS,
                                    'editingImage': editing_image,
                                    'prompts': {s['id']: system_prompt(s['seed']) for s in specs},
+                                   'taskPrompts': {s['id']: task_prompt(s['prompt']) for s in specs},
                                    'sourceHashes': {name: sha256((root / name).read_bytes()) for name in
                                        ('drawing/mini_agent.py', 'drawing/mini_dataset.py', 'drawing/mini_session.py', 'drawing/mini_protocol.py', 'evaluation/agent_commands.py')}}
         if options.get("executionBackend"):

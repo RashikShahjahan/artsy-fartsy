@@ -9,6 +9,32 @@ from drawing.mini_agent import TOOLS, VERSION, system_prompt, task_prompt
 from drawing.tool_dataset import trajectory_hash
 
 
+# Historical headers are matched as recorded, including their trailing space.
+_LEGACY_SYSTEM_PREFIX = (
+    'You are a helpful assistant that can interact with a computer.\n\n'
+    'Create the requested drawing using pycairo. Save output.png at 1920×1200. '
+    'Do not add text to the image unless requested. Use bash tool calls; files persist, shell state does not. '
+    'Submit with artsy-submit ENTRYPOINT, or echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT '
+    'when the Python entrypoint is unambiguous. '
+)
+_LEGACY_SYSTEM_SUFFIX = (
+    'Save to the relative path output.png in the current working directory. '
+    'Python previews and final validation rerun your program in a fresh directory; '
+    'an absolute output path or a PNG copied beforehand will not satisfy this requirement. '
+    'Official pycairo API reference (searchable with rg): /opt/artsy/pycairo-api.pyi. '
+    'Before writing code, search the installed API reference for the operations you plan to use. '
+)
+_LEGACY_SUBMISSION = 'Submission is mandatory; without a successful submission, the task is incomplete. '
+_LEGACY_SYSTEM_PROMPTS = tuple(
+    _LEGACY_SYSTEM_PREFIX + preview + _LEGACY_SYSTEM_SUFFIX
+    for preview in (
+        'View rendered images with artsy-preview ENTRYPOINT. ',
+        _LEGACY_SUBMISSION + 'View rendered images with artsy-preview ENTRYPOINT. ',
+        _LEGACY_SUBMISSION + 'Before submission, view rendered images with artsy-preview ENTRYPOINT. ',
+    )
+)
+
+
 def edits_python_source(command: str) -> bool:
     """Recognize definite source writes; a shell command's exit status alone is not enough.
 
@@ -39,9 +65,14 @@ def convert_mini_record(record, root, loss_policy):
     messages = copy.deepcopy(trajectory.get('messages'))
     if not isinstance(messages, list) or len(messages) < 5:
         raise ValueError(f'{rid}: missing mini conversation')
-    expected = [{'role': 'system', 'content': system_prompt(record['spec']['seed'])},
-                {'role': 'user', 'content': task_prompt(record['spec']['prompt'])}]
-    if messages[:2] != expected:
+    spec = record['spec']
+    expected = [
+        [{'role': 'system', 'content': system_prompt(spec['seed'])},
+         {'role': 'user', 'content': task_prompt(spec['prompt'])}],
+        *([{'role': 'system', 'content': system}, {'role': 'user', 'content': spec['prompt']}]
+          for system in _LEGACY_SYSTEM_PROMPTS),
+    ]
+    if messages[:2] not in expected:
         raise ValueError(f'{rid}: mini prompt mismatch')
     if messages[-1].get('role') != 'exit' or messages[-1].get('extra', {}).get('exit_status') != 'Submitted':
         raise ValueError(f'{rid}: missing terminal mini submission')
