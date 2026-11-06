@@ -495,7 +495,7 @@ no training was launched.
 ## Experiment 6 — Error-aware SFT on cumulative mini-SWE edits
 
 - **Recorded:** 2026-11-05 (America/Toronto).
-- **Status:** Implementation on `experiment-6-error-aware-sft`; training **not launched**. Experiment 5 has no completed, reviewed mini-SWE training set in the tracked repository as of this entry.
+- **Status:** Both matched batch-32 SFT arms completed all 71 updates. Held-out evaluation and human image review remain pending. The prompt-migrated export is still pending human review; this training used `--allow-unreviewed` under the user's explicit instruction.
 - **Question:** Does removing supervised loss on code edits implicated in observed execution failures improve final-image reliability or quality, while retaining learning from corrective edits?
 - **Hypothesis:** Baseline SFT rewards every executed bash action, including code subsequently shown to fail. A targeted loss mask could reduce imitation of those mistakes without discarding useful error/repair context.
 
@@ -513,7 +513,7 @@ A distinct conversion version and loss-policy field in checkpoint manifests dist
 
 ### Matched study protocol
 
-Use the **same human-approved mini-SWE JSONL**, Qwen3.5 4B base, LoRA rank 128, seed 42, one epoch, batch size 8, cosine LR schedule, initial LR 2e-4, and identical prompt distribution for both arms. Do not copy old drawing-tools demonstrations into this new mini-SWE-only treatment. Preflight both arms and record counts of supervised/masked actions and tokens:
+Use the **same mini-SWE JSONL**, Qwen3.5 4B base, LoRA rank 128, seed 42, one epoch, batch size 32, cosine LR schedule, initial LR 2e-4, and identical prompt distribution for both arms. Do not copy old drawing-tools demonstrations into this new mini-SWE-only treatment. Preflight both arms and record counts of supervised/masked actions and tokens:
 
 ```bash
 # Point to the reviewed mini-SWE training export when available.
@@ -524,16 +524,58 @@ python -m training.sft --dataset "$DATASET" --model Qwen/Qwen3.5-4B --loss-polic
 
 # Train independent adapters using identical hyperparameters; do not reuse an optimizer state.
 python -m training.sft --dataset "$DATASET" --model Qwen/Qwen3.5-4B \
-  --loss-policy final-write-final-preview-submit --lora-rank 128 --batch-size 8 \
+  --loss-policy final-write-final-preview-submit --lora-rank 128 --batch-size 32 \
   --epochs 1 --learning-rate 2e-4 --seed 42 \
-  --output-dir checkpoints/experiment6-control
+  --output-dir checkpoints/experiment6-control-batch32
 
 python -m training.sft --dataset "$DATASET" --model Qwen/Qwen3.5-4B \
-  --loss-policy error-aware --lora-rank 128 --batch-size 8 \
+  --loss-policy error-aware --lora-rank 128 --batch-size 32 \
   --epochs 1 --learning-rate 2e-4 --seed 42 \
-  --output-dir checkpoints/experiment6-error-aware
+  --output-dir checkpoints/experiment6-error-aware-batch32
 ```
 
 Evaluate both checkpoints using mini-SWE on the same original **163 held-out Parti prompts**, with matching inference settings/seeds. Primary measures: valid-submission/render rate and paired human image preference. Secondary measures: HPSv3 reward, correction rate, turns/tokens, and refusal/failure counts. Report treatment-mask coverage and any examples where good earlier edits were mistakenly masked. The restored 228 training prompts are not held out. GRPO follow-up can be a separate matched second stage after SFT quality is measured.
 
-**Launch gate:** An approved dataset and accessible Tinker/Docker runtime are required; these commands have not been executed.
+**Launch gate:** The prepared dataset is pending human review. The user explicitly directed the run to proceed and authorized uploading this dataset to Tinker; both arms use `--allow-unreviewed`. Docker is needed for later drawing evaluation, not for SFT itself.
+
+### Prompt migration preflight (2026-11-05)
+
+The available 2,269-record mini-SWE export predates the current mandatory-submission
+sentence. Because all 2,269 records already contain a successful final submission,
+the system message was updated in a derived training export and each
+`miniTrajectoryHash` recomputed. No assistant actions, tool results, source, images,
+or judgments were changed. This is a prompt migration, **not regenerated model
+output**; the original export remains intact.
+
+- [Migrated training export](datasets/parti-prompts/sft-mini-swe/training-ready-experiment-6.jsonl)
+  (SHA-256 `a1a43465c574aa881a822fa92433a3dc99deecb6b58f7dd9c46b0c5e9c0a498b`).
+- [Migration provenance](datasets/parti-prompts/sft-mini-swe/experiment-6-prompt-migration.json).
+- Full local `--check-batch` token/image preflight succeeded for both policies
+  using the repository's cached Hugging Face metadata. The original batch-8 plan
+  had 2,269 examples and a 284-step one-epoch schedule. The control selects
+  14,529 assistant actions (15 masked; 11,875,876 supervised tokens); error-aware
+  selects 13,044 (1,500 masked; 7,340,015 supervised tokens). There are 2,269
+  records and all remain pending human review.
+
+### Training launch (2026-11-05)
+
+The initially launched batch-8 arms were stopped at 48 control and 39
+error-aware steps after the user requested a restart at batch size 32 to match
+the previous mini-SWE SFT run. They remain in
+`checkpoints/experiment6-control/` and `checkpoints/experiment6-error-aware/`
+as partial, stopped runs; they were not resumed. Only the manifests and metrics
+remain because both were interrupted before the first save at step 50.
+
+Fresh hosted SFT arms ran on Tinker using the migrated dataset hash above,
+Qwen3.5-4B, LoRA rank 128, seed 42, one epoch, batch size 32, cosine schedule,
+and initial learning rate 2e-4. Each has its own output directory and fresh
+optimizer state. Both include `--allow-unreviewed` per the user's instruction.
+The 2,269 examples gave a 71-step one-epoch schedule. Both runs completed and
+saved their final sampler metadata.
+
+- Control: [run directory](checkpoints/experiment6-control-batch32/), completed
+  at step 71 with final-batch loss 0.850243.
+- Error-aware: [run directory](checkpoints/experiment6-error-aware-batch32/),
+  completed at step 71 with final-batch loss 0.888025.
+- Each run's `training-manifest.json` records the full configuration; `metrics.jsonl`
+  contains all 71 step metrics, and `final.json` records the sampler path.
