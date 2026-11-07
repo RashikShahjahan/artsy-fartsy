@@ -143,8 +143,20 @@ those modules in a fresh directory and runs the selected entrypoint. Non-Python
 workspace assets are not included. The backend stores this snapshot as its own
 `program.py` artifact; that name is not imposed on the agent's source files.
 The system prompt reuses mini's built-in opening with brief drawing-specific
-instructions. Pycairo’s installed API reference is available at `/opt/artsy/pycairo-api.pyi`
-inside the container instead of being pasted into every system prompt.
+instructions. The Docker image generates a browsable Markdown API reference from
+the *installed* pycairo type stub at `/opt/artsy/docs/pycairo/README.md`.
+Classes have their own directories, and each method has a complete Markdown page
+(for example `/opt/artsy/docs/pycairo/Context/arc.md`). The agent can navigate
+with `ls` and read pages with `cat`, without receiving truncated grep signatures.
+The original stub is still available at `/opt/artsy/pycairo-api.pyi`. To rebuild
+outside Docker, run:
+
+```sh
+python scripts/generate_pycairo_markdown.py /path/to/cairo/__init__.pyi /tmp/pycairo-docs
+```
+
+Existing SFT trajectories are not changed by the new documentation layout;
+retrieval behavior needs fresh demonstrations or a controlled prompt-only eval.
 
 This is trajectory contract v4. Use `--harness drawing-tools` to run historical
 checkpoints trained on `update_drawing`, `read_drawing`, `preview_drawing`,
