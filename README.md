@@ -1,6 +1,6 @@
 # Artsy
 
-Train and evaluate models that draw with Python. An agent writes pycairo code,
+Train and evaluate models that draw with Python. An agent writes ArtCanvas code,
 inspects PNG previews, repairs its work, and submits an image with editable source.
 The project includes a local web UI, teacher dataset generation, hosted LoRA SFT,
 GRPO training, and an independent Inspect evaluation harness.
