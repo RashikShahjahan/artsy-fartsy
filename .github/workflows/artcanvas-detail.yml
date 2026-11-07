@@ -3,7 +3,7 @@ name: ArtCanvas detail API
 on:
   push:
     branches:
-      - feature/artcanvas-detailed-drawing
+      - main
   pull_request:
     paths:
       - 'runtime/artcanvas.py'
@@ -25,4 +25,6 @@ jobs:
           sudo apt-get install -y libcairo2-dev pkg-config
           python -m pip install -r runtime/requirements.txt
       - name: Test ArtCanvas detailed drawing
-        run: python -m unittest discover -s tests -p 'test_artcanvas_detail.py' -v
+        run: |
+          python -m unittest discover -s tests -p 'test_artcanvas_detail.py' -v
+          python -m unittest discover -s tests -p 'test_artcanvas_runtime.py' -v
