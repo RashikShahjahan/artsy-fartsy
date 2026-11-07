@@ -11,6 +11,7 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor
 from contextlib import suppress
 
 from .agent_contract import ROOT
+from .documentation import DOCUMENTATION_LOCATION
 
 # Use a project-local config directory; the adapters use Artsy's credentials,
 # and mini must not print a startup banner into CLI JSON output.
@@ -42,14 +43,18 @@ def task_prompt(prompt):
 
 {prompt}
 
-Create the drawing using pycairo and save a 1920×1200 PNG. Do not add text to the image unless requested.
+Create the drawing using ArtCanvas v2 and save a 1920×1200 PNG. Do not add text to the image unless requested.
 Save to the relative path output.png in the current working directory. Final validation reruns your program in a fresh directory.
 If your drawing uses randomness, call `random.seed(42)` before the first random draw. Explicitly seed any separate random number generators as well so both runs produce the same image.
 
+## ArtCanvas API
+
+{DOCUMENTATION_LOCATION}
+
 ## Recommended Workflow
 
-1. Your first tool call must only inspect the installed pycairo Markdown reference at `/opt/artsy/docs/pycairo/README.md` and relevant method pages. Use `ls` to navigate and `cat` to read whole pages. Read complete signatures, parameter descriptions, and overloads, not isolated `rg -n` matches. You can read multiple pages in one bash command; wait for the tool result before writing code.
-2. Use those complete API definitions when you write the drawing code in a later tool call.
+1. Use `from artcanvas import ArtCanvas`. The complete ArtCanvas API is above; do not browse the pycairo reference or recursively list documentation files. Start by writing your Python program.
+2. Use `with ArtCanvas(1920, 1200, "output.png") as canvas:` so the image is saved automatically.
 3. Run the Python entrypoint you intend to submit with `rm -f output.png && python ENTRYPOINT` and wait for the result. If execution fails, fix the error and rerun the script.
 4. After the script succeeds, use a separate tool call, `artsy-preview output.png`, to view the generated image. If you edit the source, run it again and view the new PNG before submitting.
 5. Once you have viewed the image from the current source and it meets the request, submit that entrypoint. Submission is mandatory.
@@ -59,7 +64,6 @@ If your drawing uses randomness, call `random.seed(42)` before the first random 
 - Use exactly one bash tool call per response, with a single string argument in the form `{{"command": "..."}}`.
 - Each command runs in a fresh subshell. Files persist, while directory and environment changes do not.
 - Submit with `artsy-submit ENTRYPOINT`. Run the submission command by itself. A successful submission ends the task."""
-
 
 async def run_agent(complete, execute, prompt, seed, *, max_turns, progress=None, output_path=None, resume=None):
     """Keep mini's parser, loop, limits and serialization; bridge I/O to asyncio.
