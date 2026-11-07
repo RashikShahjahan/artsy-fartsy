@@ -84,8 +84,15 @@ async def generate_dataset(options: dict[str, Any]) -> dict[str, Any]:
         if options.get('executionBackend') == 'local':
             raise ValueError('mini-swe requires a Docker editing workspace')
         from .mini_dataset import candidate, inspect_image
+        from .renderer import DockerRenderer
+        # One immutable, verified image backs both the editing shell and the
+        # independent final render. The default renderer tag may be different
+        # (artsy-rl-runtime) and must never silently change the ArtCanvas API.
+        if options.get('renderer') is not None and not isinstance(options['renderer'], DockerRenderer):
+            raise ValueError('mini-swe requires Docker for editing and final rendering')
         editing_image = await asyncio.to_thread(inspect_image)
-        options = {**options, 'agentImage': editing_image['id']}
+        options = {**options, 'agentImage': editing_image['id'],
+                   'renderer': DockerRenderer(image=editing_image['id'])}
         from .mini_agent import FORMAT as trajectory_format
     elif harness != 'drawing-tools':
         raise ValueError('Unknown coding harness')
