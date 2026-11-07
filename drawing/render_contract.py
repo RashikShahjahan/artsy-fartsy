@@ -9,7 +9,7 @@ from PIL import Image
 class RenderBackend(Protocol):
     async def render(self, code: str, seed: int) -> dict[str, Any]: ...
 
-RUNTIME_VERSION = "pycairo-v1"
+RUNTIME_VERSION = "artcanvas-v2"
 OUTPUT_PATH_GUIDANCE = (
     'Save to the relative path output.png in the current working directory. '
     'Python previews and final validation rerun your program in a fresh directory; '
