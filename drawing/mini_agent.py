@@ -63,6 +63,7 @@ If your drawing uses randomness, call `random.seed(42)` before the first random 
 
 - Use exactly one bash tool call per response, with a single string argument in the form `{{"command": "..."}}`.
 - Each command runs in a fresh subshell. Files persist, while directory and environment changes do not.
+- Never preview and submit in the same bash command (including commands chained with `&&`, `;`, or a script). Call `artsy-preview` on one model turn, wait for and inspect its image result, then submit in a separate bash tool call on a later model turn.
 - Submit with `artsy-submit ENTRYPOINT`. Run the submission command by itself. A successful submission ends the task."""
 
 async def run_agent(complete, execute, prompt, seed, *, max_turns, progress=None, output_path=None, resume=None):
