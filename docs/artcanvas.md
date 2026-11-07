@@ -80,6 +80,7 @@ fill_pattern(kind, spacing=8, angle=0, line_width=1, opacity=1,
 
 # Reusable geometry:
 path = create_path()    # capture the current composable path
+append_path(path)       # add saved geometry to the current path
 draw_path(path, fill=False, stroke=False)
 
 # Transparency, compositing, and optional Gaussian blur:
@@ -132,7 +133,7 @@ with ArtCanvas(1920, 1200, "output.png") as c:
     # Fill and texture only inside the silhouette.
     c.save_state()
     c.new_path()
-    c.ctx.append_path(leaf)  # alternatively reconstruct the path with move_to/curve_to
+    c.append_path(leaf)
     c.clip()
     c.set_gradient(400, 400, 1000, 800, [
         (0, 0.08, 0.25, 0.05, 1),
