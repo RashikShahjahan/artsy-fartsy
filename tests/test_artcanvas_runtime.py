@@ -21,7 +21,7 @@ with ArtCanvas(1920, 1200, "output.png") as canvas:
         self.assertTrue(result["ok"], result.get("stderr", result))
         self.assertEqual(result["runtimeVersion"], RUNTIME_VERSION)
         self.assertEqual((result["width"], result["height"]), (1920, 1200))
-        self.assertTrue(result["png"].startswith(b"\\x89PNG\\r\\n\\x1a\\n"))
+        self.assertEqual(result["png"][:8].hex(), "89504e470d0a1a0a")
 
     def test_reference_matches_implementation(self):
         from drawing.documentation import DOCUMENTATION_LOCATION, api_documentation
