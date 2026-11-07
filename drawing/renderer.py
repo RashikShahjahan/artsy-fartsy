@@ -72,6 +72,8 @@ class LocalRenderer:
             runner += f"random.seed({seed}); runpy.run_path('program.py', run_name='__main__')"
             env = os.environ.copy()
             env.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONHASHSEED": str(seed % (2**32))})
+            runtime_directory = Path(__file__).resolve().parents[1] / "runtime"
+            env["PYTHONPATH"] = str(runtime_directory) + os.pathsep + env.get("PYTHONPATH", "")
             if sys.platform == "darwin":
                 env.setdefault("DYLD_FALLBACK_LIBRARY_PATH", "/opt/homebrew/lib:/usr/local/lib:/usr/lib")
             try:
