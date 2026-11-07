@@ -37,9 +37,12 @@ class DetailAPITests(unittest.TestCase):
                 c.set_line_join("round")
                 c.set_line_width(8)
                 c.stroke_preserve()
-                self.assertTrue(len(c.create_path()) > 0)
+                self.assertTrue(any(True for _ in c.create_path()))
                 c.new_path()
-                c.draw_rectangle(70, 90, 15, 15, fill=False)
+                c.move_to(70, 90)
+                c.line_to(85, 90)
+                c.line_to(85, 105)
+                c.close_path()
                 c.fill_preserve()
                 c.stroke()
             with Image.open(dest) as image:
@@ -119,7 +122,7 @@ class DetailAPITests(unittest.TestCase):
             with Image.open(path) as image:
                 self.assertEqual(image.size, (120, 100))
                 self.assertEqual(image.getpixel((0, 0))[:3], (0, 0, 255))
-                self.assertNotEqual(image.getpixel((12, 15))[:3], (0, 0, 255))
+                self.assertNotEqual(image.getpixel((20, 20))[:3], (0, 0, 255))
                 self.assertNotEqual(image.getpixel((99, 45))[:3], (0, 0, 255))
 
     def test_error_validation(self):
