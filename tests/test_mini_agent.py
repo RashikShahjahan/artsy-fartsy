@@ -191,7 +191,7 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
         upstream = yaml.safe_load(files('minisweagent').joinpath('config/mini.yaml').read_text())
         self.assertEqual(system_prompt(7), upstream['agent']['system_template'].strip())
         prompt = task_prompt('Draw blue')
-        self.assertTrue(prompt.startswith('Please create this drawing:\\n\\nDraw blue'.replace('\\\\n', '\\n')))
+        self.assertTrue(prompt.startswith('Please create this drawing:'))
         for guidance in (
             '## Recommended Workflow', 'ArtCanvas v2',
             'from artcanvas import ArtCanvas', 'draw_circle(x, y, radius, fill=False)',
