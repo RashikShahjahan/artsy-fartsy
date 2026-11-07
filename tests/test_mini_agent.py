@@ -185,25 +185,22 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
 
     def test_drawing_task_prompt(self):
         from importlib.resources import files
-
         import yaml
-
         from drawing.mini_agent import system_prompt, task_prompt
 
         upstream = yaml.safe_load(files('minisweagent').joinpath('config/mini.yaml').read_text())
         self.assertEqual(system_prompt(7), upstream['agent']['system_template'].strip())
         prompt = task_prompt('Draw blue')
-        self.assertTrue(prompt.startswith('Please create this drawing:\n\nDraw blue'))
+        self.assertTrue(prompt.startswith('Please create this drawing:\\n\\nDraw blue'.replace('\\\\n', '\\n')))
         for guidance in (
-            '## Recommended Workflow', '/opt/artsy/docs/pycairo/README.md',
-            'Read complete signatures, parameter descriptions, and overloads',
-            'Save to the relative path output.png', '## Command Execution Rules',
+            '## Recommended Workflow', 'ArtCanvas v2',
+            'from artcanvas import ArtCanvas', 'draw_circle(x, y, radius, fill=False)',
+            'Start by writing your Python program', 'Save to the relative path output.png',
             'Use exactly one bash tool call', 'artsy-submit ENTRYPOINT',
-            'Submission is mandatory.',
         ):
             self.assertIn(guidance, prompt)
+        self.assertNotIn('Your first tool call must only inspect', prompt)
         self.assertNotIn('/workspace/program.py', prompt)
-        self.assertNotIn('from artcanvas import', prompt)
 
     async def test_legacy_mini_headers_are_preserved_and_must_match_as_a_pair(self):
         from drawing.mini_agent import task_prompt
