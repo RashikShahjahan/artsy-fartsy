@@ -195,12 +195,11 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
         prompt = task_prompt('Draw blue')
         self.assertTrue(prompt.startswith('Please create this drawing:\n\nDraw blue'))
         for guidance in (
-            '## Recommended Workflow',
-            '2. Before submission, view rendered images with `artsy-preview ENTRYPOINT`',
-            'Before writing code, search the installed API reference',
+            '## Recommended Workflow', '/opt/artsy/docs/pycairo/README.md',
+            'Read complete signatures, parameter descriptions, and overloads',
             'Save to the relative path output.png', '## Command Execution Rules',
             'Use exactly one bash tool call', 'artsy-submit ENTRYPOINT',
-            'echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT',
+            'Submission is mandatory.',
         ):
             self.assertIn(guidance, prompt)
         self.assertNotIn('/workspace/program.py', prompt)
