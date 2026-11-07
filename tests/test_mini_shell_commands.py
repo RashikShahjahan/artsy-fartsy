@@ -52,6 +52,48 @@ class ShellCommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result['terminal'])
             self.assertEqual(session.bundle['files']['landscape.py'], CODE)
 
+    async def test_preview_and_submission_in_one_shell_call_are_rejected(self):
+        # The host must validate *emitted events*, not just parse the command
+        # string: bash chaining, nested scripts, and either event order are valid.
+        cases = (
+            'artsy-preview {path} && artsy-submit {path}',
+            'artsy-submit {path}; artsy-preview {path}',
+            'artsy-preview {path} && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT',
+            'echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT; artsy-preview {path}',
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                workspace = TestWorkspace()
+                self.addCleanup(workspace.cleanup)
+                (workspace.directory / 'scene.py').write_text(CODE)
+                session = await self.session(workspace)
+                rejected = await session.execute(case.format(path='scene.py'))
+                self.assertEqual(rejected['returncode'], 1, rejected)
+                self.assertFalse(rejected.get('terminal'), rejected)
+                self.assertFalse(session.submitted)
+                self.assertIsNone(session.bundle)
+                self.assertIn('separate bash tool calls', rejected['content'][0]['text'])
+                # The agent must preview again so it can actually inspect the
+                # returned pixels before submitting on another model turn.
+                preview = await session.execute('artsy-preview scene.py')
+                self.assertEqual(preview['returncode'], 0, preview)
+                self.assertEqual(sum(p['type'] == 'image_url' for p in preview['content']), 1)
+                self.assertFalse(session.submitted)
+                submitted = await session.execute('artsy-submit scene.py')
+                self.assertEqual(submitted['returncode'], 0, submitted)
+                self.assertTrue(submitted['terminal'])
+                self.assertTrue(session.submitted)
+
+    async def test_running_source_and_previewing_in_same_call_is_allowed(self):
+        workspace = TestWorkspace()
+        self.addCleanup(workspace.cleanup)
+        (workspace.directory / 'scene.py').write_text(CODE)
+        session = await self.session(workspace)
+        result = await session.execute('python scene.py && artsy-preview output.png')
+        self.assertEqual(result['returncode'], 0, result)
+        self.assertEqual(sum(p['type'] == 'image_url' for p in result['content']), 1)
+        self.assertFalse(session.submitted)
+
     async def test_native_completion_marker_inside_script(self):
         workspace = TestWorkspace()
         self.addCleanup(workspace.cleanup)
