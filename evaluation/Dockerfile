@@ -6,7 +6,7 @@ RUN pip install --no-cache-dir -r /opt/artsy/requirements.txt
 RUN python -c "from importlib.metadata import distribution; from pathlib import Path; Path('/opt/artsy/pycairo-api.pyi').symlink_to(distribution('pycairo').locate_file('cairo/__init__.pyi'))"
 COPY runtime/artcanvas.py /opt/artsy/runtime/artcanvas.py
 COPY docs/artcanvas.md /opt/artsy/docs/artcanvas.md
-RUN python -c "import site; from pathlib import Path; Path(site.getsitepackages()[0], 'artsy-runtime.pth').write_text('/opt/artsy/runtime\\n')"
+ENV PYTHONPATH=/opt/artsy/runtime
 RUN python -c "from artcanvas import ArtCanvas; assert ArtCanvas.__name__ == 'ArtCanvas'"
 COPY evaluation/render.py /opt/artsy/render.py
 COPY evaluation/agent_commands.py /opt/artsy/agent_commands.py
