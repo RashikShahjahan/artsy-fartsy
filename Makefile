@@ -2,7 +2,7 @@ PYTHON ?= .venv/bin/python
 EVAL_PYTHON ?= $(if $(wildcard .eval-venv/bin/python),.eval-venv/bin/python,$(PYTHON))
 ARGS ?=
 
-.PHONY: ui tts-setup serve render draw eval eval-base dataset grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
+.PHONY: ui tts-setup serve render draw eval eval-base agent-image dataset grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
 ui:
 	$(PYTHON) -m ui.server $(ARGS)
 
@@ -21,6 +21,10 @@ draw:
 
 eval eval-base:
 	$(EVAL_PYTHON) -m evaluation.evaluate $(ARGS)
+
+agent-image:
+	docker build -f evaluation/Dockerfile -t artsy-editing-agent:latest .
+	$(PYTHON) -c 'from drawing.mini_dataset import inspect_image; print(inspect_image())'
 
 dataset:
 	$(PYTHON) -m drawing.generate_dataset $(ARGS)

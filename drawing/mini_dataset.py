@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -72,18 +73,90 @@ def provider_messages(messages):
     return [{k: v for k, v in m.items() if k != 'extra'} for m in messages]
 
 
+# The editing image and the independent final renderer must agree on these
+# files. Checking content rather than the mutable tag detects stale Docker builds.
+IMAGE_RUNTIME_FILES = {
+    '/opt/artsy/runtime/artcanvas.py': 'runtime/artcanvas.py',
+    '/opt/artsy/docs/artcanvas.md': 'docs/artcanvas.md',
+    '/opt/artsy/requirements.txt': 'runtime/requirements.txt',
+    '/opt/artsy/render.py': 'evaluation/render.py',
+    '/opt/artsy/agent_commands.py': 'evaluation/agent_commands.py',
+    '/opt/artsy/render_contract.py': 'drawing/render_contract.py',
+    '/opt/artsy/mini_protocol.py': 'drawing/mini_protocol.py',
+}
+
+IMAGE_BUILD_COMMAND = 'docker build -f evaluation/Dockerfile -t artsy-editing-agent:latest .'
+
+# Run as the image's non-root user, in the same network-isolated conditions
+# used for actual model commands. This tests a real ArtCanvas drawing, not just
+# whether a similarly named module happens to import.
+IMAGE_PREFLIGHT_SCRIPT = """
+import hashlib
+import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from PIL import Image
+from artcanvas import ArtCanvas
+
+files = {path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
+         for path in json.loads(__import__('sys').argv[1])}
+with TemporaryDirectory(dir='/workspace') as directory:
+    output = Path(directory) / 'smoke.png'
+    with ArtCanvas(32, 32, str(output)) as canvas:
+        canvas.fill_background(1, 1, 1)
+        canvas.set_color(1, 0, 0)
+        canvas.draw_circle(16, 16, 8, fill=True)
+    with Image.open(output) as image:
+        image.load()
+        assert image.format == 'PNG' and image.size == (32, 32)
+print(json.dumps({'files': files, 'ok': True}))
+"""
+
+
 def inspect_image():
+    """Pin and verify the actual editing container *before* any model requests."""
     image = os.getenv('ARTSY_AGENT_IMAGE', 'artsy-editing-agent:latest')
     try:
         result = subprocess.run(['docker', 'image', 'inspect', image, '--format', '{{.Id}}'],
                                 capture_output=True, text=True, timeout=15, check=True)
     except (OSError, subprocess.SubprocessError) as error:
-        raise RuntimeError('Start Docker and build the editing image: docker build -f '
-                           'evaluation/Dockerfile -t artsy-editing-agent:latest .') from error
+        raise RuntimeError('Start Docker and build the editing image: ' + IMAGE_BUILD_COMMAND) from error
     image_id = result.stdout.strip()
     if not image_id.startswith('sha256:'):
         raise RuntimeError('Docker did not return an immutable editing image ID')
-    return {'name': image, 'id': image_id}
+
+    try:
+        probe = subprocess.run(
+            ['docker', 'run', '--rm', '--pull=never', '--network=none',
+             '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=128',
+             '--memory=512m', '--cpus=1', image_id,
+             'python', '-c', IMAGE_PREFLIGHT_SCRIPT, json.dumps(list(IMAGE_RUNTIME_FILES))],
+            capture_output=True, text=True, timeout=35)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError(f'Cannot verify Artsy editing image {image} ({image_id}): {error}. '
+                           f'Rebuild with: {IMAGE_BUILD_COMMAND}') from error
+    if probe.returncode:
+        raise RuntimeError(
+            f'Artsy editing image {image} ({image_id}) failed its ArtCanvas smoke test: '
+            f'{(probe.stderr or probe.stdout)[-2048:]}. Rebuild with: {IMAGE_BUILD_COMMAND}')
+    try:
+        manifest = json.loads(probe.stdout)
+        if manifest.get('ok') is not True or not isinstance(manifest.get('files'), dict):
+            raise ValueError('Invalid image preflight response')
+    except (ValueError, TypeError) as error:
+        raise RuntimeError(f'Artsy editing image returned invalid preflight output. '
+                           f'Rebuild with: {IMAGE_BUILD_COMMAND}') from error
+
+    root = Path(__file__).resolve().parents[1]
+    for container_path, source_path in IMAGE_RUNTIME_FILES.items():
+        expected = hashlib.sha256((root / source_path).read_bytes()).hexdigest()
+        if manifest['files'].get(container_path) != expected:
+            raise RuntimeError(
+                f'Artsy editing image {image} ({image_id}) is stale or incompatible: '
+                f'{source_path} differs from the installed container copy. '
+                f'Rebuild with: {IMAGE_BUILD_COMMAND}')
+    return {'name': image, 'id': image_id, 'preflight': 'passed'}
 
 
 async def candidate(options, spec, index, api_doc):

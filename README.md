@@ -334,16 +334,26 @@ exposes no refusal tool. Use drawing-only input specs; explicit refusal specs
 require `--harness drawing-tools`. Mini generation requires Docker, including
 when a renderer is supplied programmatically.
 
-Build the persistent editing workspace before collecting trajectories:
+Build and verify the editing workspace before collecting trajectories:
 
 ```sh
-docker build -f evaluation/Dockerfile -t artsy-editing-agent:latest .
+make agent-image
 make dataset ARGS="--harness mini-swe --input datasets/my-prompts/prompts.jsonl --output datasets/experiment-5 --candidates 2"
 ```
 
-The existing renderer image is still required for independent preview and final
-renders (see Docker setup above). `ARTSY_AGENT_IMAGE` can select a different
-editing image; its value and image ID are recorded in the dataset manifest.
+`make agent-image` builds `artsy-editing-agent:latest` and smoke-tests an
+actual ArtCanvas drawing inside the network-isolated editing container. Dataset
+generation performs the same preflight before any teacher/model calls, comparing
+the installed ArtCanvas, API reference, and rendering helpers with the repository
+sources. If you see a stale-image or `ModuleNotFoundError: artcanvas` diagnostic,
+run `make agent-image` and restart generation in a **new output directory** if the
+earlier run already saved candidates.
+
+For mini-SWE, the editing workspace and independent final renderer now use the
+**same verified, immutable image ID**; a separate `artsy-rl-runtime:latest` build
+is not required for mini-SWE collection. `ARTSY_AGENT_IMAGE` can select a custom
+editing image, provided its installed runtime matches the checked-out sources.
+Its name, image ID, and preflight result are recorded in the dataset manifest.
 The editing container has no network, host mounts, or credentials. Its files
 persist within one candidate. Interrupted collection saves a bounded, hashed
 checkpoint of generated files in `/workspace`, `/tmp`, and `/home/artsy`, including
