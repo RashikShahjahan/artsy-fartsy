@@ -43,7 +43,7 @@ DEFAULT_MAX_TOKENS = MAX_RESPONSE_TOKENS
 DEFAULT_TOKEN_LIMIT = None
 DEFAULT_TIME_LIMIT = None
 DEFAULT_MAX_TURNS = 25
-RUNTIME_VERSION = "pycairo-v1"
+from drawing.render_contract import RUNTIME_VERSION
 LOCAL_MODEL_URL = "http://127.0.0.1:8080/v1"
 sha256 = lambda data: hashlib.sha256(data).hexdigest()
 
