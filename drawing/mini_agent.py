@@ -48,8 +48,8 @@ If your drawing uses randomness, call `random.seed(42)` before the first random 
 
 ## Recommended Workflow
 
-1. Your first tool call must only inspect the installed pycairo API reference at `/opt/artsy/pycairo-api.pyi`. Search for the methods you plan to use and wait for the tool result.
-2. Use the returned signatures when you write the drawing code in a later tool call.
+1. Your first tool call must only inspect the installed pycairo Markdown reference at `/opt/artsy/docs/pycairo/README.md` and relevant method pages. Use `ls` to navigate and `cat` to read whole pages. Read complete signatures, parameter descriptions, and overloads, not isolated `rg -n` matches. You can read multiple pages in one bash command; wait for the tool result before writing code.
+2. Use those complete API definitions when you write the drawing code in a later tool call.
 3. Run the Python entrypoint you intend to submit with `rm -f output.png && python ENTRYPOINT` and wait for the result. If execution fails, fix the error and rerun the script.
 4. After the script succeeds, use a separate tool call, `artsy-preview output.png`, to view the generated image. If you edit the source, run it again and view the new PNG before submitting.
 5. Once you have viewed the image from the current source and it meets the request, submit that entrypoint. Submission is mandatory.
