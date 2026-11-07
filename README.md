@@ -1,6 +1,6 @@
 # Artsy
 
-Train and evaluate models that draw with Python. An agent writes pycairo code,
+Train and evaluate models that draw with Python. An agent writes ArtCanvas code,
 inspects PNG previews, repairs its work, and submits an image with editable source.
 The project includes a local web UI, teacher dataset generation, hosted LoRA SFT,
 GRPO training, and an independent Inspect evaluation harness.
@@ -142,21 +142,10 @@ Submission snapshots the Python files in the workspace. Final scoring recreates
 those modules in a fresh directory and runs the selected entrypoint. Non-Python
 workspace assets are not included. The backend stores this snapshot as its own
 `program.py` artifact; that name is not imposed on the agent's source files.
-The system prompt reuses mini's built-in opening with brief drawing-specific
-instructions. The Docker image generates a browsable Markdown API reference from
-the *installed* pycairo type stub at `/opt/artsy/docs/pycairo/README.md`.
-Classes have their own directories, and each method has a complete Markdown page
-(for example `/opt/artsy/docs/pycairo/Context/arc.md`). The agent can navigate
-with `ls` and read pages with `cat`, without receiving truncated grep signatures.
-The original stub is still available at `/opt/artsy/pycairo-api.pyi`. To rebuild
-outside Docker, run:
-
-```sh
-python scripts/generate_pycairo_markdown.py /path/to/cairo/__init__.pyi /tmp/pycairo-docs
-```
-
-Existing SFT trajectories are not changed by the new documentation layout;
-retrieval behavior needs fresh demonstrations or a controlled prompt-only eval.
+The mini-SWE prompt includes the complete [ArtCanvas API reference](docs/artcanvas.md)
+instead of asking the agent to search a large pycairo documentation directory.
+The original pycairo reference remains available for debugging at
+`/opt/artsy/pycairo-api.pyi`, but is not the model-facing drawing API.
 
 This is trajectory contract v4. Use `--harness drawing-tools` to run historical
 checkpoints trained on `update_drawing`, `read_drawing`, `preview_drawing`,
@@ -393,8 +382,9 @@ This includes the 228 prompts restored from the historical extended evaluation.
 Evaluation uses the original **163** prompts; RL has **327**, and preference is empty.
 Review the combined dataset with
 `make ui ARGS="--dataset datasets/parti-prompts/sft/prompts.jsonl --candidates datasets/parti-prompts/sft/candidates.jsonl"`.
-The preserved trajectories use `artcanvas-v2`; current `pycairo-v1` training
-requires regenerating with mini-SWE into a fresh output directory.
+Preserved ArtCanvas trajectories are historical training sources. Recent native
+pycairo trajectories are incompatible with the restored ArtCanvas runtime; generate
+new mini-SWE trajectories or explicitly validate and convert older ArtCanvas records.
 Original batch directories remain as historical sources. The 391-prompt evaluation
 belongs to Experiment 2 and is not held out for models trained on the restored prompts.
 Assignments are deterministic and stratified by upstream Category and Challenge.
@@ -567,19 +557,28 @@ reference, use `--continue-from` with `--additional-steps`; see
 [continuation and checkpoint selection](docs/grpo-continuation.md). Evaluate
 checkpoints separately with Inspect and human review.
 
-## Pycairo and local episodes
+## ArtCanvas v2 and local episodes
 
-Generated programs use the full pycairo API through `import cairo` and explicitly
-save the relative path `output.png` with `surface.write_to_png("output.png")`.
-Python previews and final validation rerun the program in a fresh directory;
-absolute output paths and previously copied PNGs do not satisfy that contract. The versioned
-`pycairo-v1` runtime uses native pycairo bindings. Programs create their own surface,
-context, and background. Default output is 1920×1200. Standalone rendering accepts
-sizes up to 4096×4096; Inspect and RL require the fixed default dimensions.
-The installed pycairo package includes its full API reference in `cairo/__init__.pyi`.
-The sandbox exposes it at `/opt/artsy/pycairo-api.pyi`, searchable with `rg`; no
-separate documentation download is needed. Existing ArtCanvas programs and recordings
-must be migrated or regenerated before use with this runtime.
+New drawings use the original [ArtCanvas v2 API](docs/artcanvas.md):
+`from artcanvas import ArtCanvas`. The complete, one-page API reference is
+included directly in the agent prompt, so a documentation-search tool call is
+unnecessary. ArtCanvas wraps the installed Cairo bindings and creates a white
+1920×1200 canvas by default. Use the context manager to write the relative
+`output.png` file:
+
+```python
+from artcanvas import ArtCanvas
+
+with ArtCanvas(1920, 1200, "output.png") as canvas:
+    canvas.set_color(0, 0, 1)
+    canvas.draw_circle(960, 600, 200, fill=True)
+```
+
+Python previews and final validation rerun the program in a fresh directory.
+Absolute output paths and previously copied PNGs do not satisfy that contract.
+The runtime provenance is `artcanvas-v2`; recent `pycairo-v1` trajectories
+and checkpoints remain historical and must not be mixed with new ArtCanvas SFT
+and GRPO runs.
 
 Render an existing program without a model server or Docker:
 

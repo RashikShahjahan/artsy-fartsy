@@ -9,6 +9,7 @@ Unexecuted malformed teacher replies and judge critiques are omitted.
 """
 
 from drawing.documentation import DOCUMENTATION_LOCATION, api_documentation
+from drawing.render_contract import RUNTIME_VERSION
 
 import copy
 import hashlib
@@ -331,7 +332,7 @@ def _convert_record(record: dict, root: Path, loss_policy: str = LOSS_POLICY) ->
     if loss_policy not in LOSS_POLICIES:
         raise ValueError(f"Unknown loss policy: {loss_policy}")
     rid = record["id"]
-    if record.get("runtimeVersion") != "pycairo-v1":
+    if record.get("runtimeVersion") != RUNTIME_VERSION:
         raise ValueError(f"{rid}: incompatible drawing runtime")
     if record.get("apiDocHash") != digest(api_documentation().encode()):
         raise ValueError(f"{rid}: API documentation changed since generation")
