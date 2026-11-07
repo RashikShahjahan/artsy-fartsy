@@ -18,7 +18,7 @@ def drawing_system_prompt(token_limit: int | None = MODEL_CONTEXT_WINDOW, token_
     """
     return (
         "Fulfill the drawing request by writing /workspace/program.py. "
-        "Use the installed pycairo package (import cairo) to save output.png at 1920×1200. "
+        "Use the installed ArtCanvas v2 API (from artcanvas import ArtCanvas) to save output.png at 1920×1200. "
         "Use bash commands to write, run, and fix your program. "
         "Write the program and run its preview in separate bash calls on separate turns. "
         "Use the preview command to receive both execution feedback and the actual PNG image. "
@@ -49,7 +49,7 @@ def _drawing_tool(name: str, description: str, argument: str | None = None, deta
 
 
 DRAWING_TOOLS = [
-    _drawing_tool("update_drawing", "Create or replace the drawing with a complete pycairo Python program.",
+    _drawing_tool("update_drawing", "Create or replace the drawing with a complete ArtCanvas v2 Python program.",
                   "source", "Complete Python source saving a 1920×1200 output.png, at most 64 KiB."),
     _drawing_tool("read_drawing", "Read the current drawing's Python source."),
     _drawing_tool("preview_drawing", "Render the current drawing and return execution feedback and its PNG preview."),
@@ -64,7 +64,7 @@ def drawing_tools_prompt() -> str:
     return (
         "Fulfill the drawing request using the drawing tools. "
         "Use update_drawing(source) to create or replace the complete Python program. "
-        "Use the installed pycairo package (import cairo) to save output.png at 1920×1200. "
+        "Use the installed ArtCanvas v2 API (from artcanvas import ArtCanvas) to save output.png at 1920×1200. "
         "Use read_drawing() to inspect the current source if needed. "
         "After writing, call preview_drawing() on a separate turn to receive execution "
         "feedback and the actual PNG image. Revise the source and preview again as needed. "
