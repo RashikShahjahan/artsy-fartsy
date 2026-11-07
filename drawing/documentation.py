@@ -5,8 +5,9 @@ from importlib.metadata import distribution
 import json
 
 DOCUMENTATION_LOCATION = (
-    'Official pycairo API reference (searchable with rg): /opt/artsy/pycairo-api.pyi. '
-    'Before writing code, search the installed API reference for the operations you plan to use. '
+    'Browsable pycairo Markdown API reference: /opt/artsy/docs/pycairo/README.md. '
+    'Before writing code, navigate the class folders and use cat to read complete method pages, '
+    'including parameters and overloads. The source type stub is /opt/artsy/pycairo-api.pyi. '
 )
 
 
