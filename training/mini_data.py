@@ -6,6 +6,12 @@ import re
 
 from drawing.agent_contract import SFT_MAX_TURNS
 from drawing.documentation import DOCUMENTATION_LOCATION
+
+# Historical v5 prompts used the pycairo-stub locator; do not rewrite their recorded headers.
+_HISTORICAL_DOC_LOCATION = (
+    'Official pycairo API reference (searchable with rg): /opt/artsy/pycairo-api.pyi. '
+    'Before writing code, search the installed API reference for the operations you plan to use. '
+)
 from drawing.mini_agent import TOOLS, VERSION, system_prompt, task_prompt
 from drawing.render_contract import OUTPUT_PATH_GUIDANCE
 from drawing.tool_dataset import trajectory_hash
@@ -40,7 +46,7 @@ _LEGACY_SYSTEM_PROMPTS = tuple(
 def _historical_task_prompt(prompt, workflow_version):
     output_guidance = OUTPUT_PATH_GUIDANCE
     if workflow_version == 5:
-        workflow = f"""1. Identify the requested subjects, composition, style, and constraints. {DOCUMENTATION_LOCATION.strip()}
+        workflow = f"""1. Identify the requested subjects, composition, style, and constraints. {_HISTORICAL_DOC_LOCATION.strip()}
 2. Before submission, view rendered images with `artsy-preview ENTRYPOINT`.
 3. Make focused edits to fix the most important issues you observed, then preview again to verify the changes.
 4. Submit promptly once the drawing meets the request. Submission is mandatory."""
