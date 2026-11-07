@@ -47,7 +47,7 @@ class DetailAPITests(unittest.TestCase):
                 c.stroke()
             with Image.open(dest) as image:
                 self.assertEqual(image.getpixel((45, 55))[:3], (255, 0, 0))
-                self.assertEqual(image.getpixel((85, 55))[:3], (255, 255, 255))
+                self.assertEqual(image.getpixel((89, 50))[:3], (255, 255, 255))
                 self.assertEqual(image.getpixel((125, 50))[:3], (0, 0, 255))
                 self.assertEqual(image.getpixel((170, 50))[:3], (255, 255, 255))
 
