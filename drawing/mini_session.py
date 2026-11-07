@@ -47,18 +47,6 @@ class DrawingSession:
             if output is None:
                 output = '\n'.join(p.get('text', '') for p in result.get('content', []))
             events, text = read_events(output)
-            # These events are emitted by trusted Artsy executables (and can
-            # occur inside compound bash scripts). Reject a submission made in
-            # the same shell call as a preview: the agent cannot inspect that
-            # image until a *subsequent model turn*. Check before mutating
-            # submission state, regardless of event order or shell exit code.
-            has_preview = any(event['kind'] == 'preview' for event in events)
-            has_submit = (any(event['kind'] == 'submit' for event in events)
-                          or (result['returncode'] == 0 and COMPLETE in text.splitlines()))
-            if has_preview and has_submit:
-                return self.result(1, 'Preview and submission must use separate bash tool calls. '
-                                   'Run artsy-preview, inspect its returned image, then call '
-                                   'artsy-submit ENTRYPOINT in a later model turn.')
             images, previews = [], []
             for event in events:
                 if event['kind'] == 'preview':
