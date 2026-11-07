@@ -38,7 +38,7 @@ PROVENANCE_FILES = (
     "evaluation/agent_commands.py",
     "drawing/render_contract.py", "drawing/model_profiles.py", "drawing/vision.py",
     "training/run_store.py", "training/hpsv3.py", "training/hpsv3_server.py",
-    "runtime/requirements.txt",
+    "runtime/requirements.txt", "runtime/artcanvas.py", "docs/artcanvas.md",
     "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/mini.yaml",
     "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
     "evaluation/requirements.txt", "training/cookbook_env.py", "training/cookbook_mini.py",
