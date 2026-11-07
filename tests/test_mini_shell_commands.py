@@ -90,6 +90,9 @@ class DockerShellTests(unittest.IsolatedAsyncioTestCase):
         try:
             code = "cat > /tmp/scene.py <<'PY'\n" + CODE + 'PY\n'
             shell = lambda c: asyncio.to_thread(workspace.execute, {'command': c})
+            import_check = await shell("python -c \"from artcanvas import ArtCanvas; print(ArtCanvas.__name__)\"")
+            self.assertEqual(import_check['returncode'], 0, import_check)
+            self.assertIn('ArtCanvas', import_check['output'])
             docs = await shell("rg -n -A 12 'def set_source_rgb' /opt/artsy/pycairo-api.pyi")
             self.assertEqual(docs['returncode'], 0, docs)
             self.assertIn('set_source_rgb', docs['output'])
