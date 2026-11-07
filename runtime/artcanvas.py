@@ -343,6 +343,10 @@ class ArtCanvas:
         """Return an immutable snapshot of the current path."""
         return self.ctx.copy_path()
 
+    def append_path(self, path):
+        """Append a saved path to the current composable path without drawing."""
+        self.ctx.append_path(path)
+
     def draw_path(self, path, fill=False, stroke=False):
         """Draw a saved path, optionally filling and outlining it.
 
