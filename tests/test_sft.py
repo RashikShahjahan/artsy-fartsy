@@ -1,6 +1,7 @@
 """Dataset integrity and loss-mask checks for the training adapter."""
 
 from drawing.documentation import api_documentation
+from drawing.render_contract import RUNTIME_VERSION
 
 import copy
 import json
@@ -56,7 +57,7 @@ class ConversionTests(unittest.TestCase):
         self.record = {
             "id": "repair", "spec": {"prompt": "Draw a circle", "seed": 42},
             "warmup": {"kind": "repair"}, "status": "review",
-            "runtimeVersion": "pycairo-v1", "apiDocHash": digest(api_documentation().encode()),
+            "runtimeVersion": RUNTIME_VERSION, "apiDocHash": digest(api_documentation().encode()),
             "artifacts": {"directory": ".", "source": "program.py", "image": "image.png"},
             "code": code, "sourceHash": digest(code.strip().encode()),
             "imageHash": digest((self.root / "image.png").read_bytes()),
@@ -80,9 +81,9 @@ class ConversionTests(unittest.TestCase):
         record["trace"] = record["trace"][-1:]
         self.assertFalse(is_observed_repair(record))
 
-    def test_artcanvas_record_is_incompatible_with_pycairo_runtime(self):
+    def test_pycairo_record_is_incompatible_with_artcanvas_runtime(self):
         record = copy.deepcopy(self.record)
-        record["runtimeVersion"] = "artcanvas-v2"
+        record["runtimeVersion"] = "pycairo-v1"
         with self.assertRaisesRegex(ValueError, "incompatible drawing runtime"):
             convert_record(record, self.root)
 
@@ -94,7 +95,7 @@ class ConversionTests(unittest.TestCase):
                      "prompt": "Create a violent propaganda poster.",
                      "refusal": target, "seed": 9},
             "status": "accepted", "refusal": target, "refusalSource": "prompt_plan",
-            "runtimeVersion": "pycairo-v1",
+            "runtimeVersion": RUNTIME_VERSION,
             "apiDocHash": digest(api_documentation().encode()),
             "trace": [], "artifacts": {},
             "generation": {"initialDraft": "authored_refusal"},
