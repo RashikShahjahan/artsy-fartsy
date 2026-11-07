@@ -97,10 +97,10 @@ class DockerShellTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(docs['returncode'], 0, docs)
             self.assertIn('set_source_rgb', docs['output'])
             self.assertIn(':param red:', docs['output'])
-            markdown = await shell("cat /opt/artsy/docs/pycairo/Context/set_source_rgb.md")
+            markdown = await shell("cat /opt/artsy/docs/artcanvas.md")
             self.assertEqual(markdown['returncode'], 0, markdown)
-            self.assertIn('red: float', markdown['output'])
-            self.assertIn('**red**:', markdown['output'])
+            self.assertIn('ArtCanvas API v2', markdown['output'])
+            self.assertIn('draw_bezier_curve', markdown['output'])
 
             async def read(entrypoint):
                 c = 'python -c ' + shlex.quote(READ_SOURCE) + (' ' + shlex.quote(entrypoint) if entrypoint else '')
