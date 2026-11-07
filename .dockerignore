@@ -3,8 +3,12 @@
 !evaluation/
 !evaluation/Dockerfile
 !evaluation/render.py
+!scripts/
+!scripts/generate_pycairo_markdown.py
 !runtime/
 !runtime/**
+!docs/
+!docs/artcanvas.md
 !training/
 !training/score_rl.py
 !drawing/
