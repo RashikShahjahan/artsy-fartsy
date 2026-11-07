@@ -346,7 +346,7 @@ Artifacts: [sealed UI score export](eval-results/experiment-1-human-preferences/
 ## Experiment 5 — Rank-128 SFT with revised trajectory generation and coding harness
 
 - **Recorded:** 2026-11-04 (America/Toronto).
-- **Status:** Planned; trajectory generation and training have not started for this experiment.
+- **Status:** Rank-128 SFT training and the 12-turn held-out evaluation with HPSv3 scoring are complete. Human image review has not been run.
 - **Decision:** Keep LoRA rank 128 for the next SFT run. This is Rashik's choice based on the previous experiments, including the observed human-preference and mean HPSv3 reward results; it does not establish statistically significant rank-128 superiority or revise earlier results.
 - **Question:** Does a new rank-128 SFT run with revised teacher prompts and tooling improve drawing quality and final-image reliability?
 
@@ -359,7 +359,7 @@ Artifacts: [sealed UI score export](eval-results/experiment-1-human-preferences/
 
 ### Run details and evaluation
 
-Teacher model, trajectory count, adapter initialization, training settings other than rank, and harness configuration remain to be recorded before launch. Save the final prompt and tool schemas, dataset hashes, and training configuration with the run artifacts.
+The final training configuration and dataset hash are recorded in the run manifest. The 12-turn held-out evaluation compares the completed rank-128 checkpoint against the preceding mini-SWE rank-128 checkpoint on the original 163 prompts. Because the harness, prompts, and training data changed together, this comparison measures their combined effect and cannot isolate each change's contribution.
 
 Use the original 163 held-out evaluation prompts for comparison with the previous rank-128 checkpoints. The restored 228 SFT prompts remain training inputs and must not be counted as held-out evaluation. Report image quality, valid final-image rate, rendering failures, turn-limit outcomes, and token/turn usage, with the generation settings and tool interface recorded for each comparison. Because these four changes are introduced together, this experiment measures their combined effect and cannot isolate each change's contribution.
 
@@ -377,7 +377,7 @@ PNG observations, source hashes, and independent final render results. All
 executed editing actions receive supervision. No refusal tool is exposed; use
 drawing-only prompts. The teacher is instructed to omit unrequested image text.
 Two single-trajectory smoke tests have been collected with the configured teacher;
-the full experiment dataset and training run have not been launched.
+at that point, the full experiment dataset and training run had not been launched.
 
 Single-trajectory smoke-test artifacts: `datasets/mini-swe-single-demo-2026-11-04/`.
 The teacher was `openai/gpt-6-luna` through OpenRouter, using the SFT prompt
@@ -491,6 +491,46 @@ rendering and SFT conversion passed, retaining all seven assistant actions. Usag
 `datasets/mini-swe-output-path-demo-2026-11-04/`, including `trajectory.md`, source,
 `sft-example.json`, raw trajectory, and final PNG. Human review is pending;
 no training was launched.
+
+### Rank-128 training and held-out evaluation (2026-11-06)
+
+The hosted SFT run used 2,276 mini-SWE trajectories from the revised dataset,
+Qwen/Qwen3.5-4B, LoRA rank 128, seed 42, batch size 32, one epoch, cosine
+schedule, and learning rate 0.0002. It completed all 72 updates; final-batch
+loss was 0.705914. The training manifest records dataset SHA-256
+`daa7256c44d75223e306383db76056323862496839cb27c87a0660e8ae8216b9` and
+`--allow-unreviewed`, as authorized for the run.
+
+The checkpoint was evaluated on the original 163 Parti prompts with the
+mini-SWE harness, a 12-turn cap, 32,768 output tokens per response, temperature
+0, and no shared token or wall-clock episode cap. All samples completed without
+sample errors. The run used 50 concurrent samples, model connections, and
+sandboxes.
+
+| Measure | Previous mini-SWE rank 128 | Experiment 5 rank 128 |
+|---|---:|---:|
+| Valid final images | 48/163 (29.4%) | 97/163 (59.5%) |
+| Incomplete at 12 turns | 115/163 | 66/163 |
+| Total inference tokens | 19,225,809 | 12,272,188 |
+| Mean tokens per prompt | 117,950 | 75,290 |
+| Mean HPSv3 reward on valid images | −2.286 | −3.693 |
+| Mean normalized preference across all prompts | 0.1183 | 0.2037 |
+
+The normalized preference includes failed deliveries as zero, so its increase
+reflects the higher render rate and is not evidence of higher quality among
+delivered images. On the 32 prompts where both checkpoints delivered valid
+images, HPSv3 preferred the previous checkpoint on 17 and Experiment 5 on 15;
+the raw mean difference on those matched images was 0.139 in favor of the
+previous checkpoint. These are descriptive results from one checkpoint per
+run, with no significance test or training-seed replication. HPSv3 used the
+quantized MLX implementation `mlx-4bit-g64-v1`; these rewards are not
+full-precision scores. No human image review or separate adherence judgment was
+run.
+
+- Training artifacts: [run directory](checkpoints/sft-experiment5-seeded-rank128-2026-11-06/).
+- Generation artifacts: [12-turn evaluation](eval-results/experiment5-seeded-rank128-mini-swe-12-turns-50c-2026-11-06/).
+- HPSv3 summary: [comparison with the previous mini-SWE rank-128 checkpoint](eval-results/experiment5-seeded-rank128-hpsv3-vs-prior-2026-11-06/comparison.json).
+- An initial 10-worker attempt was stopped after concurrency was raised to 50; its partial output is preserved at `eval-results/experiment5-seeded-rank128-mini-swe-12-turns-2026-11-06/` and is not included above.
 
 ## Experiment 6 — Error-aware SFT on cumulative mini-SWE edits
 
