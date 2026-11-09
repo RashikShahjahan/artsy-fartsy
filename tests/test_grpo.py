@@ -279,7 +279,11 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_defaults_match_existing_agent_protocol(self):
         args = parser().parse_args([])
-        self.assertEqual(args.group_size, 4)
+        self.assertIsNone(args.group_size)
+        from training.grpo import group_size_for_stage
+        self.assertEqual(group_size_for_stage("rlvr"), 2)
+        self.assertEqual(group_size_for_stage("rlhf"), 4)
+        self.assertEqual(parser().parse_args(["--group-size", "6"]).group_size, 6)
         self.assertEqual(args.batch_size, 8)
         self.assertEqual(args.max_samples, 32)
         from training.data import ROOT

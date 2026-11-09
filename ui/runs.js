@@ -30,14 +30,15 @@ const fields = {
     ["dry_run", "Dry run (no model calls)", "bool", false, "", "", true],
   ],
   rl: [
+    ["reward_mode", "RL stage", "select", "rlvr", "", "RLVR uses 227 reserved prompts after SFT; RLHF uses the remaining 100 and HPSv3.", false, ["rlvr", "rlhf"]],
     ["harness", "Rollout harness", "select", "mini-swe", "", "Match the harness used to train the SFT checkpoint.", true, ["mini-swe", "drawing-tools"]],
-    ["dataset", "RL prompt dataset", "text", "datasets/grpo-v2/prompts.jsonl", "", ""],
-    ["init_checkpoint", "Initial SFT checkpoint", "catalog", "", "checkpoints/run/final.json", "Choose a completed SFT checkpoint; GRPO uses its optimizer and sampler state."],
+    ["dataset", "RL prompt dataset", "text", "datasets/parti-prompts/rl/prompts.jsonl", "", "Canonical 327-prompt pool is automatically split into 227 RLVR and 100 RLHF prompts. Custom datasets are used as supplied."],
+    ["init_checkpoint", "Initial SFT / RLVR checkpoint", "catalog", "", "checkpoints/run/final.json", "Choose SFT for RLVR or RLVR for RLHF. The CLI validates stage compatibility."],
     ["continue_from", "Continue from previous RL run (optional)", "text", "", "checkpoints/previous-run", "Forks an existing completed run with optimizer state.", true],
     ["additional_steps", "Additional updates when continuing", "int", "", "Required only for continuation", "", true],
     ["max_steps", "Maximum optimizer updates", "int", "", "All updates", ""],
     ["batch_size", "Prompt groups per update", "int", "2", "", ""],
-    ["group_size", "Rollouts per prompt", "int", "4", "", ""],
+    ["group_size", "Rollouts per prompt (optional override)", "int", "", "RLVR: 2 · RLHF: 4", "Leave blank for stage-specific default."],
     ["max_samples", "Concurrent Docker episodes", "int", "4", "", ""],
     ["epochs", "Epochs", "int", "1", "", ""],
     ["learning_rate", "Learning rate", "float", "0.00001", "", "", true],
@@ -50,7 +51,7 @@ const titles = {eval: "evaluation", sft: "SFT", rl: "RL"};
 const descriptions = {
   eval: "Runs the existing Inspect benchmark. Uses model calls, Docker, and judges unless execution-only is enabled.",
   sft: "Trains on approved conversation trajectories using Tinker. Output appears under checkpoints/.",
-  rl: "Runs the GRPO trainer, including Docker rollouts. Results will appear in the RL monitor.",
+  rl: "Runs PPO with verifiable RLVR rewards or HPSv3 preference RLHF rewards, using Docker rollouts.",
 };
 const $ = id => document.getElementById(id);
 const saved = {};
@@ -84,7 +85,7 @@ async function loadModelChoices() {
   $("advanced").open = wasOpen;
   $("model-choice-status").textContent =
     modelChoices.eval.length + " inference models, " + modelChoices.rl.length +
-    " saved SFT checkpoints" + (bridgeOnline ? "" : " · inference bridge offline");
+    " saved SFT/RLVR checkpoints" + (bridgeOnline ? "" : " · inference bridge offline");
 }
 function saveFields() {
   const values = saved[activeKind] || {};

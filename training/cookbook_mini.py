@@ -94,11 +94,16 @@ class MiniDockerSession(DockerSession):
 
     async def execute_bash(self, command):
         if not isinstance(command, str) or not command.strip():
+            self.invalid_tool_calls += 1
             return "Return code: 1\nExpected a bash command.", False
         if self.submitted:
             return "Return code: 1\nThis request has already ended.", True
         result = await self.drawing.execute(command)
         self.tool_calls.append({"name": "bash", "arguments": {"command": command}})
+        self.execution_attempts += 1
+        if (result["returncode"] != 0 or any(
+                event.get("ok") is False for event in result.get("previewEvents", []))):
+            self.execution_errors += 1
         self.previews.extend(result.get("previewEvents", []))
         self.submitted = self.drawing.submitted
         observation = await asyncio.to_thread(
@@ -127,6 +132,7 @@ class MiniBashTool:
         from tinker_cookbook.tool_use.tools import simple_tool_result
         arguments = input.arguments
         if not isinstance(arguments, dict) or set(arguments) != {"command"} or not isinstance(arguments["command"], str):
+            self.session.invalid_tool_calls += 1
             observation, done = "Return code: 1\nExpected bash(command: string).", False
         else:
             observation, done = await self.session.execute_bash(arguments["command"])

@@ -155,23 +155,35 @@ Sequences are preflighted rather
 than truncated or packed. Resume uses the local checkpoint metadata to restore the
 remote optimizer state and deterministic data order.
 
-## Policy stages: SFT → RL
+## Policy stages: SFT → RLVR → RLHF
 
 ```mermaid
 flowchart TD
-    A[SFT final.json] --> B[RL policy initialization]
+    A[SFT final.json] --> B[RLVR policy initialization]
     A --> C[Frozen SFT KL reference sampler]
+    P[327 held-out RL prompts] --> Q[227 RLVR prompts]
+    P --> R[100 RLHF prompts]
+    Q --> D
     B --> D[Grouped multi-turn Docker rollouts]
-    D --> E[Fresh final rendering and independent adherence, image safety and code safety judges]
-    E --> F[Safety/refusal outcomes or normalized adherence reward]
+    D --> E[Verify bash schema, command/preview outcomes and trusted final PNG]
+    E --> F[Deterministic RLVR reward]
     C --> G[Cookbook PPO updates]
     F --> G
-    G --> H[RL checkpoints and final.json]
+    G --> H[RLVR final.json]
+    H --> I[RLHF policy initialization]
+    C --> J[Cookbook PPO with original SFT KL reference]
+    I --> K[Grouped Docker rollouts and fresh trusted final rendering]
+    R --> K
+    K --> L[HPSv3 normalized final-image preference]
+    L --> J
+    J --> M[RLHF final.json]
 ```
 
-RL optimizes adherence and safety/refusal outcomes directly from SFT. There is no
-separate visual preference training stage or visual quality reward.
-See [reward architecture](rlhf-architecture.md).
+RLVR trains verifiable workflow behavior before RLHF: tool-call schema validity,
+non-erroring sandbox commands and previews, and an independently verified final
+image. RLVR needs no visual judge. Its completed checkpoint initializes RLHF;
+RLHF uses HPSv3 final-image preference while retaining the original frozen SFT
+KL reference. See [reward architecture](rlhf-architecture.md).
 
 ## Shared execution boundary
 

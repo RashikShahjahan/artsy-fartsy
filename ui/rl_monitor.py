@@ -70,6 +70,7 @@ def runs(root: Path):
         choices.append({
             "id": path.name,
             "model": config.get("model"),
+            "stage": config.get("reward_mode", "rlhf"),
             "totalSteps": manifest.get("total_steps"),
             "groupSize": config.get("group_size"),
             "batchSize": config.get("batch_size"),
@@ -145,6 +146,11 @@ def episodes(root: Path, name: str):
                     "adherence": scores.get("adherence"),
                     "visualQuality": scores.get("visual_quality"),
                     "renderValid": scores.get("render_valid") == 1,
+                    "verifiedImage": scores.get("image_verified"),
+                    "toolProtocol": scores.get("tool_protocol"),
+                    "executionSuccess": scores.get("execution_success"),
+                    "executionErrors": result.get("executionErrors"),
+                    "invalidToolCalls": result.get("invalidToolCalls"),
                     "toolCalls": (len(result["toolCalls"]) if isinstance(result.get("toolCalls"), list)
                                   else len(result["commands"]) if isinstance(result.get("commands"), list) else 0),
                     "bashCalls": len(result["commands"]) if isinstance(result.get("commands"), list) else 0,

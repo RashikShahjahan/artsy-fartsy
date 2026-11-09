@@ -20,6 +20,8 @@ sys.path.insert(0, str(ROOT))
 
 from drawing.dataset_specs import validate_specs
 from drawing.eval_specs import load_specs
+from training.rl_split import (RL_TOTAL, RLVR_COUNT, RLHF_COUNT, SPLIT_VERSION,
+                               partition_rl_prompts)
 
 REVISION = "944b156abfdad7627c3221b5ec4f6a6fb060a197"
 SOURCE_SHA256 = "fab29e41bb512a169b56acab4cf2a41dcb675e285df2efcde6640c7dd3c440eb"
@@ -217,6 +219,37 @@ def prepare(source: Path, output: Path, seed: int, preference_count: int | None 
             "strata": {f"{category} / {challenge}": count for (category, challenge), count in sorted(
                 Counter((row["source"]["category"], row["source"]["challenge"]) for row in rows).items())},
         }
+    # Also materialize the stage-specific RL subsets for inspection and
+    # explicit --dataset overrides. The trainer derives precisely the same
+    # assignments from rl/prompts.jsonl when using its default dataset.
+    rlvr_target = (len(splits["rl"]) * RLVR_COUNT + RL_TOTAL // 2) // RL_TOTAL
+    staged = partition_rl_prompts(splits["rl"], rlvr_count=rlvr_target)
+    assert set(row["id"] for row in staged["rlvr"]).isdisjoint(
+        row["id"] for row in staged["rlhf"])
+    manifest["rl_stage_splits"] = {
+        "version": SPLIT_VERSION,
+        "source_split": "rl",
+        "canonical_counts": {"rlvr": RLVR_COUNT, "rlhf": RLHF_COUNT, "total": RL_TOTAL},
+        "method": "Stratified largest-remainder allocation over RL Category/Challenge; "
+                  "stable SHA-256 by prompt ID, independent of training RNG seeds.",
+        "splits": {},
+    }
+    for stage in ("rlvr", "rlhf"):
+        rows = staged[stage]
+        path = output / "rl" / f"{stage}.prompts.jsonl"
+        text = "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n"
+                       for row in rows)
+        path.write_text(text, encoding="utf-8")
+        assert len(load_specs(path)) == len(rows)
+        manifest["rl_stage_splits"]["splits"][stage] = {
+            "file": f"rl/{stage}.prompts.jsonl",
+            "records": len(rows),
+            "sha256": digest(path.read_bytes()),
+            "categories": dict(sorted(Counter(row["source"]["category"] for row in rows).items())),
+            "challenges": dict(sorted(Counter(row["source"]["challenge"] for row in rows).items())),
+        }
+    if len(splits["rl"]) == RL_TOTAL:
+        assert len(staged["rlvr"]) == RLVR_COUNT and len(staged["rlhf"]) == RLHF_COUNT
     write_json(output / "manifest.json", manifest)
     return manifest
 

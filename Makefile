@@ -2,7 +2,7 @@ PYTHON ?= .venv/bin/python
 EVAL_PYTHON ?= $(if $(wildcard .eval-venv/bin/python),.eval-venv/bin/python,$(PYTHON))
 ARGS ?=
 
-.PHONY: ui tts-setup serve render draw eval eval-base agent-image dataset grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
+.PHONY: ui tts-setup serve render draw eval eval-base agent-image dataset rlvr rlhf grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
 ui:
 	$(PYTHON) -m ui.server $(ARGS)
 
@@ -28,6 +28,12 @@ agent-image:
 
 dataset:
 	$(PYTHON) -m drawing.generate_dataset $(ARGS)
+
+rlvr:
+	$(PYTHON) -m training.rlvr $(ARGS)
+
+rlhf:
+	$(PYTHON) -m training.rlhf $(ARGS)
 
 grpo:
 	$(PYTHON) -m training.grpo $(ARGS)

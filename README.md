@@ -3,7 +3,7 @@
 Train and evaluate models that draw with Python. An agent writes ArtCanvas code,
 inspects PNG previews, repairs its work, and submits an image with editable source.
 The project includes a local web UI, teacher dataset generation, hosted LoRA SFT,
-GRPO training, and an independent Inspect evaluation harness.
+RLVR followed by preference-based GRPO training, and an independent Inspect evaluation harness.
 
 Completed experiment setups, results, and conclusions are recorded in the
 [experiment log](EXPERIMENT_LOG.md).
@@ -90,7 +90,7 @@ or text. It uses GPT-6 Luna through OpenRouter with ten internal turns per
 response; configure `OPENROUTER_API_KEY` and start Docker. The native bridge is
 only needed for Qwen. The developer [Studio](http://127.0.0.1:4173/studio) generates drawings;
 Prompt review and SFT candidates review training data; Runs launches evaluation,
-SFT, and GRPO jobs. RL prompts and RL rollouts browse saved training artifacts.
+SFT, RLVR, and preference RLHF jobs. RL prompts and RL rollouts browse saved training artifacts.
 The `/preferences` workspace supports blind ranking of existing model outputs.
 Browsing and review do not require Docker or a running bridge. Generation and
 training consume provider credits.
@@ -389,7 +389,7 @@ The canonical SFT dataset is `datasets/parti-prompts/sft/`: **1,142 prompts**,
 2,284 generated candidates in `candidates.jsonl`, and 2,219 previously validated
 trajectories in `training-ready.jsonl` (1,134 unique prompts; visual review pending).
 This includes the 228 prompts restored from the historical extended evaluation.
-Evaluation uses the original **163** prompts; RL has **327**, and preference is empty.
+Evaluation uses the original **163** prompts; the reserved RL pool has **327**: **227 for RLVR** and **100 for RLHF**, with no overlap. Preference is empty.
 Review the combined dataset with
 `make ui ARGS="--dataset datasets/parti-prompts/sft/prompts.jsonl --candidates datasets/parti-prompts/sft/candidates.jsonl"`.
 Preserved ArtCanvas trajectories are historical training sources. Recent native
@@ -491,45 +491,90 @@ with remote state paths, and `final.json` with training-state and sampler paths.
 These are metadata, not local full-model weights. The bridge discovers compatible
 samplers for evaluation and Studio.
 
-## GRPO training
+## RLVR and RLHF training
 
-GRPO initializes from a completed SFT checkpoint and uses its sampler as the frozen
-KL reference. Tinker Cookbook handles native sampling, group-relative advantages,
-PPO updates, reference-KL shaping, and optimizer checkpoints. Docker runs each
-multi-turn drawing episode and a separate final scoring render. The inference
-bridge is unnecessary during training.
+The recommended policy pipeline is **SFT → RLVR → RLHF**. Both RL stages use
+Tinker Cookbook PPO/GRPO with grouped multi-turn Docker episodes, reference-KL
+regularization, and hosted LoRA checkpoints. The inference bridge is unnecessary.
+
+**RLVR** uses deterministic **negative-only penalties**, with no HPSv3 service.
+The maximum reward is **0**; successful actions and valid images earn no positive
+bonus:
+- **−0.75** when the final submitted source fails to produce a valid 1920×1200
+  PNG in an independent network-isolated Docker scorer, or is not submitted
+- **−0.125 per invalid tool call**: malformed replies or calls that violate the
+  `bash(command)` schema; an episode with no tool calls incurs one penalty
+- **−0.125 per failed execution**: nonzero shell exit status, failed preview
+  feedback, or a recorded execution error
+
+Penalties accumulate for each error rather than being divided by the number of
+successful actions, so trivial successful commands cannot dilute earlier errors.
+Per-rollout `result.json` stores `image_penalty`, `tool_penalty`,
+`execution_penalty`, aggregate `reward`, diagnostic success ratios, and raw
+error counts.
+
+**RLHF** starts from the RLVR checkpoint and uses the normalized HPSv3 preference
+score for valid submitted images. Its KL reference remains the original frozen
+SFT policy, propagated through the RLVR checkpoint. Direct SFT → RLHF initialization
+remains supported for older experiments but skips the new stage.
 
 ```sh
 uv pip install --python .venv/bin/python -r training/requirements-grpo.txt
 
-# Validate local inputs without API/Docker calls or writes.
-.venv/bin/python -m training.grpo --dry-run \
+# Check the RLVR plan without Tinker, Docker or HPSv3 calls.
+.venv/bin/python -m training.rlvr --dry-run \
   --init-checkpoint checkpoints/sft-run/final.json --max-steps 1
 
-# One hosted update. Start Docker and configure the correctness judge first.
-make grpo ARGS="--init-checkpoint checkpoints/sft-run/final.json --max-steps 1 --output-dir checkpoints/grpo-smoke"
+# Train one RLVR update. Docker and Tinker credentials are required.
+make rlvr ARGS="--init-checkpoint checkpoints/sft-run/final.json --max-steps 1 --output-dir checkpoints/rlvr-smoke"
+
+# Check the preference stage using the RLVR final checkpoint.
+.venv/bin/python -m training.grpo --dry-run \
+  --init-checkpoint checkpoints/rlvr-smoke/final.json --max-steps 1
+
+# Train one RLHF update. Configure ARTSY_HPSV3_MODEL and ARTSY_HPSV3_URL.
+make rlhf ARGS="--init-checkpoint checkpoints/rlvr-smoke/final.json --max-steps 1 --output-dir checkpoints/rlhf-smoke"
 ```
+
+The stage entrypoints default to `checkpoints/rlvr-v1` and `checkpoints/rlhf-v1`,
+with `make rlhf` taking `checkpoints/rlvr-v1/final.json` as its starting state.
+The historical `make grpo` still defaults to the older SFT input for compatibility.
 
 For a full run, omit `--max-steps 1` and choose a new output directory. Repeat that
 original command to resume. `--finalize-only --output-dir PATH` recovers the final
 export after training completes.
 
-**GRPO now defaults to `--harness mini-swe`.** It uses the same mini-SWE-agent
+**Both RL stages use `--harness mini-swe` by default.** It uses the same mini-SWE-agent
 2.2.3 `bash(command)` schema, prompt, persistent editing workspace, optional
 `artsy-preview` images, and `artsy-submit` (or native completion) as new SFT
 trajectories. Submissions snapshot all Python modules; a separate network-isolated
 container re-renders their bundled source for final-image scoring.
 
-Select `--harness drawing-tools` when starting from an older SFT checkpoint trained
-with named drawing tools. New SFT checkpoints declare a `tool_contract` so GRPO
-rejects a mismatched selection. Older checkpoint files lack this marker: inspect
-their training dataset before selecting a harness. A new GRPO run cannot resume
-or continue an older algorithm-version run.
+RLVR requires mini-SWE to verify bash-tool and execution evidence. For legacy
+pre-mini-SWE SFT checkpoints, direct GRPO/RLHF still accepts
+`--harness drawing-tools`; its separate RLVR path is not supported. New SFT
+checkpoints declare a `tool_contract` and incompatible stages are rejected.
+Continuation must stay within the same reward stage and algorithm version.
 
-The default prompt path is `datasets/parti-prompts/rl/prompts.jsonl`, the reserved
-Parti RL split. Each full update uses eight prompts with four rollouts per prompt,
-with capacity for all 32 Docker episodes concurrently. The default initialization is
-the local `checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json`;
+The shared default input file, `datasets/parti-prompts/rl/prompts.jsonl`,
+contains 327 reserved Parti RL prompts. The trainer **automatically partitions
+it into two disjoint stages**: **227 RLVR prompts** and **100 RLHF prompts**.
+Assignment is reproducible, stratified by upstream Category/Challenge, independent
+of rollout RNG seeds, and applied **before** `--limit`. The selected prompt IDs,
+source SHA-256, and split version are pinned in the training manifest and checked
+on continuation. With the CLI default of eight prompts per batch and
+stage-specific rollout counts, one epoch takes **29 RLVR updates (454 rollouts with group size 2)** and
+**13 RLHF updates (400 rollouts with group size 4)**. The maximum Docker
+concurrency remains 32 episodes. Both stages support an explicit
+`--group-size N` override.
+
+`python3 scripts/prepare_parti_prompts.py` also writes inspectable
+`datasets/parti-prompts/rl/rlvr.prompts.jsonl` and
+`datasets/parti-prompts/rl/rlhf.prompts.jsonl`, with counts and hashes in
+`datasets/parti-prompts/manifest.json`. Explicit **custom** `--dataset`
+files are consumed as provided (not automatically repartitioned); the default
+canonical source path activates the 227/100 split. The default initialization is
+`checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json`;
 pass `--init-checkpoint` for your own SFT run.
 
 | Setting | Default |
