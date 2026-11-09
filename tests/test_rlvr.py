@@ -103,9 +103,14 @@ class CheckpointHandoffTests(unittest.TestCase):
                 load_run(args)
 
     def test_rlvr_forbids_legacy_tools(self):
-        args = parser().parse_args(["--reward-mode", "rlvr", "--harness", "drawing-tools"])
-        with self.assertRaisesRegex(ValueError, "mini-swe"):
-            load_run(args)
+        with tempfile.TemporaryDirectory() as root:
+            dataset = Path(root) / "prompts.jsonl"
+            dataset.write_text(json.dumps({"id": "one", "prompt": "Draw", "seed": 1}) + "\n")
+            args = parser().parse_args([
+                "--reward-mode", "rlvr", "--harness", "drawing-tools",
+                "--dataset", str(dataset)])
+            with self.assertRaisesRegex(ValueError, "mini-swe"):
+                load_run(args)
 
 
 class DockerVerifierTests(unittest.IsolatedAsyncioTestCase):
