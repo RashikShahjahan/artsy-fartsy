@@ -22,40 +22,66 @@ from training.sft import RENDERER
 
 
 class VerifierTests(unittest.TestCase):
-    def test_all_components_are_bounded_and_deterministic(self):
+    def test_clean_submission_receives_zero_not_a_positive_bonus(self):
         value = verified_reward(submitted=True, render_valid=True,
                                 valid_tool_calls=2, invalid_tool_calls=0,
                                 execution_attempts=2, execution_errors=0)
         self.assertEqual(value, {
             "image_verified": 1.0, "tool_protocol": 1.0,
-            "execution_success": 1.0, "reward": 1.0})
-        self.assertEqual(verified_reward(
+            "execution_success": 1.0, "image_penalty": 0.0,
+            "tool_penalty": 0.0, "execution_penalty": 0.0,
+            "reward": 0.0})
+
+    def test_missing_image_and_missing_tool_calls_are_penalized(self):
+        no_work = verified_reward(
             submitted=False, render_valid=False, valid_tool_calls=0,
-            invalid_tool_calls=0, execution_attempts=0, execution_errors=0)["reward"], 0.0)
+            invalid_tool_calls=0, execution_attempts=0, execution_errors=0)
+        self.assertEqual(no_work["reward"], -0.875)
+        self.assertEqual(no_work["image_penalty"], -0.75)
+        self.assertEqual(no_work["tool_penalty"], -0.125)
+        self.assertEqual(no_work["execution_penalty"], 0.0)
 
-    def test_unsubmitted_work_has_at_most_process_credit(self):
-        value = verified_reward(submitted=False, render_valid=True,
-                                valid_tool_calls=5, invalid_tool_calls=0,
-                                execution_attempts=5, execution_errors=0)
-        self.assertEqual(value["image_verified"], 0.0)
-        self.assertEqual(value["reward"], 0.25)
-        value = verified_reward(submitted=True, render_valid=False,
-                                valid_tool_calls=1, invalid_tool_calls=1,
-                                execution_attempts=2, execution_errors=1)
-        self.assertEqual(value["reward"], 0.125)
-        with self.assertRaises(ValueError):
-            verified_reward(submitted=True, render_valid=True,
-                            valid_tool_calls=1, invalid_tool_calls=0,
-                            execution_attempts=1, execution_errors=2)
+        unsubmitted = verified_reward(
+            submitted=False, render_valid=True, valid_tool_calls=5,
+            invalid_tool_calls=0, execution_attempts=5, execution_errors=0)
+        self.assertEqual(unsubmitted["image_verified"], 0.0)
+        self.assertEqual(unsubmitted["reward"], -0.75)
 
-    def test_tool_and_execution_errors_lower_reward(self):
-        clean = verified_reward(submitted=True, render_valid=True,
-                                valid_tool_calls=3, invalid_tool_calls=0,
-                                execution_attempts=3, execution_errors=0)["reward"]
-        buggy = verified_reward(submitted=True, render_valid=True,
+    def test_each_tool_and_execution_failure_adds_a_negative_penalty(self):
+        value = verified_reward(submitted=True, render_valid=True,
                                 valid_tool_calls=3, invalid_tool_calls=2,
-                                execution_attempts=3, execution_errors=1)["reward"]
-        self.assertGreater(clean, buggy)
+                                execution_attempts=3, execution_errors=1)
+        self.assertEqual(value["image_penalty"], 0.0)
+        self.assertEqual(value["tool_penalty"], -0.25)
+        self.assertEqual(value["execution_penalty"], -0.125)
+        self.assertEqual(value["reward"], -0.375)
+        self.assertLessEqual(value["reward"], 0.0)
+
+        invalid = verified_reward(submitted=True, render_valid=False,
+                                  valid_tool_calls=1, invalid_tool_calls=1,
+                                  execution_attempts=2, execution_errors=1)
+        self.assertEqual(invalid["reward"], -1.0)
+
+    def test_successful_commands_cannot_dilute_prior_errors(self):
+        def score(successes):
+            return verified_reward(
+                submitted=True, render_valid=True,
+                valid_tool_calls=successes + 1, invalid_tool_calls=1,
+                execution_attempts=successes + 1, execution_errors=1)["reward"]
+        self.assertEqual(score(0), -0.25)
+        self.assertEqual(score(99), -0.25)
+
+    def test_invalid_evidence_is_rejected(self):
+        for counts in (
+            dict(valid_tool_calls=1, invalid_tool_calls=0,
+                 execution_attempts=1, execution_errors=2),
+            dict(valid_tool_calls=-1, invalid_tool_calls=0,
+                 execution_attempts=0, execution_errors=0),
+            dict(valid_tool_calls=True, invalid_tool_calls=0,
+                 execution_attempts=0, execution_errors=0),
+        ):
+            with self.subTest(counts=counts), self.assertRaises(ValueError):
+                verified_reward(submitted=True, render_valid=True, **counts)
 
 
 class CheckpointHandoffTests(unittest.TestCase):
@@ -164,7 +190,7 @@ class DockerVerifierTests(unittest.IsolatedAsyncioTestCase):
             group.sessions = [session]
             adjustment, = await group.compute_group_rewards(
                 [SimpleNamespace(transitions=[SimpleNamespace(reward=0.1)])], [])
-            expected = 0.75 + 0.125 * 0.5 + 0.125 * (2 / 3)
+            expected = -0.125 - 0.125
             self.assertAlmostEqual(adjustment[0] + 0.1, expected)
             saved = json.loads((root / "result.json").read_text())
             self.assertEqual(saved["invalidToolCalls"], 1)
@@ -187,7 +213,7 @@ class DockerVerifierTests(unittest.IsolatedAsyncioTestCase):
             group.sessions = [session]
             adjustment, = await group.compute_group_rewards(
                 [SimpleNamespace(transitions=[])], [])
-            self.assertEqual(adjustment[0], 0.25)
+            self.assertEqual(adjustment[0], -0.75)
             self.assertEqual(session.result["scores"]["image_verified"], 0.0)
 
 
