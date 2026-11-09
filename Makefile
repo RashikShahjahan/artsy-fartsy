@@ -32,7 +32,10 @@ dataset:
 rlvr:
 	$(PYTHON) -m training.rlvr $(ARGS)
 
-rlhf grpo:
+rlhf:
+	$(PYTHON) -m training.rlhf $(ARGS)
+
+grpo:
 	$(PYTHON) -m training.grpo $(ARGS)
 
 test:
