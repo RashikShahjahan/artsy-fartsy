@@ -25,6 +25,7 @@ from drawing.config import IMAGE_SIZE, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
 from training.hpsv3 import REWARD_VERSION, normalized_reward
 from training.rlvr_reward import RLVR_ALGORITHM, RLVR_REWARD_VERSION
+from training.rl_split import stage_specs
 from drawing.agent_contract import DRAWING_TOOLS_CONTRACT_VERSION
 from drawing.mini_agent import CONTRACT_VERSION as MINI_SWE_CONTRACT_VERSION
 from training.data import ROOT, digest
@@ -45,6 +46,7 @@ PROVENANCE_FILES = (
     "evaluation/requirements.txt", "training/cookbook_env.py", "training/cookbook_mini.py",
     "training/cookbook_dataset.py", "training/score_rl.py", "training/grpo.py",
     "training/sft.py", "training/rlvr.py", "training/rlhf.py", "training/rlvr_reward.py",
+    "training/rl_split.py",
     "training/requirements.txt", "training/requirements-grpo.txt",
     "drawing/dataset_client.py", "drawing/tinker_client.py",
 )
@@ -79,7 +81,7 @@ def checkpoint_tool_contract(path: Path, source: dict) -> str | None:
 
 
 def load_run(args):
-    specs = load_specs(args.dataset)
+    specs, stage_split_version = stage_specs(args.dataset, load_specs(args.dataset), args.reward_mode)
     if args.limit:
         specs = specs[:args.limit]
     if args.reward_mode == "rlvr" and args.harness != "mini-swe":
@@ -136,6 +138,7 @@ def load_run(args):
         "renderer": source["renderer"], "image_size": IMAGE_SIZE,
         "lora_rank": source["lora_rank"],
         "dataset_sha256": digest(args.dataset.read_bytes()),
+        "rl_stage_split_version": stage_split_version,
         "prompt_ids": [row["id"] for row in specs],
         "initial_state_path": initial["state_path"],
         "reference_model": reference_model,
@@ -204,7 +207,10 @@ def load_continuation(args):
             or previous["image_size"] != IMAGE_SIZE
             or digest(args.dataset.read_bytes()) != previous["dataset_sha256"]):
         raise ValueError("Continuation model or dataset changed")
-    all_specs = load_specs(args.dataset)
+    all_specs, stage_split_version = stage_specs(
+        args.dataset, load_specs(args.dataset), args.reward_mode)
+    if previous.get("rl_stage_split_version") != stage_split_version:
+        raise ValueError("Continuation RL stage split changed")
     wanted = previous["prompt_ids"]
     specs = all_specs[:len(wanted)]
     if not specs or [s["id"] for s in specs] != wanted:
