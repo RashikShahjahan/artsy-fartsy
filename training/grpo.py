@@ -44,7 +44,7 @@ PROVENANCE_FILES = (
     "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
     "evaluation/requirements.txt", "training/cookbook_env.py", "training/cookbook_mini.py",
     "training/cookbook_dataset.py", "training/score_rl.py", "training/grpo.py",
-    "training/sft.py", "training/rlvr.py", "training/rlvr_reward.py",
+    "training/sft.py", "training/rlvr.py", "training/rlhf.py", "training/rlvr_reward.py",
     "training/requirements.txt", "training/requirements-grpo.txt",
     "drawing/dataset_client.py", "drawing/tinker_client.py",
 )
