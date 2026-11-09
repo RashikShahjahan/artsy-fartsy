@@ -16,7 +16,7 @@ from unittest.mock import patch
 from drawing.mini_agent import PREVIEW, SUBMIT, run_agent
 from drawing.mini_dataset import candidate
 from drawing.mini_session import DrawingSession
-from drawing.renderer import LocalRenderer
+from drawing.renderer import DockerRenderer, LocalRenderer
 from drawing.tool_dataset import trajectory_hash
 from training.data import convert_record
 
@@ -248,8 +248,12 @@ class MiniTests(unittest.IsolatedAsyncioTestCase):
         image = {'name': 'test-editing-image', 'id': 'sha256:' + '0' * 64}
         with tempfile.TemporaryDirectory() as root, \
              patch('drawing.mini_dataset.Workspace', TestWorkspace), \
-             patch('drawing.mini_dataset.inspect_image', return_value=image):
-            options = {'output': root, 'teacher': teacher, 'renderer': LocalRenderer(),
+             patch('drawing.mini_dataset.inspect_image', return_value=image), \
+             patch.object(DockerRenderer, 'render', new=LocalRenderer().render):
+            # Test the Docker-only contract with a locally executed fake
+            # backend. Production still pins and runs the Docker renderer.
+            options = {'output': root, 'teacher': teacher,
+                       'renderer': DockerRenderer(image=image['id']),
                        'harness': 'mini-swe', 'candidates': 1,
                        'specs': [{'id': 'drawing', 'family': 'circles', 'prompt': 'Draw', 'seed': 7}]}
             result = await generate_dataset(options)
