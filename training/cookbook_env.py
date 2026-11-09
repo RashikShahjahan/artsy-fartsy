@@ -27,6 +27,7 @@ from drawing.vision import prepare_image
 from drawing.agent_contract import (DRAWING_TOOLS, DRAWING_TOOLS_CONTRACT_VERSION, SFT_MAX_TURNS,
                                     drawing_tools_prompt, host_user_prompt, turn_countdown)
 from training.hpsv3 import REWARD_VERSION
+from training.rlvr_reward import RLVR_REWARD_VERSION, verified_reward
 from training.data import ROOT
 from training.sft import RENDERER, create_encoder
 
@@ -187,10 +188,17 @@ class DockerSession:
     """One ephemeral sandbox per trajectory, never used to grade final code."""
 
     def __init__(self, spec: dict, directory: Path, judge, model=MODEL_ID,
-                 renderer=RENDERER, max_length=MODEL_CONTEXT_WINDOW, revision=None):
+                 renderer=RENDERER, max_length=MODEL_CONTEXT_WINDOW, revision=None,
+                 reward_mode="rlhf"):
         self.spec, self.directory, self.judge = spec, directory, judge
         self.model, self.renderer = model, renderer
         self.max_length, self.revision = max_length, revision
+        if reward_mode not in ("rlvr", "rlhf"):
+            raise ValueError("Unknown reward mode")
+        self.reward_mode = reward_mode
+        self.invalid_tool_calls = 0
+        self.execution_attempts = 0
+        self.execution_errors = 0
         self.container: str | None = None
         self._lifecycle_lock = asyncio.Lock()
         self._closed = False
@@ -345,9 +353,13 @@ class DockerSession:
         result = {"prompt": self.spec["prompt"], "seed": self.spec["seed"],
                   "outcome": "incomplete", "agent": "artsy-cookbook",
                   "toolCalls": self.tool_calls, "previewAttempts": len(self.previews),
+                  "invalidToolCalls": self.invalid_tool_calls,
+                  "executionAttempts": self.execution_attempts,
+                  "executionErrors": self.execution_errors,
                   "trajectoryContractVersion": self.trajectory_contract_version,
                   "scores": {"render_valid": 0.0, "preference": 0.0},
-                  "judgeVersion": REWARD_VERSION,
+                  "judgeVersion": (RLVR_REWARD_VERSION if self.reward_mode == "rlvr"
+                                   else REWARD_VERSION),
                   "refused": refusal is not None, "refusalCorrect": False,
                   "expectedRefusal": self.spec.get("kind") == "refusal"}
         if refusal is not None:
@@ -391,10 +403,11 @@ class DockerSession:
                 result["imageHash"] = hashlib.sha256(png).hexdigest()
                 result["scores"]["render_valid"] = 1.0
                 self.png = png
-                judgment = await self.judge["hpsv3"].score(self.spec["prompt"], png)
-                result["judgment"] = judgment
-                result["scores"].update(
-                    hpsv3=judgment["hpsv3_score"], preference=judgment["preference"])
+                if self.reward_mode == "rlhf":
+                    judgment = await self.judge["hpsv3"].score(self.spec["prompt"], png)
+                    result["judgment"] = judgment
+                    result["scores"].update(
+                        hpsv3=judgment["hpsv3_score"], preference=judgment["preference"])
         self.result = result
         (self.directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
         return 0.0, {
@@ -447,12 +460,15 @@ class ArtsyGroupBuilder:
 
     def __init__(self, spec: dict, group_size: int, step: int, root: Path, judge, max_tokens: int,
                  max_length: int, normalize_rewards: bool, model=MODEL_ID, renderer=RENDERER,
-                 revision=None, harness="drawing-tools"):
+                 revision=None, harness="drawing-tools", reward_mode="rlhf"):
         self.spec, self.group_size, self.step = spec, group_size, step
         self.root, self.judge = root, judge
         self.max_tokens, self.max_length = max_tokens, max_length
         self.normalize_rewards = normalize_rewards
         self.model, self.renderer, self.revision = model, renderer, revision
+        if reward_mode not in ("rlvr", "rlhf"):
+            raise ValueError("Unknown reward mode")
+        self.reward_mode = reward_mode
         if harness not in ("mini-swe", "drawing-tools"):
             raise ValueError("Unknown GRPO harness")
         self.harness = harness
@@ -497,6 +513,8 @@ class ArtsyGroupBuilder:
                 calls = message.get("tool_calls") or []
                 malformed = len(calls) != 1 or bool(message.get("unparsed_tool_calls"))
                 if malformed:
+                    # The protocol verifier sees even calls rejected before tool dispatch.
+                    self._artsy_session.invalid_tool_calls += 1
                     # Mini-SWE sends a user correction rather than executing
                     # malformed replies. Never execute multiple commands per turn.
                     clean = {k: v for k, v in message.items()
@@ -535,7 +553,8 @@ class ArtsyGroupBuilder:
             session_class = MiniDockerSession if self.harness == "mini-swe" else DockerSession
             session = session_class(self.spec,
                 self.root / f"step-{self.step:06d}" / self.spec["id"] / uuid4().hex,
-                self.judge, self.model, self.renderer, self.max_length, self.revision)
+                self.judge, self.model, self.renderer, self.max_length, self.revision,
+                reward_mode=self.reward_mode)
             session._resources = self._resources
             self.sessions.append(session)
 
@@ -554,6 +573,8 @@ class ArtsyGroupBuilder:
                                       tool_execution="sequential",
                                       failed_parse_reward=0.0,
                                       terminate_on_parse_error=True)
+            if self.harness == "mini-swe":
+                agent._artsy_session = session
             environments.append(EnvFromMessageEnv(
                 encoder(self.model, self.renderer, self.max_length, self.revision).renderer,
                 agent, failed_parse_reward=0.0,
@@ -595,8 +616,18 @@ class ArtsyGroupBuilder:
         adjusted = []
         for session, trajectory in zip(self.sessions, trajectories):
             result = session.result
-            if (result.get("refused") or not session.submitted
-                    or not result["scores"]["render_valid"]):
+            if self.reward_mode == "rlvr":
+                components = verified_reward(
+                    submitted=session.submitted,
+                    render_valid=bool(result["scores"]["render_valid"]),
+                    valid_tool_calls=len(session.tool_calls),
+                    invalid_tool_calls=session.invalid_tool_calls,
+                    execution_attempts=session.execution_attempts,
+                    execution_errors=session.execution_errors)
+                result["scores"].update(components)
+                reward = components["reward"]
+            elif (result.get("refused") or not session.submitted
+                  or not result["scores"]["render_valid"]):
                 reward = 0.0
             else:
                 reward = result["scores"]["preference"]
@@ -608,4 +639,4 @@ class ArtsyGroupBuilder:
         return adjusted
 
     def logging_tags(self):
-        return ["artsy", self.spec.get("difficulty", "unspecified")]
+        return ["artsy", self.reward_mode, self.spec.get("difficulty", "unspecified")]
