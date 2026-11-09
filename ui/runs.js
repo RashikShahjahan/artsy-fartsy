@@ -30,9 +30,9 @@ const fields = {
     ["dry_run", "Dry run (no model calls)", "bool", false, "", "", true],
   ],
   rl: [
-    ["reward_mode", "RL stage", "select", "rlvr", "", "RLVR follows SFT; RLHF follows RLVR and uses HPSv3.", false, ["rlvr", "rlhf"]],
+    ["reward_mode", "RL stage", "select", "rlvr", "", "RLVR uses 227 reserved prompts after SFT; RLHF uses the remaining 100 and HPSv3.", false, ["rlvr", "rlhf"]],
     ["harness", "Rollout harness", "select", "mini-swe", "", "Match the harness used to train the SFT checkpoint.", true, ["mini-swe", "drawing-tools"]],
-    ["dataset", "RL prompt dataset", "text", "datasets/grpo-v2/prompts.jsonl", "", ""],
+    ["dataset", "RL prompt dataset", "text", "datasets/parti-prompts/rl/prompts.jsonl", "", "Canonical 327-prompt pool is automatically split into 227 RLVR and 100 RLHF prompts. Custom datasets are used as supplied."],
     ["init_checkpoint", "Initial SFT / RLVR checkpoint", "catalog", "", "checkpoints/run/final.json", "Choose SFT for RLVR or RLVR for RLHF. The CLI validates stage compatibility."],
     ["continue_from", "Continue from previous RL run (optional)", "text", "", "checkpoints/previous-run", "Forks an existing completed run with optimizer state.", true],
     ["additional_steps", "Additional updates when continuing", "int", "", "Required only for continuation", "", true],
