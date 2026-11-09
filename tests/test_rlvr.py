@@ -104,6 +104,7 @@ class CheckpointHandoffTests(unittest.TestCase):
             _, plan, _ = load_run(args)
             self.assertEqual(plan["algorithm"], RLVR_ALGORITHM)
             self.assertEqual(plan["reward_mode"], "rlvr")
+            self.assertEqual(plan["group_size"], 2)
             self.assertEqual(plan["reference_sampler_path"], "tinker://sft/sampler")
             self.assertIsNone(plan["hpsv3_model"])
             self.assertEqual(plan["checkpoint_tool_contract"], "mini-swe")
@@ -120,6 +121,7 @@ class CheckpointHandoffTests(unittest.TestCase):
             self.assertEqual(rlhf["reference_sampler_path"], "tinker://sft/sampler")
             self.assertEqual(rlhf["reference_model"], plan["reference_model"])
             self.assertEqual(rlhf["reward_mode"], "rlhf")
+            self.assertEqual(rlhf["group_size"], 4)
             self.assertEqual(rlhf["algorithm"], "tinker-cookbook-rlhf-v8")
             rlvr_source["harness"] = "drawing-tools"
             checkpoint.write_text(json.dumps({
@@ -155,6 +157,12 @@ class CheckpointHandoffTests(unittest.TestCase):
                 preference_specs, preference_config, preference_updates = load_run(args)
                 self.assertEqual((len(verifier_specs), len(preference_specs)), (227, 100))
                 self.assertEqual((verifier_updates, preference_updates), (29, 13))
+                self.assertEqual(verifier_config["group_size"], 2)
+                self.assertEqual(preference_config["group_size"], 4)
+                args.group_size = 6
+                _, override, _ = load_run(args)
+                self.assertEqual(override["group_size"], 6)
+                args.group_size = None
                 self.assertEqual(verifier_config["rl_stage_split_version"], SPLIT_VERSION)
                 self.assertEqual(preference_config["rl_stage_split_version"], SPLIT_VERSION)
                 self.assertFalse(
