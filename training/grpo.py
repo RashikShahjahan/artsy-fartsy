@@ -152,8 +152,9 @@ def load_run(args):
         "hpsv3_url": os.getenv("ARTSY_HPSV3_URL", "http://127.0.0.1:8090"),
         "hpsv3_center": float(os.getenv("ARTSY_HPSV3_CENTER", "0")),
         "hpsv3_scale": float(os.getenv("ARTSY_HPSV3_SCALE", "5")),
-        "reward": ("0.75 verified submitted final PNG + 0.125 valid tool protocol ratio "
-                   "+ 0.125 successful command/preview ratio" if args.reward_mode == "rlvr"
+        "reward": ("penalty-only: -0.75 missing/invalid final PNG, -0.125 per invalid bash "
+                   "tool call (or no calls), -0.125 per failed command/preview; best=0"
+                   if args.reward_mode == "rlvr"
                    else "submitted final image=sigmoid((hpsv3_mu-center)/scale); missing/refused/invalid=0"),
         "reward_version": RLVR_REWARD_VERSION if args.reward_mode == "rlvr" else REWARD_VERSION,
         "loss": "Cookbook PPO; optional reference-KL reward penalty",
