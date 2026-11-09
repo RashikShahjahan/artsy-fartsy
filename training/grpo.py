@@ -33,6 +33,14 @@ from training.sft import batches
 from training.run_store import atomic_json, atomic_text, contents, recover_jsonl_tail, run_lock
 
 ALGORITHM = "tinker-cookbook-rlhf-v8"
+
+
+def group_size_for_stage(reward_mode: str) -> int:
+    """Default grouped rollouts: two for verifier RL, four for preference RL."""
+    if reward_mode not in ("rlvr", "rlhf"):
+        raise ValueError("Unknown RL reward mode")
+    return 2 if reward_mode == "rlvr" else 4
+
 PROVENANCE_FILES = (
     "drawing/documentation.py", "drawing/config.py", "drawing/judges.py",
     "drawing/agent_contract.py", "drawing/eval_specs.py", "drawing/visual_judge.py",
@@ -81,6 +89,8 @@ def checkpoint_tool_contract(path: Path, source: dict) -> str | None:
 
 
 def load_run(args):
+    if args.group_size is None:
+        args.group_size = group_size_for_stage(args.reward_mode)
     specs, stage_split_version = stage_specs(args.dataset, load_specs(args.dataset), args.reward_mode)
     if args.limit:
         specs = specs[:args.limit]
@@ -396,7 +406,8 @@ def parser():
     p.add_argument("--epochs", type=int, default=1)
     p.add_argument("--max-steps", type=int, default=-1)
     p.add_argument("--batch-size", type=int, default=8, help="Prompt groups per update")
-    p.add_argument("--group-size", type=int, default=4, help="Independent trajectories per prompt")
+    p.add_argument("--group-size", type=int, default=None,
+                   help="Independent trajectories per prompt (default: RLVR=2, RLHF=4)")
     p.add_argument("--max-samples", type=int, default=32, help="Maximum concurrent Docker episodes")
     p.add_argument("--learning-rate", type=float, default=1e-5)
     # Cookbook recommends T=1 when using a reference-policy KL penalty.
@@ -419,6 +430,8 @@ def main(argv=None):
     p = parser()
     arguments = list(sys.argv[1:] if argv is None else argv)
     args = p.parse_args(arguments)
+    if args.group_size is None:
+        args.group_size = group_size_for_stage(args.reward_mode)
     if args.continue_from is not None:
         forbidden = {"--" + k.replace("_", "-") for k in INHERITED_PARAMETERS}
         forbidden.update({"--epochs", "--max-steps", "--limit", "--init-checkpoint"})
