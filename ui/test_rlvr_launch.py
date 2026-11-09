@@ -20,6 +20,13 @@ class RLVRLaunchTests(unittest.TestCase):
         self.assertEqual(argv[argv.index("--reward-mode") + 1], "rlvr")
         self.assertIn("training.grpo", argv)
         self.assertIn("--dry-run", argv)
+        self.assertNotIn("--group-size", argv)  # CLI chooses RLVR=2 or RLHF=4.
+        for stage in ("rlvr", "rlhf"):
+            argv, _ = launch.command("rl", {"reward_mode": stage}, "b" * 32)
+            self.assertNotIn("--group-size", argv)
+        argv, _ = launch.command("rl", {
+            "reward_mode": "rlvr", "group_size": 4}, "c" * 32)
+        self.assertEqual(argv[argv.index("--group-size") + 1], "4")
         self.assertEqual(output.name, "ui-rl-" + "a" * 32)
         with self.assertRaisesRegex(ValueError, "Unknown RL reward stage"):
             launch.command("rl", {"reward_mode": "made-up"}, "a" * 32)
