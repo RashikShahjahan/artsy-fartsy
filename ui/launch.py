@@ -1,4 +1,4 @@
-"""Local, allowlisted launch service for the Artsy evaluation/SFT/GRPO CLIs.
+"""Local, allowlisted launch service for the Artsy evaluation/SFT/RLVR/RLHF CLIs.
 
 Jobs run as child processes of the UI server, not inside HTTP request threads.
 No shell, arbitrary commands, or user-selected output directories are supported.
@@ -46,6 +46,7 @@ OPTIONS = {
         "dry_run": ("--dry-run", "bool"),
     },
     "rl": {
+        "reward_mode": ("--reward-mode", "reward_mode"),
         "harness": ("--harness", "harness"),
         "dataset": ("--dataset", "file"),
         "init_checkpoint": ("--init-checkpoint", "file"),
@@ -66,7 +67,7 @@ MODULES = {"eval": "evaluation.evaluate", "sft": "training.sft", "rl": "training
 
 
 def model_choices(bridge_models=None):
-    """Existing inference models and trainable SFT checkpoints for run forms.
+    """Existing inference models and SFT/RLVR initial checkpoints for run forms.
 
     A served model is selectable for evaluation. Checkpoint discovery is local
     and metadata-only; it neither loads sampler weights nor starts a model.
@@ -102,8 +103,9 @@ def model_choices(bridge_models=None):
         try:
             record = json.loads(file.read_text(encoding="utf-8"))
             config = record.get("config")
-            if not isinstance(config, dict) or config.get("algorithm") is not None:
-                continue  # GRPO final.json is not a valid SFT initialization.
+            if (not isinstance(config, dict) or config.get("algorithm")
+                    not in (None, "tinker-cookbook-rlvr-v1")):
+                continue  # Preference-optimized RLHF cannot initialize another stage.
             base_model = config.get("model")
             if (not isinstance(base_model, str) or not base_model.startswith("Qwen/")
                     or not isinstance(config.get("renderer"), str)
@@ -115,7 +117,9 @@ def model_choices(bridge_models=None):
             relative = file.relative_to(ROOT).as_posix()
             checkpoints.append((file.stat().st_mtime, {
                 "value": relative,
-                "label": f"{file.parent.name} · {base_model} · step {record.get('step', 'final')}",
+                "label": (f"{file.parent.name} · "
+                          f"{'RLVR' if config.get('algorithm') else 'SFT'} · {base_model} "
+                          f"· step {record.get('step', 'final')}"),
                 "model": base_model,
             }))
         except (OSError, ValueError, TypeError, AttributeError):
@@ -163,6 +167,10 @@ def _value(name, kind, value):
         return value
     if kind in ("file", "directory"):
         return _path(value, directory=kind == "directory")
+    if kind == "reward_mode":
+        if value not in ("rlvr", "rlhf"):
+            raise ValueError("Unknown RL reward stage")
+        return value
     if kind == "harness":
         if value not in ("mini-swe", "drawing-tools"):
             raise ValueError("Unknown RL harness")
@@ -202,7 +210,7 @@ def command(kind, settings, run_id):
     if kind == "rl":
         continuation = bool(selected.get("continue_from"))
         if continuation:
-            forbidden = set(selected) - {"continue_from", "additional_steps", "dataset", "save_every", "dry_run"}
+            forbidden = set(selected) - {"continue_from", "additional_steps", "dataset", "save_every", "dry_run", "reward_mode"}
             if forbidden:
                 raise ValueError("RL continuation inherits training settings; remove " + sorted(forbidden)[0])
             if not selected.get("additional_steps"):
