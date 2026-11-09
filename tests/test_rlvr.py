@@ -128,6 +128,44 @@ class CheckpointHandoffTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_run(args)
 
+    def test_canonical_pool_uses_disjoint_stage_splits_before_limit(self):
+        from training.rl_split import SPLIT_VERSION
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            dataset = root / "rl" / "prompts.jsonl"
+            dataset.parent.mkdir()
+            records = [
+                {"id": f"parti-{i:04d}", "prompt": f"Draw scene {i}", "seed": i,
+                 "source": {"category": f"cat-{i % 4}", "challenge": f"level-{i % 3}"}}
+                for i in range(327)]
+            dataset.write_text("".join(json.dumps(record) + "\\n" for record in records))
+            checkpoint = root / "sft.json"
+            checkpoint.write_text(json.dumps({
+                "config": {"model": MODEL_ID, "renderer": RENDERER, "lora_rank": 32,
+                           "tool_contract": "mini-swe",
+                           "api_doc_sha256": digest(api_documentation().encode())},
+                "state_path": "tinker://sft/state",
+                "sampler_path": "tinker://sft/sampler"}))
+            args = parser().parse_args([
+                "--dataset", str(dataset), "--init-checkpoint", str(checkpoint)])
+            with patch("training.rl_split.DEFAULT_RL_DATASET", dataset):
+                args.reward_mode = "rlvr"
+                verifier_specs, verifier_config, verifier_updates = load_run(args)
+                args.reward_mode = "rlhf"
+                preference_specs, preference_config, preference_updates = load_run(args)
+                self.assertEqual((len(verifier_specs), len(preference_specs)), (227, 100))
+                self.assertEqual((verifier_updates, preference_updates), (29, 13))
+                self.assertEqual(verifier_config["rl_stage_split_version"], SPLIT_VERSION)
+                self.assertEqual(preference_config["rl_stage_split_version"], SPLIT_VERSION)
+                self.assertFalse(
+                    {item["id"] for item in verifier_specs}
+                    & {item["id"] for item in preference_specs})
+                args.limit = 5
+                limited, config, updates = load_run(args)
+                self.assertEqual(limited, preference_specs[:5])
+                self.assertEqual(config["prompt_ids"], [row["id"] for row in limited])
+                self.assertEqual(updates, 1)
+
     def test_rlvr_forbids_legacy_tools(self):
         with tempfile.TemporaryDirectory() as root:
             dataset = Path(root) / "prompts.jsonl"
