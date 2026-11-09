@@ -23,6 +23,7 @@ class ContinuationTests(unittest.TestCase):
         defaults = vars(grpo.parser().parse_args([]))
         self.config = {k: defaults[k] for k in grpo.INHERITED_PARAMETERS}
         self.config['batch_size'] = 2
+        self.config['group_size'] = 4  # Stored historical RLHF run, not a parser-stage default.
         self.config.update(algorithm=grpo.ALGORITHM, model=MODEL_ID,
                            tokenizer_revision=MODEL_REVISION, renderer=RENDERER,
                            image_size=IMAGE_SIZE, dataset_sha256=grpo.digest(self.dataset.read_bytes()),
