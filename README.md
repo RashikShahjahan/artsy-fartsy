@@ -497,18 +497,21 @@ The recommended policy pipeline is **SFT → RLVR → RLHF**. Both RL stages use
 Tinker Cookbook PPO/GRPO with grouped multi-turn Docker episodes, reference-KL
 regularization, and hosted LoRA checkpoints. The inference bridge is unnecessary.
 
-**RLVR** uses deterministic verifiers, with no HPSv3 service:
-- **75%**: a submitted source snapshot independently produces a valid 1920×1200 PNG
-  in a fresh network-isolated Docker scorer
-- **12.5%**: the fraction of model tool attempts that conform to the exact
-  `bash(command)` schema (malformed replies and calls count as failures)
-- **12.5%**: the fraction of executed shell actions that complete without nonzero
-  exit codes or failed preview feedback
+**RLVR** uses deterministic **negative-only penalties**, with no HPSv3 service.
+The maximum reward is **0**; successful actions and valid images earn no positive
+bonus:
+- **−0.75** when the final submitted source fails to produce a valid 1920×1200
+  PNG in an independent network-isolated Docker scorer, or is not submitted
+- **−0.125 per invalid tool call**: malformed replies or calls that violate the
+  `bash(command)` schema; an episode with no tool calls incurs one penalty
+- **−0.125 per failed execution**: nonzero shell exit status, failed preview
+  feedback, or a recorded execution error
 
-An unsubmitted or invalid final image cannot earn the 75% render credit; it may
-earn up to 25% verifiable process credit to bootstrap early training. A no-tool
-episode receives no protocol/execution credit. Per-rollout result JSON includes
-`image_verified`, `tool_protocol`, `execution_success`, and raw error counts.
+Penalties accumulate for each error rather than being divided by the number of
+successful actions, so trivial successful commands cannot dilute earlier errors.
+Per-rollout `result.json` stores `image_penalty`, `tool_penalty`,
+`execution_penalty`, aggregate `reward`, diagnostic success ratios, and raw
+error counts.
 
 **RLHF** starts from the RLVR checkpoint and uses the normalized HPSv3 preference
 score for valid submitted images. Its KL reference remains the original frozen
