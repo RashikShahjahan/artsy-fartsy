@@ -389,7 +389,7 @@ The canonical SFT dataset is `datasets/parti-prompts/sft/`: **1,142 prompts**,
 2,284 generated candidates in `candidates.jsonl`, and 2,219 previously validated
 trajectories in `training-ready.jsonl` (1,134 unique prompts; visual review pending).
 This includes the 228 prompts restored from the historical extended evaluation.
-Evaluation uses the original **163** prompts; RL has **327**, and preference is empty.
+Evaluation uses the original **163** prompts; the reserved RL pool has **327**: **227 for RLVR** and **100 for RLHF**, with no overlap. Preference is empty.
 Review the combined dataset with
 `make ui ARGS="--dataset datasets/parti-prompts/sft/prompts.jsonl --candidates datasets/parti-prompts/sft/candidates.jsonl"`.
 Preserved ArtCanvas trajectories are historical training sources. Recent native
@@ -556,10 +556,23 @@ pre-mini-SWE SFT checkpoints, direct GRPO/RLHF still accepts
 checkpoints declare a `tool_contract` and incompatible stages are rejected.
 Continuation must stay within the same reward stage and algorithm version.
 
-The default prompt path for both stages is `datasets/parti-prompts/rl/prompts.jsonl`,
-the reserved Parti RL split. Each full update uses eight prompts with four rollouts per prompt,
-with capacity for all 32 Docker episodes concurrently. The default initialization is
-the local `checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json`;
+The shared default input file, `datasets/parti-prompts/rl/prompts.jsonl`,
+contains 327 reserved Parti RL prompts. The trainer **automatically partitions
+it into two disjoint stages**: **227 RLVR prompts** and **100 RLHF prompts**.
+Assignment is reproducible, stratified by upstream Category/Challenge, independent
+of rollout RNG seeds, and applied **before** `--limit`. The selected prompt IDs,
+source SHA-256, and split version are pinned in the training manifest and checked
+on continuation. With CLI defaults of eight prompts and four rollouts per prompt,
+one epoch takes **29 RLVR updates (908 rollouts)** and **13 RLHF updates
+(400 rollouts)**, each with capacity for 32 concurrent Docker episodes.
+
+`python3 scripts/prepare_parti_prompts.py` also writes inspectable
+`datasets/parti-prompts/rl/rlvr.prompts.jsonl` and
+`datasets/parti-prompts/rl/rlhf.prompts.jsonl`, with counts and hashes in
+`datasets/parti-prompts/manifest.json`. Explicit **custom** `--dataset`
+files are consumed as provided (not automatically repartitioned); the default
+canonical source path activates the 227/100 split. The default initialization is
+`checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json`;
 pass `--init-checkpoint` for your own SFT run.
 
 | Setting | Default |
