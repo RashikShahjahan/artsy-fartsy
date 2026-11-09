@@ -22,15 +22,16 @@ runs, a `config.tool_contract` identifying `mini-swe` or `drawing-tools`.
 Docker workspaces, submission snapshots, and a fresh independent Docker final
 renderer with RLHF. It does not initialize or call an HPSv3 client.
 
-The terminal RLVR reward is 0.75 for a verified submitted 1920×1200 PNG,
-plus 0.125 times the fraction of valid single `bash(command)` model tool
-attempts, plus 0.125 times the fraction of successful sandbox command/preview
-executions. Invalid schema, multi-tool responses, nonzero command exits,
-failed previews, and timeouts reduce these ratios; attempts must exist to earn
-process credit. Without a submitted valid image, at most 0.25 process credit
-is available. This intermediate signal helps policies learn the workflow
-before optimizing image preference. Raw verifier counts and component scores
-are saved with each rollout in `result.json`.
+The terminal RLVR reward is **penalty-only**. A clean episode receives **0**
+and nothing can receive a positive reward. An absent or invalid final submitted
+1920×1200 PNG costs **−0.75**; each malformed or invalid `bash(command)` tool
+call costs **−0.125** (with one tool penalty if no calls occur); and each failed
+execution, nonzero shell return code, failed preview or recorded timeout costs
+**−0.125**. Failures accumulate as counts, not ratios: successfully executing
+more commands cannot offset or dilute earlier errors. This teaches the model to
+avoid verifiable errors before the RLHF image-preference stage. The rollout's
+`result.json` records raw counts, diagnostic success ratios, individual
+negative penalties, and the total nonpositive reward.
 
 The final RLVR checkpoint has algorithm `tinker-cookbook-rlvr-v1` and carries
 its own policy state and sampler as well as the original SFT KL reference.
