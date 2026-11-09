@@ -30,7 +30,7 @@ const fields = {
     ["dry_run", "Dry run (no model calls)", "bool", false, "", "", true],
   ],
   rl: [
-    ["reward_mode", "RL stage", "select", "rlhf", "", "RLVR follows SFT; RLHF follows RLVR and uses HPSv3.", false, ["rlvr", "rlhf"]],
+    ["reward_mode", "RL stage", "select", "rlvr", "", "RLVR follows SFT; RLHF follows RLVR and uses HPSv3.", false, ["rlvr", "rlhf"]],
     ["harness", "Rollout harness", "select", "mini-swe", "", "Match the harness used to train the SFT checkpoint.", true, ["mini-swe", "drawing-tools"]],
     ["dataset", "RL prompt dataset", "text", "datasets/grpo-v2/prompts.jsonl", "", ""],
     ["init_checkpoint", "Initial SFT / RLVR checkpoint", "catalog", "", "checkpoints/run/final.json", "Choose SFT for RLVR or RLVR for RLHF. The CLI validates stage compatibility."],
