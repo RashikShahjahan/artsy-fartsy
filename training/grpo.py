@@ -24,6 +24,7 @@ import sys
 from drawing.config import IMAGE_SIZE, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
 from training.hpsv3 import REWARD_VERSION, normalized_reward
+from training.rlvr_reward import RLVR_ALGORITHM, RLVR_REWARD_VERSION
 from drawing.agent_contract import DRAWING_TOOLS_CONTRACT_VERSION
 from drawing.mini_agent import CONTRACT_VERSION as MINI_SWE_CONTRACT_VERSION
 from training.data import ROOT, digest
@@ -43,7 +44,8 @@ PROVENANCE_FILES = (
     "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
     "evaluation/requirements.txt", "training/cookbook_env.py", "training/cookbook_mini.py",
     "training/cookbook_dataset.py", "training/score_rl.py", "training/grpo.py",
-    "training/sft.py", "training/requirements.txt", "training/requirements-grpo.txt",
+    "training/sft.py", "training/rlvr.py", "training/rlvr_reward.py",
+    "training/requirements.txt", "training/requirements-grpo.txt",
     "drawing/dataset_client.py", "drawing/tinker_client.py",
 )
 
@@ -80,6 +82,8 @@ def load_run(args):
     specs = load_specs(args.dataset)
     if args.limit:
         specs = specs[:args.limit]
+    if args.reward_mode == "rlvr" and args.harness != "mini-swe":
+        raise ValueError("RLVR requires --harness mini-swe for verified bash execution outcomes")
     if args.harness == "mini-swe" and any(spec.get("kind") == "refusal" for spec in specs):
         raise ValueError("mini-SWE GRPO requires drawing-only prompts; refusal examples have no positive reward")
     initial = json.loads(args.init_checkpoint.read_text())
@@ -87,7 +91,11 @@ def load_run(args):
     checkpoint_model = source.get("model")
     if isinstance(checkpoint_model, str) and ":peft:" in checkpoint_model:
         checkpoint_model = checkpoint_model.split(":peft:", 1)[0]
-    if (source.get("algorithm") is not None or not isinstance(checkpoint_model, str)
+    source_stage = source.get("algorithm")
+    if (source_stage not in (None, RLVR_ALGORITHM)
+            or (args.reward_mode == "rlvr" and source_stage is not None)
+            or (source_stage == RLVR_ALGORITHM and source.get("harness") != args.harness)
+            or not isinstance(checkpoint_model, str)
             or not checkpoint_model.startswith("Qwen/")
             or not isinstance(source.get("renderer"), str)
             or type(source.get("lora_rank")) is not int
@@ -96,8 +104,21 @@ def load_run(args):
             or source.get("api_doc_sha256") != digest(api_documentation().encode())
             or any(not isinstance(initial.get(key), str) or not initial[key].startswith("tinker://")
                    for key in ("state_path", "sampler_path"))):
-        raise ValueError("Initial checkpoint must contain compatible SFT weights and sampler paths")
-    recorded_contract = checkpoint_tool_contract(args.init_checkpoint, source)
+        raise ValueError("Initial checkpoint must contain compatible SFT or RLVR weights and sampler paths")
+    if source_stage == RLVR_ALGORITHM:
+        reference_model = source.get("reference_model")
+        reference_sampler_path = source.get("reference_sampler_path")
+        if (not isinstance(reference_model, str) or not reference_model.startswith("Qwen/")
+                or not isinstance(reference_sampler_path, str)
+                or not reference_sampler_path.startswith("tinker://")):
+            raise ValueError("RLVR checkpoint is missing its frozen SFT KL reference")
+        recorded_contract = source["harness"]
+    else:
+        # Preserve the hosted context selection for the frozen SFT sampler.
+        reference_model = (source["model"] if ":peft:" in source["model"]
+                           else f"{checkpoint_model}:peft:{MODEL_CONTEXT_WINDOW}")
+        reference_sampler_path = initial["sampler_path"]
+        recorded_contract = checkpoint_tool_contract(args.init_checkpoint, source)
     if recorded_contract is None:
         print("Warning: SFT tool contract is unknown; verify its training dataset matches "
               f"--harness {args.harness} before training.", file=sys.stderr)
@@ -105,7 +126,8 @@ def load_run(args):
         raise ValueError(
             f"SFT checkpoint uses {recorded_contract}, not {args.harness}; select the matching --harness")
     config = {
-        "algorithm": ALGORITHM, "model": checkpoint_model,
+        "algorithm": RLVR_ALGORITHM if args.reward_mode == "rlvr" else ALGORITHM,
+        "reward_mode": args.reward_mode, "model": checkpoint_model,
         "harness": args.harness, "checkpoint_tool_contract": recorded_contract,
         "trajectory_contract_version": (
             MINI_SWE_CONTRACT_VERSION if args.harness == "mini-swe"
@@ -116,11 +138,8 @@ def load_run(args):
         "dataset_sha256": digest(args.dataset.read_bytes()),
         "prompt_ids": [row["id"] for row in specs],
         "initial_state_path": initial["state_path"],
-        # Preserve the hosted context selection for the frozen SFT sampler.
-        # The unsuffixed model ID can select a smaller default context.
-        "reference_model": (source["model"] if ":peft:" in source["model"]
-                            else f"{checkpoint_model}:peft:{MODEL_CONTEXT_WINDOW}"),
-        "reference_sampler_path": initial["sampler_path"],
+        "reference_model": reference_model,
+        "reference_sampler_path": reference_sampler_path,
         "api_doc_sha256": digest(api_documentation().encode()),
         "source_sha256": {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES},
         "batch_size": args.batch_size, "group_size": args.group_size,
@@ -129,15 +148,18 @@ def load_run(args):
         "temperature": args.temperature, "max_tokens": args.max_tokens,
         "max_length": args.max_length, "max_sampled_tokens": None, "max_samples": args.max_samples,
         "seed": args.seed, "epochs": args.epochs, "max_steps": args.max_steps,
-        "hpsv3_model": os.getenv("ARTSY_HPSV3_MODEL"),
+        "hpsv3_model": os.getenv("ARTSY_HPSV3_MODEL") if args.reward_mode == "rlhf" else None,
         "hpsv3_url": os.getenv("ARTSY_HPSV3_URL", "http://127.0.0.1:8090"),
         "hpsv3_center": float(os.getenv("ARTSY_HPSV3_CENTER", "0")),
         "hpsv3_scale": float(os.getenv("ARTSY_HPSV3_SCALE", "5")),
-        "reward": "submitted final image=sigmoid((hpsv3_mu-center)/scale); missing/refused/invalid=0",
-        "reward_version": REWARD_VERSION,
+        "reward": ("0.75 verified submitted final PNG + 0.125 valid tool protocol ratio "
+                   "+ 0.125 successful command/preview ratio" if args.reward_mode == "rlvr"
+                   else "submitted final image=sigmoid((hpsv3_mu-center)/scale); missing/refused/invalid=0"),
+        "reward_version": RLVR_REWARD_VERSION if args.reward_mode == "rlvr" else REWARD_VERSION,
         "loss": "Cookbook PPO; optional reference-KL reward penalty",
     }
-    normalized_reward(0.0, config["hpsv3_center"], config["hpsv3_scale"])
+    if args.reward_mode == "rlhf":
+        normalized_reward(0.0, config["hpsv3_center"], config["hpsv3_scale"])
     total = math.ceil(len(specs) / args.batch_size) * args.epochs
     if args.max_steps != -1:
         total = min(total, args.max_steps)
@@ -164,7 +186,8 @@ def load_continuation(args):
                if line.strip()]
     record = records[-1] if records else {}
     start = final["step"]
-    if (previous.get("algorithm") != ALGORITHM or final.get("config") != previous
+    expected_algorithm = RLVR_ALGORITHM if args.reward_mode == "rlvr" else ALGORITHM
+    if (previous.get("algorithm") != expected_algorithm or final.get("config") != previous
             or type(start) is not int or start < 1 or start != saved["total_steps"]
             or record.get("name") != "final" or record.get("batch") != start
             or any(record.get(k) != final.get(k) or not isinstance(final.get(k), str)
@@ -271,6 +294,7 @@ def make_cookbook_config(args, specs, plan, total):
             model=plan["model"],
             renderer=plan["renderer"],
             harness=plan.get("harness", "drawing-tools"),
+            reward_mode=plan.get("reward_mode", "rlhf"),
         ),
         learning_rate=args.learning_rate,
         # Cookbook requires an integer ceiling. Without an explicit cap, use
@@ -351,6 +375,8 @@ def parser():
     p = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     p.add_argument("--dataset", type=Path, default=ROOT / "datasets/parti-prompts/rl/prompts.jsonl")
     p.add_argument("--init-checkpoint", type=Path, default=ROOT / "checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json")
+    p.add_argument("--reward-mode", choices=("rlvr", "rlhf"), default="rlhf",
+                   help="Verifier rewards for RLVR; HPSv3 preference rewards for RLHF")
     p.add_argument("--harness", choices=("mini-swe", "drawing-tools"), default="mini-swe",
                    help="Coding environment; must match the SFT checkpoint tool interface")
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v4")
@@ -402,7 +428,8 @@ def main(argv=None):
             with run_lock(args.output_dir):
                 recorded = json.loads((args.output_dir / "training-manifest.json").read_text())
                 config = recorded["config"]
-                if not isinstance(config, dict) or config.get("algorithm") != ALGORITHM:
+                expected_algorithm = RLVR_ALGORITHM if args.reward_mode == "rlvr" else ALGORITHM
+                if not isinstance(config, dict) or config.get("algorithm") != expected_algorithm:
                     raise ValueError("Output directory does not contain a compatible Cookbook run")
                 validate_resume(args.output_dir, config, recorded["total_steps"], finalize=True)
                 print(json.dumps(write_final_checkpoint(args.output_dir, config, recorded["total_steps"]), indent=2))
@@ -431,7 +458,7 @@ def main(argv=None):
     print(json.dumps(plan, indent=2))
     if args.dry_run:
         return 0
-    if not config["hpsv3_model"] or not config["hpsv3_url"]:
+    if args.reward_mode == "rlhf" and (not config["hpsv3_model"] or not config["hpsv3_url"]):
         p.error("Set ARTSY_HPSV3_MODEL to the /health model ID and ARTSY_HPSV3_URL")
     if args.output_dir.resolve() == args.init_checkpoint.resolve().parent:
         p.error("RL output must differ from the initial SFT checkpoint directory")
