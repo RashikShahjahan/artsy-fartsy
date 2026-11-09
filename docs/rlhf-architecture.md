@@ -38,9 +38,10 @@ RLVR cannot take another RLVR/RLHF checkpoint as initialization.
 
 ## RLHF: improve final-image preference
 
-`training.grpo` defaults to `--harness mini-swe` and initializes from a
-completed RLVR checkpoint. Direct SFT initialization is retained for historical
-experiments. Cookbook still controls
+`training.rlhf` (or `make rlhf`) defaults to the completed
+`checkpoints/rlvr-v1/final.json` checkpoint. The historical `training.grpo`
+entrypoint retains direct SFT initialization for older experiments.
+Both default to `--harness mini-swe`. Cookbook still controls
 sampling, PPO updates, KL, grouped advantages, and checkpoints. Its model-facing
 tool is now the same `bash(command)` schema used for SFT and evaluation, with
 the same mini system prompt and a maximum of 12 model turns per episode.
