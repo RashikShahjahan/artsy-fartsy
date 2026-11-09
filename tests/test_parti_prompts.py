@@ -37,6 +37,22 @@ class PartiPromptsTest(unittest.TestCase):
             self.assertEqual({name: entry["records"] for name, entry in first["splits"].items()},
                              {"sft": 56, "evaluation": 10, "rl": 20, "preference": 14})
             self.assertEqual(first, second)
+            # The reserved RL pool is also exported as two reproducible
+            # non-overlapping, proportionally sized stage-specific files.
+            stage_splits = first["rl_stage_splits"]["splits"]
+            self.assertEqual((stage_splits["rlvr"]["records"],
+                              stage_splits["rlhf"]["records"]), (14, 6))
+            rl_stage_ids = {}
+            for stage, entry in stage_splits.items():
+                content = (root / "first" / entry["file"]).read_bytes()
+                self.assertEqual(content, (root / "second" / entry["file"]).read_bytes())
+                self.assertEqual(digest(content), entry["sha256"])
+                rl_stage_ids[stage] = {json.loads(line)["id"]
+                                       for line in content.splitlines()}
+            self.assertFalse(rl_stage_ids["rlvr"] & rl_stage_ids["rlhf"])
+            all_rl_ids = {json.loads(line)["id"] for line in
+                          (root / "first/rl/prompts.jsonl").read_text().splitlines()}
+            self.assertEqual(rl_stage_ids["rlvr"] | rl_stage_ids["rlhf"], all_rl_ids)
             all_ids, all_prompts = set(), set()
             pools = {}
             for name, entry in first["splits"].items():
