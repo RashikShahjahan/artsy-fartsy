@@ -94,6 +94,7 @@ def _grpo_step_entries(root):
                                 or not isinstance(state, str) or not state.startswith('tinker://')):
                             continue
                         stage = ("RLVR" if config.get("algorithm") == "tinker-cookbook-rlvr-v1"
+                                 else "RLHF" if config.get("reward_mode") == "rlhf"
                                  else "GRPO")
                         entry = _fine_tune_entry(
                             f'artsy/{name}--grpo-step-{step:06d}',
@@ -127,6 +128,7 @@ def model_catalog(root=ROOT):
             base_model, _ = compatible
             name = file.parent.name
             stage = ('RLVR' if config.get('algorithm') == 'tinker-cookbook-rlvr-v1'
+                     else 'RLHF' if config.get('reward_mode') == 'rlhf'
                      else 'GRPO' if config.get('algorithm') else 'SFT')
             entry = _fine_tune_entry(
                 f'artsy/{name}',
