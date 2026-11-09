@@ -138,7 +138,7 @@ class CheckpointHandoffTests(unittest.TestCase):
                 {"id": f"parti-{i:04d}", "prompt": f"Draw scene {i}", "seed": i,
                  "source": {"category": f"cat-{i % 4}", "challenge": f"level-{i % 3}"}}
                 for i in range(327)]
-            dataset.write_text("".join(json.dumps(record) + "\\n" for record in records))
+            dataset.write_text("".join(json.dumps(record) + "\n" for record in records))
             checkpoint = root / "sft.json"
             checkpoint.write_text(json.dumps({
                 "config": {"model": MODEL_ID, "renderer": RENDERER, "lora_rank": 32,
