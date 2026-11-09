@@ -161,7 +161,10 @@ remote optimizer state and deterministic data order.
 flowchart TD
     A[SFT final.json] --> B[RLVR policy initialization]
     A --> C[Frozen SFT KL reference sampler]
-    P[327 held-out RL prompts] --> Q[227 RLVR prompts]\n    P --> R[100 RLHF prompts]\n    Q --> D\n    B --> D[Grouped multi-turn Docker rollouts]
+    P[327 held-out RL prompts] --> Q[227 RLVR prompts]
+    P --> R[100 RLHF prompts]
+    Q --> D
+    B --> D[Grouped multi-turn Docker rollouts]
     D --> E[Verify bash schema, command/preview outcomes and trusted final PNG]
     E --> F[Deterministic RLVR reward]
     C --> G[Cookbook PPO updates]
@@ -169,7 +172,8 @@ flowchart TD
     G --> H[RLVR final.json]
     H --> I[RLHF policy initialization]
     C --> J[Cookbook PPO with original SFT KL reference]
-    I --> K[Grouped Docker rollouts and fresh trusted final rendering]\n    R --> K
+    I --> K[Grouped Docker rollouts and fresh trusted final rendering]
+    R --> K
     K --> L[HPSv3 normalized final-image preference]
     L --> J
     J --> M[RLHF final.json]
