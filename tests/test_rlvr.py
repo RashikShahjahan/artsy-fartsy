@@ -104,7 +104,7 @@ class CheckpointHandoffTests(unittest.TestCase):
 
     def test_rlvr_forbids_legacy_tools(self):
         args = parser().parse_args(["--reward-mode", "rlvr", "--harness", "drawing-tools"])
-        with self.assertRaisesRegex((ValueError), "mini-swe"):
+        with self.assertRaisesRegex(ValueError, "mini-swe"):
             load_run(args)
 
 
@@ -129,7 +129,7 @@ class DockerVerifierTests(unittest.IsolatedAsyncioTestCase):
                           "image": base64.b64encode(png).decode()}).encode())
                 return SimpleNamespace(returncode=0, stderr=b"", stdout=b"")
             with patch.object(session, "_read_submission",
-                              new=AsyncMock(return_value=("print('draw')", None))), \\
+                              new=AsyncMock(return_value=("print('draw')", None))), \
                  patch("training.cookbook_env._docker", new=AsyncMock(side_effect=docker)):
                 await session.grade([])
             self.assertNotIn("judgment", session.result)
@@ -153,7 +153,7 @@ class DockerVerifierTests(unittest.IsolatedAsyncioTestCase):
             session.tool_calls.append({"name": "bash", "arguments": {"command": "echo hello"}})
             session.execution_attempts = 1
             with patch.object(session, "_read_submission",
-                              new=AsyncMock(return_value=("print('draw')", None))), \\
+                              new=AsyncMock(return_value=("print('draw')", None))), \
                  patch("training.cookbook_env._docker", new=AsyncMock()) as docker:
                 await session.grade([])
             docker.assert_not_awaited()
