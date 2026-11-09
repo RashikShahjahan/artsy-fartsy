@@ -38,7 +38,7 @@ const fields = {
     ["additional_steps", "Additional updates when continuing", "int", "", "Required only for continuation", "", true],
     ["max_steps", "Maximum optimizer updates", "int", "", "All updates", ""],
     ["batch_size", "Prompt groups per update", "int", "2", "", ""],
-    ["group_size", "Rollouts per prompt", "int", "4", "", ""],
+    ["group_size", "Rollouts per prompt (optional override)", "int", "", "RLVR: 2 · RLHF: 4", "Leave blank for stage-specific default."],
     ["max_samples", "Concurrent Docker episodes", "int", "4", "", ""],
     ["epochs", "Epochs", "int", "1", "", ""],
     ["learning_rate", "Learning rate", "float", "0.00001", "", "", true],
