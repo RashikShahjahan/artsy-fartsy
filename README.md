@@ -562,8 +562,8 @@ it into two disjoint stages**: **227 RLVR prompts** and **100 RLHF prompts**.
 Assignment is reproducible, stratified by upstream Category/Challenge, independent
 of rollout RNG seeds, and applied **before** `--limit`. The selected prompt IDs,
 source SHA-256, and split version are pinned in the training manifest and checked
-on continuation. With CLI defaults of eight prompts and four rollouts per prompt,
-one epoch takes **29 RLVR updates (454 rollouts with group size 2)** and
+on continuation. With the CLI default of eight prompts per batch and
+stage-specific rollout counts, one epoch takes **29 RLVR updates (454 rollouts with group size 2)** and
 **13 RLHF updates (400 rollouts with group size 4)**. The maximum Docker
 concurrency remains 32 episodes. Both stages support an explicit
 `--group-size N` override.
