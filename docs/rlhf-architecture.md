@@ -25,7 +25,8 @@ renderer with RLHF. It does not initialize or call an HPSv3 client.
 The canonical `datasets/parti-prompts/rl/prompts.jsonl` pool contains 327
 prompts and is split deterministically into **227 RLVR** and **100 RLHF**
 examples, stratified by Category/Challenge. Neither stage sees the other's
-prompts. The subset is chosen before the `--limit` cap, pinned in run metadata,
+prompts. RLVR defaults to **2 independent rollouts per prompt** (454 per epoch),
+while RLHF defaults to **4** (400 per epoch); `--group-size` overrides either. The subset is chosen before the `--limit` cap, pinned in run metadata,
 and revalidated on continuation. Alternative custom dataset paths are not
 automatically partitioned. The prompt preparation script can also materialize
 `rl/rlvr.prompts.jsonl` and `rl/rlhf.prompts.jsonl` for inspection.
