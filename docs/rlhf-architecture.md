@@ -1,8 +1,9 @@
 # Artsy training architecture
 
-Artsy trains drawing agents with **SFT → GRPO**, while Inspect remains the
-independent evaluation harness. Training initializes from an SFT state and
-retains the frozen SFT sampler for optional reference-policy KL regularization.
+Artsy trains drawing agents with **SFT → RLVR → RLHF**, while Inspect remains
+the independent evaluation harness. Each RL stage uses Tinker Cookbook PPO
+with grouped rollouts. The original frozen SFT sampler is kept for optional
+reference-policy KL regularization across both RL stages.
 
 ## SFT: learn the mini-SWE drawing workflow
 
@@ -14,9 +15,32 @@ serialized as validated Python bundles before final rendering. The final
 checkpoint includes `state_path`, `sampler_path`, and, on newly produced SFT
 runs, a `config.tool_contract` identifying `mini-swe` or `drawing-tools`.
 
-## GRPO: improve final-image preference
+## RLVR: learn verifiable tool use and execution
 
-`training.grpo` defaults to `--harness mini-swe`. Cookbook still controls
+`training.rlvr` (or `make rlvr`) starts from a compatible mini-SWE SFT
+`final.json`. It shares the mini-SWE 12-turn bash harness, network-disabled
+Docker workspaces, submission snapshots, and a fresh independent Docker final
+renderer with RLHF. It does not initialize or call an HPSv3 client.
+
+The terminal RLVR reward is 0.75 for a verified submitted 1920×1200 PNG,
+plus 0.125 times the fraction of valid single `bash(command)` model tool
+attempts, plus 0.125 times the fraction of successful sandbox command/preview
+executions. Invalid schema, multi-tool responses, nonzero command exits,
+failed previews, and timeouts reduce these ratios; attempts must exist to earn
+process credit. Without a submitted valid image, at most 0.25 process credit
+is available. This intermediate signal helps policies learn the workflow
+before optimizing image preference. Raw verifier counts and component scores
+are saved with each rollout in `result.json`.
+
+The final RLVR checkpoint has algorithm `tinker-cookbook-rlvr-v1` and carries
+its own policy state and sampler as well as the original SFT KL reference.
+RLVR cannot take another RLVR/RLHF checkpoint as initialization.
+
+## RLHF: improve final-image preference
+
+`training.grpo` defaults to `--harness mini-swe` and initializes from a
+completed RLVR checkpoint. Direct SFT initialization is retained for historical
+experiments. Cookbook still controls
 sampling, PPO updates, KL, grouped advantages, and checkpoints. Its model-facing
 tool is now the same `bash(command)` schema used for SFT and evaluation, with
 the same mini system prompt and a maximum of 12 model turns per episode.
@@ -44,14 +68,14 @@ The historical `--harness drawing-tools` option retains the older named tools
 checkpoint tool contract is rejected. Checkpoints created before this
 metadata was added must be checked manually against their training dataset.
 
-The updated algorithm is `tinker-cookbook-rlhf-v8`: mini-SWE rollouts record
+The preference algorithm is `tinker-cookbook-rlhf-v8`: mini-SWE rollouts record
 trajectory contract v4; legacy drawing-tool rollouts retain v3. Older GRPO
 runs are not resumable or continuable across this implementation change,
 because optimizer and trajectory provenance must remain pinned.
 
 ## Independent validation
 
-Keep held-out evaluation prompts separate from SFT and RL prompts.
+Keep held-out evaluation prompts separate from SFT, RLVR and RLHF prompts.
 Compare checkpoints with Inspect using the **matching** harness, prompt set,
 seed, and budgets; track human visual preference, adherence, render validity,
 safety, and refusals. Run a one-update Docker/Tinker pilot before a longer
