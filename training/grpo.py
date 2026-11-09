@@ -89,8 +89,8 @@ def checkpoint_tool_contract(path: Path, source: dict) -> str | None:
 
 
 def load_run(args):
-    if args.group_size is None:
-        args.group_size = group_size_for_stage(args.reward_mode)
+    group_size = (group_size_for_stage(args.reward_mode) if args.group_size is None
+                  else args.group_size)
     specs, stage_split_version = stage_specs(args.dataset, load_specs(args.dataset), args.reward_mode)
     if args.limit:
         specs = specs[:args.limit]
@@ -155,7 +155,7 @@ def load_run(args):
         "reference_sampler_path": reference_sampler_path,
         "api_doc_sha256": digest(api_documentation().encode()),
         "source_sha256": {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES},
-        "batch_size": args.batch_size, "group_size": args.group_size,
+        "batch_size": args.batch_size, "group_size": group_size,
         "learning_rate": args.learning_rate, "clip_epsilon": args.clip_epsilon,
         "kl_coef": args.kl_coef, "normalize_rewards": args.normalize_rewards,
         "temperature": args.temperature, "max_tokens": args.max_tokens,
