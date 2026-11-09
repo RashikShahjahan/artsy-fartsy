@@ -113,6 +113,26 @@ class CheckpointHandoffTests(unittest.TestCase):
                 load_run(args)
 
 
+class RLVRDatasetTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rlvr_does_not_construct_hpsv3_client(self):
+        from training.cookbook_dataset import ArtsyDatasetBuilder
+        builder = ArtsyDatasetBuilder(
+            specs=({"id": "one", "prompt": "Draw", "seed": 1},),
+            output_dir="/tmp/artsy-rlvr-test", batch_size=1, group_size=2,
+            epochs=1, seed=42, max_tokens=None, max_length=32768,
+            model=MODEL_ID, renderer=RENDERER, revision=None,
+            normalize_rewards=False, hpsv3_model=None,
+            hpsv3_url="http://127.0.0.1:8090", reward_mode="rlvr",
+            harness="mini-swe")
+        with patch("training.cookbook_dataset.HPSv3Client") as client:
+            dataset, evaluation = await builder()
+        client.assert_not_called()
+        self.assertEqual(dataset.judge, {})
+        self.assertIsNone(evaluation)
+        group, = dataset.get_batch(0)
+        self.assertEqual(group.reward_mode, "rlvr")
+
+
 class DockerVerifierTests(unittest.IsolatedAsyncioTestCase):
     async def test_trusted_final_image_scores_without_visual_judge(self):
         png_io = BytesIO()
