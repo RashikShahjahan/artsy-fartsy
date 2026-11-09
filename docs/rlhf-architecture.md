@@ -22,6 +22,14 @@ runs, a `config.tool_contract` identifying `mini-swe` or `drawing-tools`.
 Docker workspaces, submission snapshots, and a fresh independent Docker final
 renderer with RLHF. It does not initialize or call an HPSv3 client.
 
+The canonical `datasets/parti-prompts/rl/prompts.jsonl` pool contains 327
+prompts and is split deterministically into **227 RLVR** and **100 RLHF**
+examples, stratified by Category/Challenge. Neither stage sees the other's
+prompts. The subset is chosen before the `--limit` cap, pinned in run metadata,
+and revalidated on continuation. Alternative custom dataset paths are not
+automatically partitioned. The prompt preparation script can also materialize
+`rl/rlvr.prompts.jsonl` and `rl/rlhf.prompts.jsonl` for inspection.
+
 The terminal RLVR reward is **penalty-only**. A clean episode receives **0**
 and nothing can receive a positive reward. An absent or invalid final submitted
 1920×1200 PNG costs **−0.75**; each malformed or invalid `bash(command)` tool
