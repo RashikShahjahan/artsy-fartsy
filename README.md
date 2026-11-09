@@ -530,8 +530,12 @@ make rlvr ARGS="--init-checkpoint checkpoints/sft-run/final.json --max-steps 1 -
   --init-checkpoint checkpoints/rlvr-smoke/final.json --max-steps 1
 
 # Train one RLHF update. Configure ARTSY_HPSV3_MODEL and ARTSY_HPSV3_URL.
-make grpo ARGS="--init-checkpoint checkpoints/rlvr-smoke/final.json --max-steps 1 --output-dir checkpoints/rlhf-smoke"
+make rlhf ARGS="--init-checkpoint checkpoints/rlvr-smoke/final.json --max-steps 1 --output-dir checkpoints/rlhf-smoke"
 ```
+
+The stage entrypoints default to `checkpoints/rlvr-v1` and `checkpoints/rlhf-v1`,
+with `make rlhf` taking `checkpoints/rlvr-v1/final.json` as its starting state.
+The historical `make grpo` still defaults to the older SFT input for compatibility.
 
 For a full run, omit `--max-steps 1` and choose a new output directory. Repeat that
 original command to resume. `--finalize-only --output-dir PATH` recovers the final
