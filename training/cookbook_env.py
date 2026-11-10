@@ -477,6 +477,7 @@ class ArtsyGroupBuilder:
         self._resources: RolloutResources | None = None
 
     async def make_envs(self):
+        from tinker_cookbook.renderers import ToolCall
         from tinker_cookbook.rl.message_env import EnvFromMessageEnv, MessageStepResult
         from tinker_cookbook.rl.rollout_limits import RolloutLimits
         from tinker_cookbook.tool_use.agent_tool_message_env import AgentToolMessageEnv
@@ -512,10 +513,8 @@ class ArtsyGroupBuilder:
             async def step(self, message):
                 calls = message.get("tool_calls") or []
                 call = calls[0] if len(calls) == 1 else None
-                function = call.get("function", call) if isinstance(call, dict) else {}
-                named_bash = isinstance(function, dict) and function.get("name") == "bash"
-                malformed = (len(calls) != 1 or not named_bash
-                             or bool(message.get("unparsed_tool_calls")))
+                named_bash = isinstance(call, ToolCall) and call.function.name == "bash"
+                malformed = not named_bash or bool(message.get("unparsed_tool_calls"))
                 if malformed:
                     # The protocol verifier sees even calls rejected before tool dispatch.
                     self._artsy_session.invalid_tool_calls += 1

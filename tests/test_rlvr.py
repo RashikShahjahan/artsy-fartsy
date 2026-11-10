@@ -36,31 +36,31 @@ class VerifierTests(unittest.TestCase):
         no_work = verified_reward(
             submitted=False, render_valid=False, valid_tool_calls=0,
             invalid_tool_calls=0, execution_attempts=0, execution_errors=0)
-        self.assertEqual(no_work["reward"], -0.875)
-        self.assertEqual(no_work["image_penalty"], -0.75)
-        self.assertEqual(no_work["tool_penalty"], -0.125)
+        self.assertEqual(no_work["reward"], -1.025)
+        self.assertEqual(no_work["image_penalty"], -1.0)
+        self.assertEqual(no_work["tool_penalty"], -0.025)
         self.assertEqual(no_work["execution_penalty"], 0.0)
 
         unsubmitted = verified_reward(
             submitted=False, render_valid=True, valid_tool_calls=5,
             invalid_tool_calls=0, execution_attempts=5, execution_errors=0)
         self.assertEqual(unsubmitted["image_verified"], 0.0)
-        self.assertEqual(unsubmitted["reward"], -0.75)
+        self.assertEqual(unsubmitted["reward"], -1.0)
 
     def test_each_tool_and_execution_failure_adds_a_negative_penalty(self):
         value = verified_reward(submitted=True, render_valid=True,
                                 valid_tool_calls=3, invalid_tool_calls=2,
                                 execution_attempts=3, execution_errors=1)
         self.assertEqual(value["image_penalty"], 0.0)
-        self.assertEqual(value["tool_penalty"], -0.25)
-        self.assertEqual(value["execution_penalty"], -0.125)
-        self.assertEqual(value["reward"], -0.375)
+        self.assertEqual(value["tool_penalty"], -0.05)
+        self.assertEqual(value["execution_penalty"], -0.025)
+        self.assertAlmostEqual(value["reward"], -0.075)
         self.assertLessEqual(value["reward"], 0.0)
 
         invalid = verified_reward(submitted=True, render_valid=False,
                                   valid_tool_calls=1, invalid_tool_calls=1,
                                   execution_attempts=2, execution_errors=1)
-        self.assertEqual(invalid["reward"], -1.0)
+        self.assertAlmostEqual(invalid["reward"], -1.05)
 
     def test_successful_commands_cannot_dilute_prior_errors(self):
         def score(successes):
@@ -68,8 +68,23 @@ class VerifierTests(unittest.TestCase):
                 submitted=True, render_valid=True,
                 valid_tool_calls=successes + 1, invalid_tool_calls=1,
                 execution_attempts=successes + 1, execution_errors=1)["reward"]
-        self.assertEqual(score(0), -0.25)
-        self.assertEqual(score(99), -0.25)
+        self.assertEqual(score(0), -0.05)
+        self.assertEqual(score(99), -0.05)
+
+    def test_error_categories_are_capped_independently(self):
+        for protocol_errors, execution_errors, tool_penalty, execution_penalty in (
+            (7, 1, -0.10, -0.025),
+            (1, 7, -0.025, -0.10),
+            (7, 7, -0.10, -0.10),
+        ):
+            with self.subTest(protocol_errors=protocol_errors, execution_errors=execution_errors):
+                value = verified_reward(
+                    submitted=False, render_valid=False, valid_tool_calls=1,
+                    invalid_tool_calls=protocol_errors, execution_attempts=7,
+                    execution_errors=execution_errors)
+                self.assertEqual(value["tool_penalty"], tool_penalty)
+                self.assertEqual(value["execution_penalty"], execution_penalty)
+                self.assertAlmostEqual(value["reward"], -1.0 + tool_penalty + execution_penalty)
 
     def test_invalid_evidence_is_rejected(self):
         for counts in (
@@ -236,7 +251,7 @@ class DockerVerifierTests(unittest.IsolatedAsyncioTestCase):
             group.sessions = [session]
             adjustment, = await group.compute_group_rewards(
                 [SimpleNamespace(transitions=[SimpleNamespace(reward=0.1)])], [])
-            expected = -0.125 - 0.125
+            expected = -0.05
             self.assertAlmostEqual(adjustment[0] + 0.1, expected)
             saved = json.loads((root / "result.json").read_text())
             self.assertEqual(saved["invalidToolCalls"], 1)
@@ -259,12 +274,38 @@ class DockerVerifierTests(unittest.IsolatedAsyncioTestCase):
             group.sessions = [session]
             adjustment, = await group.compute_group_rewards(
                 [SimpleNamespace(transitions=[])], [])
-            self.assertEqual(adjustment[0], -0.75)
+            self.assertEqual(adjustment[0], -1.0)
             self.assertEqual(session.result["scores"]["image_verified"], 0.0)
 
 
 @unittest.skipUnless(importlib.util.find_spec("minisweagent"), "mini-SWE not installed")
 class MiniExecutionEvidenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_single_native_bash_call_is_dispatched(self):
+        from tinker_cookbook.renderers import ToolCall
+        from training.cookbook_env import configure_concurrency
+
+        configure_concurrency(1, 1)
+        with tempfile.TemporaryDirectory() as root:
+            builder = ArtsyGroupBuilder({"id": "x", "seed": 1}, 1, 1, Path(root), {},
+                                        None, 262144, False, harness="mini-swe",
+                                        reward_mode="rlvr")
+            self.addAsyncCleanup(builder.cleanup)
+            renderer = SimpleNamespace(get_stop_sequences=lambda: [2])
+            with patch("training.cookbook_env.encoder", return_value=SimpleNamespace(renderer=renderer)), \
+                 patch("training.cookbook_mini.mini_initial_messages", return_value=[]):
+                wrapped, = await builder.make_envs()
+            session, = builder.sessions
+            session.execute_bash = AsyncMock(return_value=("ok", False))
+            call = ToolCall(id="bash-1", function=ToolCall.FunctionBody(
+                name="bash", arguments=json.dumps({"command": "echo ok"})))
+            result = await wrapped.message_env.step(
+                {"role": "assistant", "content": "", "tool_calls": [call]})
+
+            session.execute_bash.assert_awaited_once_with("echo ok")
+            self.assertEqual(session.invalid_tool_calls, 0)
+            self.assertFalse(result.episode_done)
+            self.assertEqual(result.next_messages[-1]["role"], "tool")
+
     async def test_nonzero_exits_failed_previews_and_bad_arguments_are_recorded(self):
         from training.cookbook_mini import MiniDockerSession
         session = MiniDockerSession({"seed": 1}, Path("/tmp/rlvr-test"), {},

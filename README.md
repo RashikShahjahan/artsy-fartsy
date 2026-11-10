@@ -500,15 +500,15 @@ regularization, and hosted LoRA checkpoints. The inference bridge is unnecessary
 **RLVR** uses deterministic **negative-only penalties**, with no HPSv3 service.
 The maximum reward is **0**; successful actions and valid images earn no positive
 bonus:
-- **−0.75** when the final submitted source fails to produce a valid 1920×1200
+- **−1.0** when the final submitted source fails to produce a valid 1920×1200
   PNG in an independent network-isolated Docker scorer, or is not submitted
-- **−0.125 per invalid tool call**: malformed replies or calls that violate the
+- **−0.025 per invalid tool call, capped at −0.10** for malformed replies or calls that violate the
   `bash(command)` schema; an episode with no tool calls incurs one penalty
-- **−0.125 per failed execution**: nonzero shell exit status, failed preview
+- **−0.025 per failed execution, capped at −0.10** for nonzero shell exit status, failed preview
   feedback, or a recorded execution error
 
-Penalties accumulate for each error rather than being divided by the number of
-successful actions, so trivial successful commands cannot dilute earlier errors.
+Error penalties accumulate up to their independent caps. Successful actions
+cannot dilute earlier errors.
 Per-rollout `result.json` stores `image_penalty`, `tool_penalty`,
 `execution_penalty`, aggregate `reward`, diagnostic success ratios, and raw
 error counts.
