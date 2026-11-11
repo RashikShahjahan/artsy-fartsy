@@ -29,7 +29,6 @@ OPTIONS = {
         "max_samples": ("--max-samples", "positive"),
         "max_connections": ("--max-connections", "positive"),
         "max_turns": ("--max-turns", "positive"),
-        "execution_only": ("--execution-only", "bool"),
         "dry_run": ("--dry-run", "bool"),
     },
     "sft": {
@@ -220,6 +219,8 @@ def command(kind, settings, run_id):
     output = (ROOT / ("eval-results" if kind == "eval" else "checkpoints") /
               ("ui-" + kind + "-" + run_id)).resolve()
     argv = [_python(kind), "-u", "-m", MODULES[kind]]
+    if kind == "eval":
+        argv.append("--execution-only")
     for name, (flag, category) in OPTIONS[kind].items():
         if name not in selected:
             continue

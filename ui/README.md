@@ -225,6 +225,7 @@ the underlying bridge can actually serve or which models Tinker supports.
   available, falling back to `.venv`. Set an evaluation model that is actually
   served by your configured bridge/provider; evaluation is not limited to
   Studio's static model dropdown. The default prompt set is the frozen benchmark.
+  UI evaluations always use `--execution-only`, without judge scoring.
 - **SFT** calls `training.sft` using `.venv/bin/python` when available.
   It requires a reviewed, accepted trajectory JSONL (for example
   `datasets/sft-v2/accepted.jsonl`). Base model, LoRA rank, epochs, batch
@@ -253,8 +254,8 @@ A run whose PID has vanished without a recorded exit is marked interrupted.
 
 The UI only accepts recognized flags and repository-local input paths. It does
 not provide arbitrary shell command execution or expose environment/API keys.
-Existing `.env` variables still configure Tinker, the inference bridge, and
-the evaluation judges. Set `ARTSY_TRAIN_PYTHON` or `ARTSY_EVAL_PYTHON`
+Existing `.env` variables still configure Tinker and the inference bridge.
+Set `ARTSY_TRAIN_PYTHON` or `ARTSY_EVAL_PYTHON`
 to explicitly choose an interpreter.
 
 Local checks: `python -m unittest ui.test_launch ui.test_server`,

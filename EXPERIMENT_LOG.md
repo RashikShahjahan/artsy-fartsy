@@ -735,3 +735,32 @@ images. The prompt is the only experimental variable.
 
 Defer reallocating RL prompts, generating additional trajectories, and running
 another SFT job to a later experiment.
+
+## Experiment 8 — One epoch of RLVR at 32 vs. 128 rollouts per update
+
+- **Recorded:** 2026-11-10 (America/Toronto).
+- **Status:** Baseline checkpoint complete. Candidate training launched. Held-out evaluation pending.
+- **Question:** How do the two rollout batch sizes compare after one pass over the same prompts?
+
+| Arm | Prompts per full update | Rollouts per full update | Updates | Planned training rollouts |
+| --- | ---: | ---: | ---: | ---: |
+| Baseline | 8 | 32 | 29 | 908 |
+| Candidate | 32 | 128 | 8 | 908 |
+
+Both arms start from the same Qwen3.5-4B SFT checkpoint and use the same 227
+RLVR prompts, seed 42, four rollouts per prompt, verifier reward, and SFT KL
+reference. The candidate trains from SFT in a fresh run. Docker concurrency
+is capped at 32 episodes for the baseline and 128 for the candidate. Each
+arm trains for one epoch, with three prompts
+and 12 rollouts in the final batch. The comparison holds prompt exposure and
+rollout count fixed. The larger batch produces fewer optimizer updates.
+
+Evaluate the step-29 baseline and step-8 candidate on the same held-out prompts
+with matched generation settings. Compare valid render rates, prompt adherence,
+and visual quality. The earlier step-40 continuation was stopped and its
+checkpoints were deleted. The original 29-update candidate was stopped before
+it recorded a checkpoint. The first one-epoch candidate was restarted before
+its first checkpoint to raise the Docker concurrency cap.
+
+- [Baseline checkpoint](checkpoints/rlvr-g4-continued/final.json) and [training manifest](checkpoints/rlvr-g4-continued/training-manifest.json).
+- [Candidate training manifest](checkpoints/rlvr-g4-b32-epoch1-c128/training-manifest.json) and [run log](checkpoints/rlvr-g4-b32-epoch1-c128.console.log).

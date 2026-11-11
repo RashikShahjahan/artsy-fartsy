@@ -18,7 +18,7 @@ class LauncherTests(unittest.TestCase):
             prompt.write_text("{}\n")
             argv, output = launch.command("eval", {
                 "dataset": "prompts.jsonl", "model": "Qwen/Qwen3.6-35B3A",
-                "limit": 8, "epochs": 2, "execution_only": True,
+                "limit": 8, "epochs": 2,
             }, "a" * 32)
             self.assertEqual(argv[1:4], ["-u", "-m", "evaluation.evaluate"])
             self.assertIn("--execution-only", argv)
@@ -30,6 +30,8 @@ class LauncherTests(unittest.TestCase):
                 {"model": "--help"},
                 {"limit": -1},
                 {"execution_only": "true"},
+                {"execution_only": False},
+                {"execution_only": True},
                 {"dataset": "../../etc/passwd"},
             ]:
                 with self.subTest(invalid=invalid), self.assertRaises(ValueError):

@@ -11,7 +11,6 @@ const fields = {
     ["epochs", "Evaluation epochs", "int", "1", "", ""],
     ["max_connections", "Max model connections", "int", "10", "", "", true],
     ["max_turns", "Max turns per episode", "int", "", "CLI default", "", true],
-    ["execution_only", "Execution-only (skip judges)", "bool", false, "", "For renderer smoke tests only.", true],
     ["dry_run", "Dry run (no model calls)", "bool", false, "", "", true],
   ],
   sft: [
@@ -49,7 +48,7 @@ const fields = {
 };
 const titles = {eval: "evaluation", sft: "SFT", rl: "RL"};
 const descriptions = {
-  eval: "Runs the existing Inspect benchmark. Uses model calls, Docker, and judges unless execution-only is enabled.",
+  eval: "Runs the existing Inspect benchmark using model calls and Docker. Evaluations skip judges.",
   sft: "Trains on approved conversation trajectories using Tinker. Output appears under checkpoints/.",
   rl: "Runs PPO with verifiable RLVR rewards or HPSv3 preference RLHF rewards, using Docker rollouts.",
 };
