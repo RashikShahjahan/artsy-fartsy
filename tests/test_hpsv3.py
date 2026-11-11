@@ -2,6 +2,7 @@
 import base64
 from io import BytesIO
 import math
+import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -30,6 +31,26 @@ class CalibrationTests(unittest.TestCase):
         for center, scale in ((math.nan, 5), (0, 0), (0, -1), (0, math.inf)):
             with self.assertRaises(ValueError):
                 HPSv3Client('http://scorer', center=center, scale=scale)
+
+
+class TimeoutTests(unittest.TestCase):
+    def test_queue_aware_default_and_environment_override(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(HPSv3Client('http://scorer').timeout, 1800)
+        with patch.dict(os.environ, {'ARTSY_HPSV3_TIMEOUT_SECONDS': '2400.5'}):
+            self.assertEqual(HPSv3Client('http://scorer').timeout, 2400.5)
+            self.assertEqual(HPSv3Client('http://scorer', timeout=42).timeout, 42)
+        with patch.dict(os.environ, {'ARTSY_HPSV3_TIMEOUT_SECONDS': 'invalid'}):
+            self.assertEqual(HPSv3Client('http://scorer', timeout=42).timeout, 42)
+
+    def test_rejects_invalid_timeouts(self):
+        for timeout in (0, -1, math.nan, math.inf, True, 'invalid'):
+            with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                HPSv3Client('http://scorer', timeout=timeout)
+        for timeout in ('0', '-1', 'nan', 'inf', 'invalid'):
+            with self.subTest(environment=timeout), patch.dict(os.environ, {'ARTSY_HPSV3_TIMEOUT_SECONDS': timeout}):
+                with self.assertRaises(ValueError):
+                    HPSv3Client('http://scorer')
 
 
 class ClientTests(unittest.IsolatedAsyncioTestCase):

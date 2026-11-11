@@ -47,14 +47,14 @@ PROVENANCE_FILES = (
     "drawing/mini_agent.py", "drawing/mini_session.py", "drawing/mini_protocol.py",
     "evaluation/agent_commands.py",
     "drawing/render_contract.py", "drawing/model_profiles.py", "drawing/vision.py",
-    "training/run_store.py", "training/hpsv3.py", "training/hpsv3_server.py",
+    "training/run_store.py", "training/hpsv3.py", "training/hpsv3_server.py", "training/hpsv3_mlx.py",
     "runtime/requirements.txt", "runtime/artcanvas.py", "docs/artcanvas.md",
     "evaluation/harness.py", "evaluation/host_agent.py", "evaluation/mini.yaml",
     "evaluation/render.py", "evaluation/Dockerfile", "evaluation/compose.yaml",
     "evaluation/requirements.txt", "training/cookbook_env.py", "training/cookbook_mini.py",
     "training/cookbook_dataset.py", "training/score_rl.py", "training/grpo.py",
     "training/sft.py", "training/rlvr.py", "training/rlhf.py", "training/rlvr_reward.py",
-    "training/rl_split.py",
+    "training/rl_split.py", "training/hosted_context.py",
     "training/requirements.txt", "training/requirements-grpo.txt",
     "drawing/dataset_client.py", "drawing/tinker_client.py",
 )
@@ -140,6 +140,7 @@ def load_run(args):
     config = {
         "algorithm": RLVR_ALGORITHM if args.reward_mode == "rlvr" else ALGORITHM,
         "reward_mode": args.reward_mode, "model": checkpoint_model,
+        "hosted_model": f"{checkpoint_model}:peft:{MODEL_CONTEXT_WINDOW}",
         "harness": args.harness, "checkpoint_tool_contract": recorded_contract,
         "trajectory_contract_version": (
             MINI_SWE_CONTRACT_VERSION if args.harness == "mini-swe"
@@ -239,6 +240,67 @@ def load_continuation(args):
                                "source_sha256": old_hashes}}
     return specs, config, total
 
+
+
+# This is the exact pre-adapter driver used by the interrupted 262K rollout run.
+LEGACY_CONTEXT_DRIVER_SHA256 = "16ece124abb50744dee9ad14adbb15aa046d179b069d1706fa3a324154bae40f"
+
+
+def load_recovery(args):
+    """Fork an interrupted run, preserving its optimizer and remaining budget.
+
+    Accept only the audited context-selection migration. Every other runtime
+    input remains hash-pinned; source files and checkpoint history stay intact.
+    """
+    origin = args.recover_from.resolve()
+    if args.output_dir.resolve() == origin or origin in args.output_dir.resolve().parents:
+        raise ValueError("Recovery requires a new output directory")
+    manifest_bytes = (origin / "training-manifest.json").read_bytes()
+    history_bytes = (origin / "checkpoints.jsonl").read_bytes()
+    saved = json.loads(manifest_bytes)
+    previous = saved["config"]
+    if (origin / "final.json").exists():
+        raise ValueError("Recovery requires an interrupted run")
+    records = [json.loads(line) for line in history_bytes.splitlines() if line.strip()]
+    total = saved["total_steps"]
+    if type(total) is not int or total < 1 or not records:
+        raise ValueError("Recovery requires saved optimizer checkpoints")
+    last_step = -1
+    for record in records:
+        step = record.get("batch")
+        if (type(step) is not int or not last_step < step < total
+                or record.get("name") != f"{step:06d}"
+                or any(not isinstance(record.get(k), str) or not record[k].startswith("tinker://")
+                       for k in ("state_path", "sampler_path"))):
+            raise ValueError("Invalid recovery checkpoint history")
+        last_step = step
+    old = previous["source_sha256"]
+    current = {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES}
+    if (set(current) != set(old) | {"training/hosted_context.py"}
+            or "training/hosted_context.py" in old
+            or old.get("training/grpo.py") != LEGACY_CONTEXT_DRIVER_SHA256
+            or any(current[p] != h for p, h in old.items() if p != "training/grpo.py")):
+        raise ValueError("Recovery source differs beyond the audited hosted-context fix")
+    if (previous.get("algorithm") != ALGORITHM or previous.get("reward_mode") != "rlhf"
+            or previous.get("max_length") != MODEL_CONTEXT_WINDOW
+            or previous.get("reference_model") != f"{previous['model']}:peft:{MODEL_CONTEXT_WINDOW}"
+            or digest(args.dataset.read_bytes()) != previous["dataset_sha256"]):
+        raise ValueError("Recovery requires the compatible 262K RLHF dataset and model")
+    all_specs, split = stage_specs(args.dataset, load_specs(args.dataset), "rlhf")
+    specs = all_specs[:len(previous["prompt_ids"])]
+    if [s["id"] for s in specs] != previous["prompt_ids"] or split != previous["rl_stage_split_version"]:
+        raise ValueError("Recovery prompt selection changed")
+    for key in (*INHERITED_PARAMETERS, "epochs", "max_steps", "reward_mode"):
+        setattr(args, key, previous[key])
+    record = records[-1]
+    config = {**previous, "hosted_model": f"{previous['model']}:peft:{MODEL_CONTEXT_WINDOW}",
+              "source_sha256": current,
+              "continuation": {"source_dir": str(origin), "source_manifest_sha256": digest(manifest_bytes),
+                  "source_checkpoints_sha256": digest(history_bytes),
+                  "start_step": last_step, "additional_steps": total - last_step,
+                  "state_path": record["state_path"], "sampler_path": record["sampler_path"],
+                  "source_sha256": old, "migration": "explicit-hosted-context-v1"}}
+    return specs, config, total
 
 def seed_continuation(output_dir, config):
     """Use Cookbook's resume branch, which loads weights AND optimizer state.
@@ -380,7 +442,9 @@ async def train(args, specs, plan, total):
     config = make_cookbook_config(args, specs, plan, total)
     from drawing.dataset_client import close_chat_clients
     try:
-        await cookbook.main(config)
+        from training.hosted_context import cookbook_hosted_context
+        with cookbook_hosted_context(cookbook, plan["hosted_model"]):
+            await cookbook.main(config)
     finally:
         await close_chat_clients()
     # Retain Artsy's model-catalog format for make serve, evaluation and the UI.
@@ -399,6 +463,7 @@ def parser():
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v4")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
+    p.add_argument("--recover-from", type=Path, help="Recover interrupted pre-context-fix run with optimizer state")
     p.add_argument("--additional-steps", type=int, help="Positive number of extra updates")
     p.add_argument("--finalize-only", action="store_true",
                    help="Recover final.json from a completed Cookbook run without training")
@@ -432,6 +497,11 @@ def main(argv=None):
     args = p.parse_args(arguments)
     if args.group_size is None:
         args.group_size = group_size_for_stage(args.reward_mode)
+    if args.recover_from is not None:
+        forbidden = {"--" + k.replace("_", "-") for k in (*INHERITED_PARAMETERS, "epochs", "max_steps", "reward_mode")}
+        forbidden.update({"--continue-from", "--additional-steps", "--limit", "--init-checkpoint", "--finalize-only"})
+        if any(token.split("=", 1)[0] in forbidden for token in arguments):
+            p.error("Recovery inherits training settings and the remaining update budget")
     if args.continue_from is not None:
         forbidden = {"--" + k.replace("_", "-") for k in INHERITED_PARAMETERS}
         forbidden.update({"--epochs", "--max-steps", "--limit", "--init-checkpoint"})
@@ -468,7 +538,8 @@ def main(argv=None):
             or not 0 < args.clip_epsilon < 1 or args.kl_coef < 0):
         p.error("Invalid training hyperparameters")
     try:
-        specs, config, total = (load_continuation(args) if args.continue_from else load_run(args))
+        specs, config, total = (load_recovery(args) if args.recover_from else
+                                load_continuation(args) if args.continue_from else load_run(args))
     except (ValueError, OSError, KeyError, TypeError, AttributeError) as error:
         p.error(str(error))
     start = config.get("continuation", {}).get("start_step", 0)

@@ -34,30 +34,51 @@ class MLXRewardInferencer:
         self.processor.tokenizer.add_special_tokens({'additional_special_tokens': ['<|Reward|>']})
 
     def score(self, prompt: str, image: str) -> float:
+        return self.score_batch([prompt], [image])[0]
+
+    def score_batch(self, prompts: list[str], images: list[str]) -> list[float]:
+        """Run one vision/language forward for an ordered batch of images."""
         import numpy as np
         import mlx.core as mx
         import mlx.nn as nn
         from qwen_vl_utils import process_vision_info
 
-        messages = [{'role': 'user', 'content': [
-            {'type': 'image', 'image': image, 'min_pixels': 200704, 'max_pixels': 200704},
-            {'type': 'text', 'text': INSTRUCTION.format(text_prompt=prompt) + REWARD_SUFFIX}]}]
-        images, _ = process_vision_info(messages)
-        inputs = self.processor(text=[self.processor.apply_chat_template(messages, tokenize=False,
-                                add_generation_prompt=True)], images=images, padding=True, return_tensors='np')
-        ids = mx.array(inputs['input_ids'])
+        if len(prompts) != len(images) or not prompts:
+            raise ValueError('Expected equally sized nonempty prompts and images')
+        texts, vision_images = [], []
+        for prompt, image in zip(prompts, images):
+            messages = [{'role': 'user', 'content': [
+                {'type': 'image', 'image': image, 'min_pixels': 200704, 'max_pixels': 200704},
+                {'type': 'text', 'text': INSTRUCTION.format(text_prompt=prompt) + REWARD_SUFFIX}]}]
+            processed, _ = process_vision_info(messages)
+            vision_images.extend(processed)
+            texts.append(self.processor.apply_chat_template(messages, tokenize=False,
+                         add_generation_prompt=True))
+        # Right padding keeps the original sequential rotary positions of real tokens.
+        inputs = self.processor(text=texts, images=vision_images, padding=True,
+                                padding_side='right', return_tensors='np')
+        token_ids = inputs['input_ids']
+        reward_id = self.processor.tokenizer.convert_tokens_to_ids('<|Reward|>')
+        reward_positions = []
+        for row, valid in zip(token_ids, inputs['attention_mask']):
+            indices = np.flatnonzero((row == reward_id) & (valid != 0))
+            if len(indices) != 1:
+                raise ValueError('Expected exactly one HPSv3 reward token per image')
+            reward_positions.append(int(indices[0]))
+        ids = mx.array(token_ids)
         features = self.model.get_input_embeddings(ids, mx.array(inputs['pixel_values']),
                                                    image_grid_thw=mx.array(inputs['image_grid_thw']))
-        # Sequential positions on all three rotary axes match the HPSv3 forward.
-        positions = mx.broadcast_to(mx.arange(ids.shape[1])[None, None, :], (3, 1, ids.shape[1]))
-        hidden = self.model.language_model.model(ids, inputs_embeds=features.inputs_embeds, position_ids=positions)
-        indices = np.where(inputs['input_ids'][0] == self.processor.tokenizer.convert_tokens_to_ids('<|Reward|>'))[0]
-        if len(indices) != 1:
-            raise ValueError('Expected exactly one HPSv3 reward token')
-        value = hidden[:, int(indices[0]), :].astype(mx.float32)
+        batch, length = ids.shape
+        positions = mx.broadcast_to(mx.arange(length)[None, None, :], (3, batch, length))
+        # With right padding, every real query precedes all padding keys.
+        # The causal kernel therefore excludes padding without a dense mask and
+        # follows exactly the singleton attention path (padded outputs are unused).
+        hidden = self.model.language_model.model(ids, inputs_embeds=features.inputs_embeds,
+                                                 position_ids=positions, mask="causal")
+        value = hidden[mx.arange(batch), mx.array(reward_positions), :].astype(mx.float32)
         for layer in (0, 3, 5):
             value = value @ self.head[f'rm_head.{layer}.weight'].T + self.head[f'rm_head.{layer}.bias']
             if layer != 5:
                 value = nn.relu(value)
         mx.eval(value)
-        return float(value.tolist()[0][0])
+        return [float(row[0]) for row in value.tolist()]

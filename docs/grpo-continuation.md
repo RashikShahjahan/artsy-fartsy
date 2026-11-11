@@ -45,3 +45,26 @@ KL, entropy, and within-group reward variation are diagnostics; select checkpoin
 using independent quality and safety measurements. See the [reward architecture](rlhf-architecture.md).
 
 Legacy RL runs initialized from another policy stage are incompatible with the SFT-initialized algorithm. Start a fresh RL run from the SFT checkpoint.
+
+## Recovering the interrupted hosted-context run
+
+The interrupted RLHF run used a 262,144-token rollout budget while its hosted
+policy sampler selected the 65,536-token default. The explicit hosted-context
+adapter selects `Qwen/Qwen3.5-4B:peft:262144` for training restoration and policy
+sampling. Recover checkpoint 2 and its optimizer into a new output directory:
+
+```sh
+.venv/bin/python -m training.grpo \
+  --recover-from checkpoints/rlhf-rlvr-g4-epoch1-b32-g4-c128 \
+  --output-dir checkpoints/rlhf-rlvr-g4-epoch1-b32-g4-c128-context262k
+```
+
+Use `training.grpo` directly: `training.rlhf` injects stage flags that recovery
+rejects. Recovery inherits the source settings and original four-update total;
+two updates remain, without adding updates or resetting the optimizer. Add
+`--dry-run` to validate the plan without creating the output directory.
+
+This migration accepts only the exact audited old driver hash and the new
+hosted-context adapter; every other source and dataset hash must match. It
+records immutable source manifest and checkpoint-history hashes, preserves the
+original run, and seeds the new history with the saved checkpoint 2 paths.

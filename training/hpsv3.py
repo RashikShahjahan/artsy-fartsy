@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import math
+import os
 
 import httpx
 
@@ -27,11 +28,16 @@ def normalized_reward(score: float, center: float = 0.0, scale: float = 5.0) -> 
 
 class HPSv3Client:
     def __init__(self, url: str, model: str = DEFAULT_MODEL, *, center: float = 0.0,
-                 scale: float = 5.0, api_key: str | None = None, timeout: float = 120):
+                 scale: float = 5.0, api_key: str | None = None, timeout: float | None = None):
         normalized_reward(0.0, center, scale)
         self.url, self.model = url.rstrip("/"), model
         self.center, self.scale, self.api_key = center, scale, api_key
-        self.timeout = timeout
+        # Requests can wait behind many GPU microbatches before inference starts.
+        # Resolve configuration once at construction; explicit callers win.
+        timeout = float(os.getenv("ARTSY_HPSV3_TIMEOUT_SECONDS", "1800")) if timeout is None else timeout
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("HPSv3 timeout must be positive and finite")
+        self.timeout = float(timeout)
 
     async def score(self, prompt: str, png: bytes) -> dict:
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
