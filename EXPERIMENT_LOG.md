@@ -764,3 +764,103 @@ its first checkpoint to raise the Docker concurrency cap.
 
 - [Baseline checkpoint](checkpoints/rlvr-g4-continued/final.json) and [training manifest](checkpoints/rlvr-g4-continued/training-manifest.json).
 - [Candidate training manifest](checkpoints/rlvr-g4-b32-epoch1-c128/training-manifest.json) and [run log](checkpoints/rlvr-g4-b32-epoch1-c128.console.log).
+
+## Experiment 9 — Threefold RLVR prompt expansion and harder held-out evaluation
+
+- **Recorded:** 2026-11-12 (America/Toronto).
+- **Status:** Complete. Training finished all 22 updates and saved the final checkpoint at 13:40 America/Toronto on 2026-11-12. Matched base/SFT/RLVR evaluation completed all 450 episodes with zero sample errors; RLVR delivered 147/150 valid images (98.0%), versus SFT's 109/150 (72.7%).
+- **Question:** Does a fresh epoch of execution-verifier RL on 681 diverse prompts improve execution reliability on more demanding requests?
+- **Initialization:** [Qwen3.5-4B Parti SFT, rank 128, step 72](checkpoints/parti-sft-artcanvas-full-2026-11-07-qwen3.5-4b-r128-b32/final.json), the same SFT state used by Experiment 8. No RL checkpoint continuation.
+- **Training prompts:** Existing 227 canonical Parti RLVR prompts plus 454 GenAI-Bench prompts, exactly 681 (3x). The 100 Parti RLHF prompts remain reserved.
+- **Evaluation:** New 150-prompt GenAI-Bench hard set: 50 counting/binding, 50 spatial/composition, 50 comparison/differentiation/logic. Each has at least three source skill tags, ranked by tag complexity. The hard label is a selection proxy; relative difficulty against the original Parti suite has not been measured in a matched comparison. The original 163 Parti evaluation prompts remain a separate regression benchmark.
+- **Source:** `BaiqiL/GenAI-Bench-1600@e51e8a8070fadfbfe1f160436bf14e7664e87247`, prompt and skill JSON only. No source-image generation or human-rating supervision.
+- **Leakage checks:** All additions screened for exact and lexical near-duplicate overlap with canonical Parti SFT/eval/RL splits, the selected checkpoint's exact SFT input, SFT-v2 prompts, and each other. Semantic equivalence is not guaranteed. Original Parti stage assignments remain unchanged.
+- **Training settings:** Match the Experiment 8 larger-batch arm: one epoch, 32 prompt groups/update, four rollouts/prompt, max 128 concurrent Docker episodes, LR 1e-5, temperature 1, PPO clip 0.2, SFT-reference KL 0.01, seed 42, save every update. **22 updates / 2,724 rollouts**, including nine prompts / 36 rollouts in the final update. Reward remains the negative-only execution verifier; visual adherence is not optimized by RLVR.
+- **Dataset:** [Manifest](datasets/experiment9-genai/manifest.json), [preparation notes](datasets/experiment9-genai/README.md), [training inputs](datasets/experiment9-genai/rlvr/prompts.jsonl), [hard eval](datasets/experiment9-genai/evaluation-hard/prompts.jsonl).
+- **Reproduction:** `.venv/bin/python scripts/prepare_expanded_rlvr.py`; source file hashes, exclusion inputs, selection rules and split hashes are pinned in the manifest.
+- **Validation:** Exact dataset sizes, unchanged original 227 Parti records, split disjointness, lexical train/eval near-duplicate screening, and byte-identical reproduction passed. Trainer dry run passed; 19 existing RL split/verifier tests passed. [Validation report](datasets/experiment9-genai/validation.json).
+- **Run:** [Final RLVR checkpoint](checkpoints/rlvr-experiment9-genai681-qwen3.5-4b-r128-b32-g4/final.json), [training manifest](checkpoints/rlvr-experiment9-genai681-qwen3.5-4b-r128-b32-g4/training-manifest.json), and [training log](checkpoints/rlvr-experiment9-genai681-qwen3.5-4b-r128-b32-g4.console.log). Launch metadata uses the same run stem with `.launch.json`.
+
+### Matched base → SFT → RLVR hard evaluation (2026-11-12)
+
+- **Status:** Complete. All 450 episodes finished with zero sample errors; comparison saved on 2026-11-12 at 14:20 America/Toronto.
+- **Scope:** All 150 new hard held-out prompts on `Qwen/Qwen3.5-4B` base, the exact Parti SFT initialization (rank 128, step 72), and Experiment 9's final RLVR policy (step 22): **450 episodes**. The original 163-prompt Parti regression set is separate from this run.
+- **Controls:** Same mini-SWE Inspect harness, prompt order and seeds; one sample/prompt/model, temperature 0, 25 model turns, 32,768 generated tokens per response, no aggregate-token or episode deadline. Base alias verified to have no configured checkpoint; SFT/RLVR aliases checked against their exact final sampler paths.
+- **Concurrency:** 32 samples, model connections and Docker sandboxes per model, three model runs in parallel (**96 episodes maximum in total**).
+- **Scoring:** Execution-only, matching the execution-reliability objective. Fresh source rendering verifies submitted PNGs; no visual preference or adherence judge is enabled.
+- **Artifacts:** [Comparison manifest](eval-results/experiment9-hard150-comparison/manifest.json), [orchestrator log](eval-results/experiment9-hard150-comparison/runner.log), and [completed comparison](eval-results/experiment9-hard150-comparison/comparison.json). Per-model summaries: [base](eval-results/experiment9-hard150-base/summary.json), [SFT](eval-results/experiment9-hard150-sft/summary.json), and [RLVR](eval-results/experiment9-hard150-rlvr/summary.json). Each run retains its Inspect log, submitted source, images and result records.
+
+### Experiment 9 hard-evaluation results
+
+| Model | Valid renders | Render rate | Evaluation duration |
+| --- | ---: | ---: | ---: |
+| Qwen3.5-4B base | 108/150 | 72.0% | 23m 26s |
+| Parti SFT, rank 128, step 72 | 109/150 | 72.7% | 26m 00s |
+| Expanded RLVR, step 22 | 147/150 | 98.0% | 11m 20s |
+
+All models completed 150/150 samples with zero infrastructure/sample errors.
+Invalid or missing submissions count as render failures in the rates above.
+
+| Prompt category | Base | SFT | RLVR |
+| --- | ---: | ---: | ---: |
+| Counting / binding | 38/50 (76%) | 37/50 (74%) | 50/50 (100%) |
+| Spatial / composition | 32/50 (64%) | 40/50 (80%) | 49/50 (98%) |
+| Comparison / differentiation / logic | 38/50 (76%) | 32/50 (64%) | 48/50 (96%) |
+
+RLVR gains 25.3 percentage points over SFT. On paired prompts it fixes 40
+SFT render failures and loses two SFT successes, for 38 additional valid
+renders overall. RLVR renders 50/50 counting/binding, 49/50 spatial/composition,
+and 48/50 comparison/logic prompts. These results measure valid submitted
+images only; visual adherence and quality were not scored. One generation per
+prompt and one training seed do not establish robustness across seeds.
+
+The comparison establishes execution-reliability improvement from the SFT
+initialization under these evaluation settings. It does not isolate the effect
+of expanding the training pool: the earlier 227-prompt RLVR checkpoint was not
+evaluated on this hard set. The original Parti regression evaluation and visual
+quality/adherence scoring remain outstanding.
+
+[Full comparison](eval-results/experiment9-hard150-comparison/comparison.json).
+
+### Previous one-epoch Parti-only RLVR on the hard set
+
+Completed 2026-11-12T19:43:43.603646+00:00. All 150 episodes completed with zero sample errors.
+
+| Model | Valid renders | Render rate |
+| --- | ---: | ---: |
+| base | 108/150 | 72.0% |
+| sft | 109/150 | 72.7% |
+| parti_rlvr | 141/150 | 94.0% |
+| rlvr | 147/150 | 98.0% |
+
+Expanded RLVR minus Parti-only RLVR: +4.0 percentage points; 9 paired render gains and 3 losses.
+
+Previous checkpoint: `rlvr-g4-b32-epoch1-c128`, step 8, 227 prompts / 908 rollouts. Same SFT initialization, one epoch, batch size 32 and group size four. Expanded run: 681 prompts / 2,724 rollouts / 22 updates. Training sources also differ (`training/grpo.py`, `training/hpsv3.py`, `training/hpsv3_server.py`); the new manifest explicitly records the hosted 262,144-token context, while the prior manifest does not. Treat this as a checkpoint comparison, not an isolated dataset-size ablation. Scoring remains execution-only.
+
+[Four-model comparison](eval-results/experiment9-hard150-comparison/comparison-with-parti.json) · [Parti-only summary](eval-results/experiment9-hard150-parti-rlvr/summary.json).
+
+### Experiment 9 deferred HPSv3 comparison
+
+Completed 2026-11-12T22:40:11.964469+00:00. All 600 episode records processed, including 505 valid images scored and 95 failed deliveries assigned zero normalized preference. No image generation was repeated.
+
+| Model | Valid images | Mean raw HPSv3 on valid images | Mean normalized score, all 150 episodes |
+| --- | ---: | ---: | ---: |
+| base | 108/150 | -9.2917 | 0.1011 |
+| sft | 109/150 | -4.5131 | 0.2239 |
+| parti_rlvr | 141/150 | -4.8763 | 0.2735 |
+| rlvr | 147/150 | -5.0667 | 0.2795 |
+
+| Model A | Model B | Matched delivered images | Wins A | Wins B | Ties | Mean raw A minus B |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| base | sft | 74 | 4 | 70 | 0 | -4.6932 |
+| base | parti_rlvr | 100 | 3 | 97 | 0 | -4.6302 |
+| base | rlvr | 106 | 7 | 99 | 0 | -4.2889 |
+| sft | parti_rlvr | 102 | 48 | 54 | 0 | -0.0996 |
+| sft | rlvr | 107 | 54 | 53 | 0 | 0.2535 |
+| parti_rlvr | rlvr | 138 | 68 | 70 | 0 | 0.1252 |
+
+Scorer: `MizzenAI/HPSv3@sha256:6a859ef3ced4dbccf123b8441cd6c426d6b04af9f396fea2b24d6a64eb6d3a2c:mlx-4bit-g64-v1`. Same established MLX pipeline: 4-bit language weights, group size 64; bfloat16 vision weights; float32 reward head; 200,704 image pixels. Source image hashes and PNG dimensions were validated before loading the scorer. Separate score records preserve the generation outputs.
+
+Raw means condition on each model delivering an image, so their prompt subsets differ. Normalized means include failed delivery as zero; normalization is the existing sigmoid(raw/5), not a calibrated human-rating scale. Pairwise wins use only prompts where both models delivered images. These are descriptive scorer results, without human review or training-seed replication. The previous-versus-expanded RLVR training-source differences noted above still apply.
+
+[HPSv3 comparison](eval-results/experiment9-hard150-hpsv3/comparison.json) · [Per-episode scores](eval-results/experiment9-hard150-hpsv3/scores.csv) · [Scoring provenance](eval-results/experiment9-hard150-hpsv3/run-manifest.json).
