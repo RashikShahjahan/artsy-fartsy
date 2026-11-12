@@ -577,6 +577,28 @@ canonical source path activates the 227/100 split. The default initialization is
 `checkpoints/sft-v2-qwen3.8-27b-final-preview-masked-cosine/final.json`;
 pass `--init-checkpoint` for your own SFT run.
 
+The expanded RLHF input is `datasets/rlhf-genai300/rlhf/prompts.jsonl`:
+the unchanged 100 Parti RLHF prompts plus 200 unused GenAI-Bench prompts,
+50 each for counting, spatial composition, comparison/logic, and scene/attributes.
+Rebuild with `.venv/bin/python scripts/prepare_expanded_rlhf.py` using the local
+pinned sources and manifest in `datasets/experiment9-genai`. Preparation verifies
+the frozen input hashes and screens additions against SFT, all 681 expanded RLVR
+prompts, the 163 Parti evaluation prompts, the 150 hard evaluation prompts, and
+each other. The lexical screen does not establish semantic disjointness.
+The manifest records provenance, allocation, exclusions, and output hashes.
+These remain gitignored local dataset artifacts. RLHF generates rollouts and
+HPSv3 rewards during training; this preparation creates prompt inputs only.
+
+To inspect the expanded input's training plan without starting training:
+
+```bash
+.venv/bin/python -m training.rlhf --dry-run \
+  --dataset datasets/rlhf-genai300/rlhf/prompts.jsonl \
+  --init-checkpoint checkpoints/rlvr-experiment9-genai681-qwen3.5-4b-r128-b32-g4/final.json \
+  --batch-size 32 --group-size 4 --epochs 1 \
+  --output-dir checkpoints/rlhf-genai300
+```
+
 | Setting | Default |
 | --- | --- |
 | Prompt groups / trajectories per group | 8 / 4 |
