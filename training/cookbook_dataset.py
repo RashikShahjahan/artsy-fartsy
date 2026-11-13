@@ -8,7 +8,7 @@ from pathlib import Path
 import chz
 from tinker_cookbook.rl.types import RLDataset, RLDatasetBuilder
 
-from training.hpsv3 import HPSv3Client
+from training.hpsv3 import HPSv3Client, DEFAULT_LOWER, DEFAULT_UPPER, DEFAULT_MINIMUM
 from training.cookbook_env import ArtsyGroupBuilder
 from training.sft import batches
 
@@ -53,8 +53,9 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
     revision: str | None
     hpsv3_model: str | None
     hpsv3_url: str
-    hpsv3_center: float = 0.0
-    hpsv3_scale: float = 5.0
+    hpsv3_lower: float = DEFAULT_LOWER
+    hpsv3_upper: float = DEFAULT_UPPER
+    hpsv3_minimum: float = DEFAULT_MINIMUM
     harness: str = "drawing-tools"
     reward_mode: str = "rlhf"
 
@@ -62,8 +63,8 @@ class ArtsyDatasetBuilder(RLDatasetBuilder):
         if self.reward_mode not in ("rlvr", "rlhf"):
             raise ValueError("Unknown reward mode")
         judges = ({"hpsv3": HPSv3Client(
-            self.hpsv3_url, self.hpsv3_model, center=self.hpsv3_center,
-            scale=self.hpsv3_scale, api_key=os.getenv("ARTSY_HPSV3_API_KEY"))}
+            self.hpsv3_url, self.hpsv3_model, lower=self.hpsv3_lower,
+            upper=self.hpsv3_upper, minimum=self.hpsv3_minimum, api_key=os.getenv("ARTSY_HPSV3_API_KEY"))}
             if self.reward_mode == "rlhf" else {})
         return ArtsyRLDataset(self.specs, self.output_dir, self.batch_size,
                               self.group_size, self.epochs, self.seed,

@@ -65,7 +65,9 @@ Final scoring runs that snapshot as a bundled Python source in a **fresh**,
 network-isolated Docker container. Only the independently rendered valid
 1920×1200 PNG reaches HPSv3. The configured scorer returns a raw score and a
 normalized `preference` reward using
-`sigmoid((hpsv3_score - ARTSY_HPSV3_CENTER) / ARTSY_HPSV3_SCALE)`.
+`minimum + (1 - minimum) * clip((hpsv3_score - lower) / (upper - lower), 0, 1)`,
+with fixed defaults lower=−11, upper=3, minimum=0.02. Training manifests and
+judgments record these parameters and reward version `artsy-final-image-hpsv3-linear-v2`.
 Invalid renders, missing submissions, refusals and budget-limit terminations
 earn zero. Source, final PNG, judge response, reward and tool-call history are
 saved per rollout. Group rewards are mean-centered by Cookbook, without

@@ -13,7 +13,8 @@ from pathlib import Path
 import re
 
 from evaluation.compare_hpsv3 import compare
-from training.hpsv3 import DEFAULT_MODEL, normalized_reward
+from training.hpsv3 import (DEFAULT_MODEL, REWARD_VERSION, DEFAULT_LOWER,
+                            DEFAULT_UPPER, DEFAULT_MINIMUM, normalized_reward)
 
 
 def write_json(path: Path, value: dict):
@@ -70,7 +71,8 @@ def score_runs(runs: dict[str, Path], output: Path, model_id: str, load_model) -
             result = row['result']
             image_hash = result.get('imageHash')
             fingerprint = hashlib.sha256(json.dumps(
-                [result['prompt'], image_hash, row['valid'], result.get('expectedRefusal', False), model_id],
+                [result['prompt'], image_hash, row['valid'], result.get('expectedRefusal', False),
+                 model_id, REWARD_VERSION, DEFAULT_LOWER, DEFAULT_UPPER, DEFAULT_MINIMUM],
                 sort_keys=True).encode()).hexdigest()
             destination = output / 'records' / row['run'] / f"{row['id']}-{row['epoch']}.json"
             if destination.exists():
@@ -98,6 +100,9 @@ def score_runs(runs: dict[str, Path], output: Path, model_id: str, load_model) -
                     scores.update(hpsv3_score=raw, hpsv3_preference=normalized_reward(raw))
                 write_json(destination, {'id': row['id'], 'epoch': row['epoch'], 'prompt': result['prompt'],
                                          'imageHash': image_hash, 'hpsv3Model': model_id,
+                                         'reward_version': REWARD_VERSION,
+                                         'normalization': {'lower': DEFAULT_LOWER, 'upper': DEFAULT_UPPER,
+                                                           'minimum': DEFAULT_MINIMUM},
                                          'fingerprint': fingerprint, 'source': source, 'scores': scores})
             completed += 1
             write_json(output / 'scoring-status.json', {'phase': 'scoring', 'completed': completed,

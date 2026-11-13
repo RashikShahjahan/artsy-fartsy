@@ -67,17 +67,20 @@ For already completed generation runs, invoke the batch directly:
 
 Scoring checkpoints are saved under `records/`, separately from immutable
 Inspect generation logs and artifacts. Matching saved scores are reused; a
-changed prompt, image or scorer is rejected. Existing inline scores with the
+changed prompt, image, scorer or reward calibration is rejected. Existing inline scores with the
 same pinned model can be reused when migrating a run. Scoring failure leaves
 generated images intact, so scoring can resume without regenerating drawings.
 Use `evaluation.resume_eval --output RUN --execution-only` to migrate an
 interrupted inline run while preserving its completed outputs.
 
 `comparison.json` and `scores.csv` retain raw HPSv3 rewards for valid images.
-A fixed sigmoid (center 0, scale 5) produces normalized preference; invalid or
+A bounded linear transform `0.02 + 0.98 * clip((raw + 11) / 14, 0, 1)`
+produces normalized preference; invalid or
 missing submissions receive zero preference and no raw reward. The report
 separates image delivery, raw image-only means, normalized all-episode means,
-and pairwise wins on matched delivered images. These are not calibrated human
+and pairwise wins on matched delivered images. Historical sigmoid scores are
+not comparable to the new normalized scores: rescore into a new output directory
+using the saved images or raw scores. These are not calibrated human
 preference probabilities or separate adherence and safety judgments.
 
 The optional inline `evaluation.evaluate --hpsv3-url URL --hpsv3-model ID` mode

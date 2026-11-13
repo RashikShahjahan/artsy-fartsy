@@ -33,7 +33,7 @@ class ContinuationTests(unittest.TestCase):
                            reference_sampler_path='tinker://original-sft-reference',
                            initial_state_path='tinker://original-sft-state',
                            hpsv3_model='saved-weights', hpsv3_url='saved-url',
-                           hpsv3_center=0., hpsv3_scale=5.)
+                           hpsv3_lower=-11., hpsv3_upper=3., hpsv3_minimum=.02)
         self.record = dict(name='final', batch=3, state_path='tinker://rl-state',
                            sampler_path='tinker://rl-sampler')
         self.write_source()

@@ -23,7 +23,8 @@ import sys
 
 from drawing.config import IMAGE_SIZE, MODEL_CONTEXT_WINDOW
 from drawing.eval_specs import load_specs
-from training.hpsv3 import REWARD_VERSION, normalized_reward
+from training.hpsv3 import (REWARD_VERSION, normalized_reward, DEFAULT_LOWER,
+                            DEFAULT_UPPER, DEFAULT_MINIMUM)
 from training.rlvr_reward import RLVR_ALGORITHM, RLVR_REWARD_VERSION
 from training.rl_split import stage_specs
 from drawing.agent_contract import DRAWING_TOOLS_CONTRACT_VERSION
@@ -89,6 +90,10 @@ def checkpoint_tool_contract(path: Path, source: dict) -> str | None:
 
 
 def load_run(args):
+    if args.reward_mode == "rlhf" and any(
+            key in os.environ for key in ("ARTSY_HPSV3_CENTER", "ARTSY_HPSV3_SCALE")):
+        raise ValueError("Sigmoid CENTER/SCALE settings are no longer supported; use "
+                         "ARTSY_HPSV3_LOWER, ARTSY_HPSV3_UPPER and ARTSY_HPSV3_MINIMUM")
     group_size = (group_size_for_stage(args.reward_mode) if args.group_size is None
                   else args.group_size)
     specs, stage_split_version = stage_specs(args.dataset, load_specs(args.dataset), args.reward_mode)
@@ -164,17 +169,18 @@ def load_run(args):
         "seed": args.seed, "epochs": args.epochs, "max_steps": args.max_steps,
         "hpsv3_model": os.getenv("ARTSY_HPSV3_MODEL") if args.reward_mode == "rlhf" else None,
         "hpsv3_url": os.getenv("ARTSY_HPSV3_URL", "http://127.0.0.1:8090"),
-        "hpsv3_center": float(os.getenv("ARTSY_HPSV3_CENTER", "0")),
-        "hpsv3_scale": float(os.getenv("ARTSY_HPSV3_SCALE", "5")),
+        "hpsv3_lower": float(os.getenv("ARTSY_HPSV3_LOWER", str(DEFAULT_LOWER))),
+        "hpsv3_upper": float(os.getenv("ARTSY_HPSV3_UPPER", str(DEFAULT_UPPER))),
+        "hpsv3_minimum": float(os.getenv("ARTSY_HPSV3_MINIMUM", str(DEFAULT_MINIMUM))),
         "reward": ("penalty-only: -1.0 missing/invalid final PNG, -0.025 per invalid bash "
                    "tool call (or no calls), -0.025 per failed command/preview, each error category capped at -0.10; best=0"
                    if args.reward_mode == "rlvr"
-                   else "submitted final image=sigmoid((hpsv3_mu-center)/scale); missing/refused/invalid=0"),
+                   else "submitted final image=minimum+(1-minimum)*clip((hpsv3_mu-lower)/(upper-lower),0,1); missing/refused/invalid=0"),
         "reward_version": RLVR_REWARD_VERSION if args.reward_mode == "rlvr" else REWARD_VERSION,
         "loss": "Cookbook PPO; optional reference-KL reward penalty",
     }
     if args.reward_mode == "rlhf":
-        normalized_reward(0.0, config["hpsv3_center"], config["hpsv3_scale"])
+        normalized_reward(0.0, config["hpsv3_lower"], config["hpsv3_upper"], config["hpsv3_minimum"])
     total = math.ceil(len(specs) / args.batch_size) * args.epochs
     if args.max_steps != -1:
         total = min(total, args.max_steps)
@@ -369,7 +375,8 @@ def make_cookbook_config(args, specs, plan, total):
             normalize_rewards=args.normalize_rewards,
             revision=plan.get("tokenizer_revision"),
             hpsv3_model=plan["hpsv3_model"], hpsv3_url=plan["hpsv3_url"],
-            hpsv3_center=plan["hpsv3_center"], hpsv3_scale=plan["hpsv3_scale"],
+            hpsv3_lower=plan["hpsv3_lower"], hpsv3_upper=plan["hpsv3_upper"],
+            hpsv3_minimum=plan["hpsv3_minimum"],
             model=plan["model"],
             renderer=plan["renderer"],
             harness=plan.get("harness", "drawing-tools"),

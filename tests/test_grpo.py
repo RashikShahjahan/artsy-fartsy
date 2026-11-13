@@ -246,6 +246,13 @@ class PreviewTests(unittest.TestCase):
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_legacy_sigmoid_environment_rejected(self):
+        from training.grpo import load_run
+        for key in ('ARTSY_HPSV3_CENTER', 'ARTSY_HPSV3_SCALE'):
+            with patch.dict('os.environ', {key: '0'}):
+                with self.assertRaisesRegex(ValueError, 'Sigmoid CENTER/SCALE'):
+                    load_run(parser().parse_args([]))
+
     def test_recover_final_json_without_rerunning_training(self):
         record = SimpleNamespace(name="final", final=None, batch=1,
                                  state_path="tinker://run/weights/final",
@@ -337,7 +344,7 @@ class ConfigurationTests(unittest.TestCase):
                 "renderer": "qwen3_8_disable_thinking",
                 "tokenizer_revision": None,
                 "lora_rank": 32, "hpsv3_model": "weights",
-                "hpsv3_url": "https://judge.example", "hpsv3_center": 0., "hpsv3_scale": 5.,
+                "hpsv3_url": "https://judge.example", "hpsv3_lower": -11., "hpsv3_upper": 3., "hpsv3_minimum": .02,
                 }
         config = make_cookbook_config(
             args, [{"id": "a", "prompt": "Draw a circle", "seed": 1}], plan, 1)
@@ -349,6 +356,8 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.kl_reference_config.base_model, "Qwen/Qwen3.8-27B:peft:262144")
         self.assertEqual(config.max_tokens, args.max_length)
         self.assertIsNone(config.dataset_builder.max_tokens)
+        self.assertEqual((config.dataset_builder.hpsv3_lower, config.dataset_builder.hpsv3_upper,
+                          config.dataset_builder.hpsv3_minimum), (-11, 3, .02))
         self.assertTrue(config.termination.zero_reward_on_limit)
 
 

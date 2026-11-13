@@ -16,21 +16,27 @@ from training.hpsv3 import HPSv3Client, normalized_reward
 
 
 class CalibrationTests(unittest.TestCase):
-    def test_monotonic_bounded_and_centered(self):
+    def test_monotonic_bounded_linear_and_clipped(self):
         rewards = [normalized_reward(v) for v in (-1e300, -10, 0, 10, 1e300)]
-        self.assertEqual(rewards, sorted(set(rewards)))
-        self.assertTrue(all(0 < value < 1 for value in rewards))
-        self.assertEqual(normalized_reward(0), 0.5)
-        self.assertEqual(normalized_reward(10, center=10), 0.5)
-        self.assertAlmostEqual(normalized_reward(10, scale=10), normalized_reward(5))
+        self.assertEqual(rewards, sorted(rewards))
+        self.assertTrue(all(0.02 <= value <= 1 for value in rewards))
+        for raw, expected in ((-11, .02), (-10, .09), (-9, .16), (-5, .44),
+                              (0, .79), (2, .93), (3, 1)):
+            with self.subTest(raw=raw):
+                self.assertAlmostEqual(normalized_reward(raw), expected)
+        self.assertEqual(normalized_reward(-1e300), .02)
+        self.assertEqual(normalized_reward(1e300), 1)
+        self.assertAlmostEqual(normalized_reward(5, lower=0, upper=10, minimum=.1), .55)
 
     def test_bad_scores_and_calibrations_rejected(self):
         for value in (float('nan'), float('inf'), True, '10', None):
             with self.assertRaises(ValueError):
                 normalized_reward(value)
-        for center, scale in ((math.nan, 5), (0, 0), (0, -1), (0, math.inf)):
+        for lower, upper, minimum in ((math.nan, 3, .02), (-11, math.inf, .02),
+                (3, 3, .02), (4, 3, .02), (-11, 3, 0), (-11, 3, 1),
+                (-11, 3, math.nan), (False, 3, .02), (-1e308, 1e308, .02)):
             with self.assertRaises(ValueError):
-                HPSv3Client('http://scorer', center=center, scale=scale)
+                HPSv3Client('http://scorer', lower=lower, upper=upper, minimum=minimum)
 
 
 class TimeoutTests(unittest.TestCase):
@@ -67,6 +73,8 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
             judgment = await HPSv3Client('http://scorer/', 'pinned-weights', api_key='token').score('Draw a fox', b'png')
         self.assertEqual(judgment['hpsv3_score'], 10)
         self.assertEqual(judgment['preference'], normalized_reward(10))
+        self.assertEqual(judgment['reward_version'], 'artsy-final-image-hpsv3-linear-v2')
+        self.assertEqual((judgment['lower'], judgment['upper'], judgment['minimum']), (-11, 3, .02))
 
     async def test_bad_service_responses_propagate(self):
         for status, body in ((500, {}), (200, {'model': 'wrong', 'score': 1}),

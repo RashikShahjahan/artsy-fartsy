@@ -619,11 +619,16 @@ without standard-deviation scaling and removes constant-reward groups.
 
 GRPO uses a separately configured HPSv3 final-image preference scorer. A
 successfully submitted, valid PNG receives the normalized preference reward
-`sigmoid((hpsv3_score - center) / scale)`. Missing submissions, invalid renders,
+`0.02 + 0.98 * clip((hpsv3_score + 11) / 14, 0, 1)`. Missing submissions, invalid renders,
 refusals, and budget-limit terminations earn zero. The raw HPSv3 score and
 normalized preference are saved per rollout. Set `ARTSY_HPSV3_MODEL` and
-`ARTSY_HPSV3_URL`, with optional `ARTSY_HPSV3_CENTER` and `ARTSY_HPSV3_SCALE`,
-before starting training. The judge is separate from the policy sampler.
+`ARTSY_HPSV3_URL`, with optional `ARTSY_HPSV3_LOWER` (−11),
+`ARTSY_HPSV3_UPPER` (3), and `ARTSY_HPSV3_MINIMUM` (0.02),
+before starting training. Bounds stay fixed throughout a run. The old
+`ARTSY_HPSV3_CENTER`/`ARTSY_HPSV3_SCALE` settings are no longer supported.
+Reward version `artsy-final-image-hpsv3-linear-v2` distinguishes this transform
+from historical sigmoid scores; previous artifacts are not rewritten.
+The judge is separate from the policy sampler.
 See the [reward architecture](docs/rlhf-architecture.md).
 
 Outputs include a training manifest, Cookbook checkpoints/metrics, grouped rollout

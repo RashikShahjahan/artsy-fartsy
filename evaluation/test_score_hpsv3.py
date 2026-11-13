@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from PIL import Image
 from evaluation.score_hpsv3 import score_runs
@@ -75,6 +75,12 @@ class DeferredScoreTests(unittest.TestCase):
         score_runs(self.runs, self.output, 'pinned', self.load)
         with self.assertRaisesRegex(ValueError, 'inputs changed'):
             score_runs(self.runs, self.output, 'different', self.load)
+
+    def test_changed_reward_version_rejects_saved_score_checkpoint(self):
+        score_runs(self.runs, self.output, 'pinned', self.load)
+        with patch('evaluation.score_hpsv3.REWARD_VERSION', 'different-calibration'):
+            with self.assertRaisesRegex(ValueError, 'inputs changed'):
+                score_runs(self.runs, self.output, 'pinned', self.load)
 
     def test_retry_changes_scoring_only_and_preserves_original_metadata(self):
         score = SimpleNamespace(value={'render_valid': 1, 'hpsv3_score': -2}, metadata={'hpsv3Model': 'pinned'})

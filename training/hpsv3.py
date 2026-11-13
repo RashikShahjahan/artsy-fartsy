@@ -7,31 +7,33 @@ import os
 
 import httpx
 
-REWARD_VERSION = "artsy-final-image-hpsv3-v1"
+REWARD_VERSION = "artsy-final-image-hpsv3-linear-v2"
 DEFAULT_MODEL = "MizzenAI/HPSv3"
+DEFAULT_LOWER = -11.0
+DEFAULT_UPPER = 3.0
+DEFAULT_MINIMUM = 0.02
 
 
-def normalized_reward(score: float, center: float = 0.0, scale: float = 5.0) -> float:
-    """Fixed sigmoid calibration; zero remains reserved for invalid submissions."""
-    if (type(score) not in (int, float) or not math.isfinite(score)
-            or not math.isfinite(center) or not math.isfinite(scale) or scale <= 0):
-        raise ValueError("HPSv3 requires a finite score/center and positive finite scale")
-    z = (score - center) / scale
-    # Stable sigmoid, bounded away from zero even for extreme finite scores.
-    if z >= 0:
-        reward = 1 / (1 + math.exp(-z))
-    else:
-        exp = math.exp(z)
-        reward = exp / (1 + exp)
-    return max(1e-6, min(1 - 1e-6, reward))
+def normalized_reward(score: float, lower: float = DEFAULT_LOWER,
+                      upper: float = DEFAULT_UPPER, minimum: float = DEFAULT_MINIMUM) -> float:
+    """Bounded linear reward for valid images; failures are assigned zero by callers."""
+    if (any(type(value) not in (int, float) or not math.isfinite(value)
+            for value in (score, lower, upper, minimum))
+            or lower >= upper or not math.isfinite(upper - lower)
+            or not 0 < minimum < 1):
+        raise ValueError("HPSv3 requires finite scores/bounds, lower < upper, and 0 < minimum < 1")
+    # Branch before subtraction so extreme finite scores still clamp safely.
+    fraction = 0.0 if score <= lower else 1.0 if score >= upper else (score - lower) / (upper - lower)
+    return minimum + (1 - minimum) * fraction
 
 
 class HPSv3Client:
-    def __init__(self, url: str, model: str = DEFAULT_MODEL, *, center: float = 0.0,
-                 scale: float = 5.0, api_key: str | None = None, timeout: float | None = None):
-        normalized_reward(0.0, center, scale)
+    def __init__(self, url: str, model: str = DEFAULT_MODEL, *, lower: float = DEFAULT_LOWER,
+                 upper: float = DEFAULT_UPPER, minimum: float = DEFAULT_MINIMUM,
+                 api_key: str | None = None, timeout: float | None = None):
+        normalized_reward(0.0, lower, upper, minimum)
         self.url, self.model = url.rstrip("/"), model
-        self.center, self.scale, self.api_key = center, scale, api_key
+        self.lower, self.upper, self.minimum, self.api_key = lower, upper, minimum, api_key
         # Requests can wait behind many GPU microbatches before inference starts.
         # Resolve configuration once at construction; explicit callers win.
         timeout = float(os.getenv("ARTSY_HPSV3_TIMEOUT_SECONDS", "1800")) if timeout is None else timeout
@@ -50,6 +52,7 @@ class HPSv3Client:
         if result.get("model") != self.model:
             raise ValueError("HPSv3 service model does not match the training configuration")
         score = result["score"]
-        reward = normalized_reward(score, self.center, self.scale)
+        reward = normalized_reward(score, self.lower, self.upper, self.minimum)
         return {"model": self.model, "hpsv3_score": score, "preference": reward,
-                "center": self.center, "scale": self.scale}
+                "reward_version": REWARD_VERSION, "lower": self.lower,
+                "upper": self.upper, "minimum": self.minimum}
