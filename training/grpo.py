@@ -250,12 +250,13 @@ def load_continuation(args):
 
 # This is the exact pre-adapter driver used by the interrupted 262K rollout run.
 LEGACY_CONTEXT_DRIVER_SHA256 = "16ece124abb50744dee9ad14adbb15aa046d179b069d1706fa3a324154bae40f"
+PRE_KL_BUDGET_DRIVER_SHA256 = "8c520e0ccfbceb0b1dc161964fce14aab86155f89ffeb10c5c8d1b4a1d1366e9"
 
 
 def load_recovery(args):
     """Fork an interrupted run, preserving its optimizer and remaining budget.
 
-    Accept only the audited context-selection migration. Every other runtime
+    Accept only audited context-selection or KL-budget migrations. Every other runtime
     input remains hash-pinned; source files and checkpoint history stay intact.
     """
     origin = args.recover_from.resolve()
@@ -282,11 +283,14 @@ def load_recovery(args):
         last_step = step
     old = previous["source_sha256"]
     current = {p: digest((ROOT / p).read_bytes()) for p in PROVENANCE_FILES}
-    if (set(current) != set(old) | {"training/hosted_context.py"}
-            or "training/hosted_context.py" in old
-            or old.get("training/grpo.py") != LEGACY_CONTEXT_DRIVER_SHA256
+    legacy_context = ("training/hosted_context.py" not in old
+                      and old.get("training/grpo.py") == LEGACY_CONTEXT_DRIVER_SHA256)
+    kl_budget = (set(current) == set(old)
+                 and old.get("training/grpo.py") == PRE_KL_BUDGET_DRIVER_SHA256)
+    if (not (legacy_context or kl_budget)
+            or set(current) != set(old) | {"training/hosted_context.py"}
             or any(current[p] != h for p, h in old.items() if p != "training/grpo.py")):
-        raise ValueError("Recovery source differs beyond the audited hosted-context fix")
+        raise ValueError("Recovery source differs beyond the audited context fixes")
     if (previous.get("algorithm") != ALGORITHM or previous.get("reward_mode") != "rlhf"
             or previous.get("max_length") != MODEL_CONTEXT_WINDOW
             or previous.get("reference_model") != f"{previous['model']}:peft:{MODEL_CONTEXT_WINDOW}"
@@ -305,7 +309,8 @@ def load_recovery(args):
                   "source_checkpoints_sha256": digest(history_bytes),
                   "start_step": last_step, "additional_steps": total - last_step,
                   "state_path": record["state_path"], "sampler_path": record["sampler_path"],
-                  "source_sha256": old, "migration": "explicit-hosted-context-v1"}}
+                  "source_sha256": old, "migration": (
+                      "explicit-hosted-context-v1" if legacy_context else "kl-context-budget-v1")}}
     return specs, config, total
 
 def seed_continuation(output_dir, config):
@@ -360,6 +365,10 @@ def make_cookbook_config(args, specs, plan, total):
     from tinker_cookbook.rl.rollout_limits import TerminationRewardPolicy
     from training.cookbook_dataset import ArtsyDatasetBuilder
 
+    # KL scoring appends the last target to the training input, then the SDK's
+    # compute_logprobs samples one extra token. Keep that token inside the hosted
+    # window, including when a rollout exhausts its entire generation budget.
+    trajectory_length = min(args.max_length, MODEL_CONTEXT_WINDOW - bool(args.kl_coef))
     return cookbook.Config(
         log_path=str(args.output_dir.resolve()),
         model_name=plan["model"],
@@ -371,7 +380,7 @@ def make_cookbook_config(args, specs, plan, total):
             specs=tuple(specs), output_dir=str((args.output_dir / "rollouts").resolve()),
             batch_size=args.batch_size, group_size=args.group_size,
             epochs=args.epochs, seed=args.seed,
-            max_tokens=args.max_tokens, max_length=args.max_length,
+            max_tokens=args.max_tokens, max_length=trajectory_length,
             normalize_rewards=args.normalize_rewards,
             revision=plan.get("tokenizer_revision"),
             hpsv3_model=plan["hpsv3_model"], hpsv3_url=plan["hpsv3_url"],
@@ -385,7 +394,7 @@ def make_cookbook_config(args, specs, plan, total):
         learning_rate=args.learning_rate,
         # Cookbook requires an integer ceiling. Without an explicit cap, use
         # context capacity; the rollout runner clips to remaining context.
-        max_tokens=args.max_tokens or args.max_length,
+        max_tokens=min(args.max_tokens or trajectory_length, trajectory_length),
         temperature=args.temperature,
         loss_fn="ppo",
         loss_fn_config={"clip_low_threshold": 1 - args.clip_epsilon,
@@ -470,7 +479,7 @@ def parser():
     p.add_argument("--output-dir", type=Path, default=ROOT / "checkpoints/grpo-v4")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--continue-from", type=Path, help="Completed RL run to fork with optimizer state")
-    p.add_argument("--recover-from", type=Path, help="Recover interrupted pre-context-fix run with optimizer state")
+    p.add_argument("--recover-from", type=Path, help="Recover interrupted pre-context-fix or pre-KL-budget-fix run with optimizer state")
     p.add_argument("--additional-steps", type=int, help="Positive number of extra updates")
     p.add_argument("--finalize-only", action="store_true",
                    help="Recover final.json from a completed Cookbook run without training")

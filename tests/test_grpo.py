@@ -354,7 +354,14 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.load_checkpoint_path, "tinker://initial")
         self.assertEqual(config.kl_reference_config.load_checkpoint_path, "tinker://reference")
         self.assertEqual(config.kl_reference_config.base_model, "Qwen/Qwen3.8-27B:peft:262144")
-        self.assertEqual(config.max_tokens, args.max_length)
+        self.assertEqual(config.max_tokens, args.max_length - 1)
+        self.assertEqual(config.dataset_builder.max_length + 1, args.max_length)
+        for length, kl, expected in ((32768, .01, 32768), (262144, 0., 262144),
+                                     (262144, .01, 262143)):
+            args.max_length, args.kl_coef = length, kl
+            bounded = make_cookbook_config(args, [], plan, 1)
+            self.assertEqual(bounded.dataset_builder.max_length, expected)
+            self.assertEqual(bounded.max_tokens, expected)
         self.assertIsNone(config.dataset_builder.max_tokens)
         self.assertEqual((config.dataset_builder.hpsv3_lower, config.dataset_builder.hpsv3_upper,
                           config.dataset_builder.hpsv3_minimum), (-11, 3, .02))

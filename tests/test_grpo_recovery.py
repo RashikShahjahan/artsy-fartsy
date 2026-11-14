@@ -69,6 +69,22 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'history'):
             grpo.load_recovery(self.args)
 
+    def test_kl_budget_recovery_preserves_settings_and_optimizer(self):
+        self.config['source_sha256'] = {
+            p: grpo.digest((grpo.ROOT / p).read_bytes()) for p in grpo.PROVENANCE_FILES}
+        self.config['source_sha256']['training/grpo.py'] = grpo.PRE_KL_BUDGET_DRIVER_SHA256
+        self.write()
+        _, plan, total = grpo.load_recovery(self.args)
+        self.assertEqual(total, 4)
+        self.assertEqual(plan['continuation']['migration'], 'kl-context-budget-v1')
+        self.assertEqual(plan['continuation']['state_path'], 'tinker://state2')
+        for key in grpo.INHERITED_PARAMETERS:
+            self.assertEqual(plan[key], self.config[key])
+        self.config['source_sha256']['training/hosted_context.py'] = 'changed'
+        self.write()
+        with self.assertRaisesRegex(ValueError, 'audited'):
+            grpo.load_recovery(self.args)
+
     def test_cli_dry_run_and_drift_rejection(self):
         base = ['--recover-from', str(self.origin), '--dataset', str(self.dataset),
                 '--output-dir', str(self.args.output_dir), '--dry-run']

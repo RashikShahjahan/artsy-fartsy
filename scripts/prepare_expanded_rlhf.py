@@ -1,4 +1,4 @@
-"""Build 300 RLHF prompts without reusing expanded RLVR or evaluation inputs.
+"""Build RLHF prompts without reusing expanded RLVR or evaluation inputs.
 
 Uses the pinned local sources and exclusion manifest from prepare_expanded_rlvr.
 No inference, preference labels, image downloads, or training are performed.
@@ -24,7 +24,10 @@ ALLOCATION = {"counting_attributes": 50, "spatial_composition": 50,
               "comparison_logic": 50, "scene_attributes": 50}
 
 
-def prepare(output: Path, rlvr_dir: Path) -> dict:
+def prepare(output: Path, rlvr_dir: Path, count: int = 300) -> dict:
+    if count < 300:
+        raise ValueError("Count must be at least 300 to preserve the original RLHF set")
+    requested_count = count
     upstream_path = rlvr_dir / "manifest.json"
     upstream_bytes = upstream_path.read_bytes()
     upstream = json.loads(upstream_bytes)
@@ -103,7 +106,7 @@ def prepare(output: Path, rlvr_dir: Path) -> dict:
                                 "source_id": index, "tags": sorted(tags[int(index)])}})
 
     added, selected = [], set()
-    for bucket, count in ALLOCATION.items():
+    for bucket, bucket_count in ALLOCATION.items():
         eligible = BUCKETS.get(bucket, {"scene", "attribute", "action relation", "part relation"})
         candidates = sorted((row for row in pool if set(row["source"]["tags"]) & eligible),
                             key=lambda row: stable(row, "rlhf-train:" + bucket))
@@ -113,14 +116,25 @@ def prepare(output: Path, rlvr_dir: Path) -> dict:
                 continue
             chosen.append({**row, "primarySkill": bucket})
             selected.add(row["id"])
-            if len(chosen) == count:
+            if len(chosen) == bucket_count:
                 break
-        if len(chosen) != count:
+        if len(chosen) != bucket_count:
             raise ValueError(f"Insufficient unused prompts for {bucket}: {len(chosen)}")
         added.extend(chosen)
+    # Retain the original skill-balanced 200 additions, then sample the rest of
+    # the screened pool without replacement. Larger sets are not quota-balanced.
+    remaining = sorted((row for row in pool if row["id"] not in selected),
+                       key=lambda row: stable(row, "rlhf-expansion"))
+    extra_count = requested_count - 300
+    if len(remaining) < extra_count:
+        raise ValueError(f"Requested {requested_count} prompts, but only {len(base) + len(pool)} are available")
+    for row in remaining[:extra_count]:
+        bucket = next((name for name, tags in BUCKETS.items()
+                       if set(row["source"]["tags"]) & tags), "scene_attributes")
+        added.append({**row, "primarySkill": bucket})
     rows = sorted(base + added, key=lambda row: stable(row, "rlhf-order"))
-    if len(rows) != 300 or len({r["id"] for r in rows}) != 300:
-        raise ValueError("Expected 300 distinct RLHF prompts")
+    if len(rows) != requested_count or len({r["id"] for r in rows}) != requested_count:
+        raise ValueError(f"Expected {requested_count} distinct RLHF prompts")
 
     manifest = {
         "version": "artsy-expanded-rlhf-v1", "seed": 42,
@@ -144,6 +158,13 @@ def prepare(output: Path, rlvr_dir: Path) -> dict:
             ("parti", exclusions[1]), ("hard", exclusions[-1]))},
         "source_rejections": rejected, "eligible_source_pool": stats(pool), "splits": {},
     }
+    if extra_count:
+        manifest["selection"]["expansion"] = {
+            "records": extra_count,
+            "method": "seeded hash over remaining screened pool without replacement",
+            "original_300_preserved": True,
+            "skill_quotas_applied_to_expansion": False,
+        }
     # Preflight every frozen output before writing any files.
     artifacts = []
     for name, records in (("rlhf", rows), ("rlhf-added", added)):
@@ -167,7 +188,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=ROOT / "datasets/rlhf-genai300")
     parser.add_argument("--rlvr-dir", type=Path, default=ROOT / "datasets/experiment9-genai")
+    parser.add_argument("--count", type=int, default=300)
     args = parser.parse_args()
-    result = prepare(args.output.resolve(), args.rlvr_dir.resolve())
+    result = prepare(args.output.resolve(), args.rlvr_dir.resolve(), args.count)
     print(json.dumps({"splits": result["splits"],
                       "source_rejections": len(result["source_rejections"])}, indent=2))
