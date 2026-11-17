@@ -11,7 +11,7 @@ from ui import server, test_artsy
 class ModelSelectionTests(unittest.TestCase):
     def test_four_models_reach_the_correct_provider_for_drawings_and_edits(self):
         served = [{'id': model['id'], 'model_path': 'tinker://fixture/sampler',
-                   'base_model': server.LARGE_MODEL_ID}
+                   'base_model': server.MODEL_ID}
                   for model in server.ARTSY_MODELS if model['id'].startswith('artsy/')]
         with tempfile.TemporaryDirectory() as temporary, \
              patch.object(server, 'bridge_model_catalog', return_value=served):
@@ -41,15 +41,17 @@ class ModelSelectionTests(unittest.TestCase):
                             self.assertIn(model['id'], run.call_args.args[1])
 
     def test_unknown_and_unavailable_models_are_rejected(self):
-        for model in ('other/model', 'Qwen/Qwen3.5-4B', '', None, []):
+        for model in ('other/model', server.LARGE_MODEL_ID, 'openai/gpt-6-luna', '', None, []):
             with self.subTest(model=model), self.assertRaisesRegex(ValueError, 'Choose Base'):
                 server.artsy_request({'prompt': 'fox', 'model': model})
         with patch.object(server, 'bridge_model_catalog', return_value=None):
-            for model in server.ARTSY_MODELS[1:3]:
+            for model in server.ARTSY_MODELS[1:]:
                 with self.subTest(model=model), self.assertRaisesRegex(ValueError, 'unavailable'):
                     server.artsy_request({'prompt': 'fox', 'model': model['id']})
 
-    def test_home_renders_exactly_four_models_with_luna_selected(self):
+    def test_home_renders_exactly_four_stages_with_rlhf_selected(self):
+        self.assertEqual([model['label'] for model in server.ARTSY_MODELS],
+                         ['Base', 'SFT', 'RLVR', 'RLHF'])
         class Options(HTMLParser):
             def __init__(self):
                 super().__init__()
@@ -70,7 +72,7 @@ class ModelSelectionTests(unittest.TestCase):
             self.assertEqual([option['value'] for option in parser.options],
                              [model['id'] for model in server.ARTSY_MODELS])
             self.assertEqual([option['value'] for option in parser.options if 'selected' in option],
-                             ['openai/gpt-6-luna'])
+                             [server.DEFAULT_ARTSY_MODEL])
 
 
 if __name__ == '__main__':

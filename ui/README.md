@@ -3,40 +3,36 @@
 From the repository root:
 
 ```sh
-.venv/bin/python -m ui.server
+make ui
 ```
 
 Open http://127.0.0.1:4173 for the voice-first Artsy experience. It introduces
 Artsy, asks what to draw, shows live drawing progress, then presents the finished
 image with voice or text follow-ups. The home screen offers voice and keyboard input. Open **Drawing settings**
-to choose a model or require approval for each action. Saved drawings live in an
+to choose a model. Saved drawings live in an
 on-demand history drawer. Image download and new-drawing controls appear with
 the artwork; a compact version selector appears after edits. Selecting a version
 makes it the basis of the next edit; **New drawing** starts a separate idea. Active jobs
 resume polling after a reload, and completed drawings remain in the sketchbook.
 
-The model selector offers **Base**, **SFT**, **GRPO**, and **GPT-6 Luna**. Base uses
-`Qwen/Qwen3.8-27B`; SFT uses `artsy/sft-v2-qwen3.8-27b-final-preview-masked-cosine`;
-GRPO uses `artsy/grpo-v4-subset200-b16-c64`. These three require the native bridge
-(`make serve`) with the completed checkpoints available. GPT-6 Luna uses
-`openai/gpt-6-luna` through OpenRouter, requires `OPENROUTER_API_KEY` in `.env`,
-and works without the bridge. Luna is the default; the browser remembers your
-selection. The selected model handles both new drawings and subsequent edits,
+The model selector offers **Base**, **SFT**, **RLVR**, and **RLHF** from the latest
+completed Qwen3.5 4B training pipeline. RLHF is the default. `make ui` starts the
+native Tinker bridge and waits for it to become ready before starting the UI.
+It reuses an existing healthy bridge; Ctrl-C stops only the services it started.
+The bridge uses `.cache/huggingface` unless `HF_HOME` is already set.
+Use `make serve` for a separate bridge, or `python -m ui.server` for only the UI.
+The selected model handles both new drawings and subsequent edits,
 so you can switch models between versions.
 
 The consumer endpoint (`POST /api/artsy/runs`) accepts the selected model ID and
 enforces **10 internal model turns per response**, including edits. Start Docker
 before drawing.
-Edits reuse the completed drawing's verified pycairo source. Choose **Auto** to
-let Artsy continue drawing, or **Approve steps** to pause before every drawing
-action, review its details, and click **Approve action** to continue. Each approval
-releases only that action, including when one model turn proposes several actions.
-The mode is fixed for the current drawing and can be changed before the next request.
+Edits reuse the completed drawing's verified pycairo source. Artsy runs drawing
+actions automatically.
 
 The drawing canvas shows only the current stage during generation. Each new visible model
 update, action, or preview replaces the previous stage instead of building a timeline.
-Both modes show the same current stage; Auto continues without pausing, while
-Approve steps adds an approval button for the pending action. Each action uses one plain-language message, changing from an action label to its result when it finishes.
+Each action uses one plain-language message, changing from an action label to its result when it finishes.
 Raw output, source code, and arguments are not displayed in the consumer UI.
 Assistant messages and tool actions appear one at a time. Saved history uses
 Previous and Next controls to inspect one recorded step at a time.

@@ -1,5 +1,4 @@
 """Run the existing drawing CLI and export its complete recorded Inspect trace."""
-import asyncio
 import base64
 import json
 import shutil
@@ -48,19 +47,9 @@ def main():
             sys.argv[1] = f"Previous request: {previous['prompt']}\n\nRequested change: {prompt}"
             sys.argv += ['--reference-source', str(parent / 'output/program.py')]
 
-    async def approve(step_id):
-        while True:
-            try:
-                decision = json.loads((Path(directory) / 'approval.json').read_text())
-                if decision.get('step_id') == step_id:
-                    return
-            except (OSError, ValueError):
-                pass
-            await asyncio.sleep(0.2)
-
     try:
         from evaluation.draw import main as draw
-        status = draw(progress=progress, **({'approval': approve} if job.get('execution_mode') == 'approval' else {}))
+        status = draw(progress=progress)
         result_file = output / 'result.json'
         if job.get('experience') == 'artsy' and result_file.is_file():
             result = json.loads(result_file.read_text())

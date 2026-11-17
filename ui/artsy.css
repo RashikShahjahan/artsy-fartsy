@@ -82,13 +82,6 @@ main.is-busy .versions, main.is-busy .activity-step-status { display: none; }
 main.is-busy .drawing-process { margin-top: 0; }
 main.is-busy .mic-button, main.is-busy .type-toggle { display: none; }
 
-.execution-modes { display: flex; gap: 4px; border: 1px solid #79685f33; border-radius: 24px; padding: 4px; margin: 0; }
-.execution-modes label { position: relative; cursor: pointer; }
-.execution-modes input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-.execution-modes span { display: block; padding: 8px 18px; border-radius: 20px; font-size: 12px; color: var(--muted); }
-.execution-modes input:checked + span { background: var(--ink); color: var(--paper); }
-.execution-modes input:focus-visible + span { outline: 2px solid var(--coral); outline-offset: 3px; }
-.execution-modes:disabled label { cursor: default; }
 /* Generation and recorded steps share the finished drawing's canvas. */
 .agent-activity { width: 100%; padding: 0; text-align: center; }
 .activity-steps { list-style: none; margin: 0; padding: 0; }
@@ -110,7 +103,6 @@ main.is-busy .activity-preview { max-height: 42svh; }
 .activity-navigation { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 24px; font-size: 12px; color: var(--muted); }
 .activity-navigation button { padding: 8px 12px; border: 1px solid #79685f26; border-radius: 20px; }
 .activity-navigation button:disabled { opacity: .35; cursor: default; }
-.approve-action { margin-top: 12px; padding: 9px 16px; border-radius: 20px; background: var(--ink); color: var(--paper); font-size: 12px; }
 
 .sidebar-scrim { position: fixed; inset: 0; background: #41303f33; z-index: 3; }
 .sidebar { position: fixed; inset: 0 0 0 auto; width: min(330px, 88vw); padding: 30px 22px; background: var(--paper); box-shadow: -5px 0 50px #41303f18; z-index: 4; overflow-y: auto; }

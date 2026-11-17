@@ -1,6 +1,5 @@
 """Consumer request policy, edit integrity, routing and worker handoff; no paid calls."""
 import hashlib
-import asyncio
 import base64
 import json
 from pathlib import Path
@@ -12,38 +11,27 @@ from ui import server, worker
 
 
 class ArtsyTests(unittest.TestCase):
+    def setUp(self):
+        bridge = patch.object(server, 'bridge_model_catalog', return_value=[
+            {'id': model['id'], 'model_path': 'tinker://fixture/sampler',
+             'base_model': server.MODEL_ID}
+            for model in server.ARTSY_MODELS[1:]])
+        bridge.start()
+        self.addCleanup(bridge.stop)
+
     def test_consumer_policy_cannot_be_overridden_by_the_client(self):
         request = server.artsy_request({'prompt': '  A friendly fox  ', 'seed': 0, 'max_turns': 900})
-        self.assertEqual(request, {'prompt': 'A friendly fox', 'model': 'openai/gpt-6-luna',
+        self.assertEqual(request, {'prompt': 'A friendly fox', 'model': server.DEFAULT_ARTSY_MODEL,
                                   'seed': 42, 'experience': 'artsy', 'max_turns': 10, 'execution_mode': 'auto'})
         for body in ([], {}, {'prompt': ''}, {'prompt': 'a' * 4001}, {'prompt': 20}):
             with self.subTest(body=str(body)[:30]), self.assertRaises(ValueError):
                 server.artsy_request(body)
 
-    def test_execution_mode_is_validated_and_saved(self):
-        self.assertEqual(server.artsy_request({'prompt': 'Fox', 'execution_mode': 'approval'})['execution_mode'], 'approval')
-        for mode in (None, '', 'manual', [], True):
-            with self.subTest(mode=mode), self.assertRaises(ValueError):
-                server.artsy_request({'prompt': 'Fox', 'execution_mode': mode})
-
-    def test_approval_only_releases_the_current_pending_action(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.object(server, 'JOBS', Path(temporary)):
-            folder = Path(temporary) / ('a' * 32)
-            folder.mkdir()
-            job = {'execution_mode': 'approval', 'state': 'running'}
-            (folder / 'job.json').write_text(json.dumps(job))
-            (folder / 'progress.json').write_text(json.dumps({'phase': 'awaiting_approval', 'steps': [
-                {'id': 'action-1', 'status': 'completed'}, {'id': 'action-2', 'status': 'pending'}]}))
-            for body in ([], {}, {'step_id': 'action-1'}, {'step_id': 'action-3'}):
-                with self.subTest(body=body), self.assertRaises(ValueError):
-                    server.approve_action(folder.name, body)
-            self.assertFalse((folder / 'approval.json').exists())
-            server.approve_action(folder.name, {'step_id': 'action-2'})
-            self.assertEqual(json.loads((folder / 'approval.json').read_text()), {'step_id': 'action-2'})
-            for change in ({'state': 'completed'}, {'execution_mode': 'auto'}):
-                (folder / 'job.json').write_text(json.dumps({**job, **change}))
-                with self.assertRaises(ValueError):
-                    server.approve_action(folder.name, {'step_id': 'action-2'})
+    def test_consumer_requests_always_run_automatically(self):
+        for mode in ('approval', 'auto', None, '', 'manual', [], True):
+            with self.subTest(mode=mode):
+                request = server.artsy_request({'prompt': 'Fox', 'execution_mode': mode})
+                self.assertEqual(request['execution_mode'], 'auto')
 
     def completed(self, root):
         ident = 'a' * 32
@@ -136,27 +124,14 @@ class ArtsyTests(unittest.TestCase):
                  patch('evaluation.draw.main', side_effect=draw):
                 self.assertEqual(worker.main(), 0)
 
-    def test_worker_waits_for_the_matching_approval(self):
+    def test_worker_ignores_legacy_approval_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)
             (folder / 'job.json').write_text(json.dumps({'experience': 'artsy', 'execution_mode': 'approval'}))
-
-            def draw(*, progress, approval):
-                async def exercise():
-                    task = asyncio.create_task(approval('action-2'))
-                    await asyncio.sleep(0.01)
-                    self.assertFalse(task.done())
-                    (folder / 'approval.json').write_text(json.dumps({'step_id': 'action-1'}))
-                    await asyncio.sleep(0.21)
-                    self.assertFalse(task.done())
-                    (folder / 'approval.json').write_text(json.dumps({'step_id': 'action-2'}))
-                    await asyncio.wait_for(task, 1)
-                asyncio.run(exercise())
-                return 0
-
-            with patch('sys.argv', ['ui.worker', str(folder), 'Fox', '42', 'openai/gpt-6-luna']), \
-                 patch('evaluation.draw.main', side_effect=draw):
+            with patch('sys.argv', ['ui.worker', str(folder), 'Fox', '42', server.DEFAULT_ARTSY_MODEL]), \
+                 patch('evaluation.draw.main', return_value=0) as draw:
                 self.assertEqual(worker.main(), 0)
+            self.assertEqual(set(draw.call_args.kwargs), {'progress'})
 
     def test_turn_limit_keeps_latest_preview_and_source_for_follow_up(self):
         for with_preview in (True, False):
@@ -194,8 +169,8 @@ class ArtsyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, patch.object(server, 'JOBS', Path(temporary)):
             folder = Path(temporary) / ('a' * 32)
             (folder / 'output').mkdir(parents=True)
-            (folder / 'job.json').write_text(json.dumps({'state': 'running', 'execution_mode': 'approval'}))
-            progress = {'phase': 'awaiting_approval', 'steps': [{'id': 'action-1', 'status': 'pending'}]}
+            (folder / 'job.json').write_text(json.dumps({'state': 'running', 'execution_mode': 'auto'}))
+            progress = {'phase': 'drawing', 'steps': [{'id': 'action-1', 'status': 'pending'}]}
             (folder / 'progress.json').write_text(json.dumps(progress))
             (folder / 'output/preview-0-0.png').write_bytes(b'fixture PNG')
             handler = object.__new__(server.Handler)

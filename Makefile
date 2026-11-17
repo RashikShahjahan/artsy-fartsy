@@ -4,7 +4,7 @@ ARGS ?=
 
 .PHONY: ui tts-setup serve render draw eval eval-base agent-image dataset rlvr rlhf grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
 ui:
-	$(PYTHON) -m ui.server $(ARGS)
+	$(PYTHON) -m ui.start $(ARGS)
 
 tts-setup:
 	UV_CACHE_DIR="$(CURDIR)/.cache/uv" uv venv --allow-existing --python 3.12 .tts-venv

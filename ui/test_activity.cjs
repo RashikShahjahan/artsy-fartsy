@@ -11,8 +11,8 @@ function node(tag = 'div') {
 }
 function find(parent, tag) { return parent.children.flatMap(child => [child, ...find(child, tag)]).filter(child => child.tag === tag); }
 function title(parent) { return find(parent, 'strong')[0].textContent; }
-const run = (overrides = {}) => ({id: 'a'.repeat(32), state: 'running', execution_mode: 'approval',
-  progress: {phase: 'awaiting_approval', turn: 1, max_turns: 10, steps: [
+const run = (overrides = {}) => ({id: 'a'.repeat(32), state: 'running', execution_mode: 'auto',
+  progress: {phase: 'drawing', turn: 1, max_turns: 10, steps: [
     {id: 'turn-1', kind: 'model', title: 'Agent turn 1', status: 'completed', output: '<script>text only</script>'},
     {id: 'action-1', kind: 'tool', title: 'Write drawing code', status: 'pending', command: 'draw'},
   ]}, ...overrides});
@@ -57,13 +57,12 @@ test('old saved traces recover every recorded action and preview', () => {
   assert.equal(steps[0].previews.length, 1);
 });
 
-test('only the current action appears and polling offers approval only for pending steps', async () => {
+test('only the current action appears and pending steps run without approval', async () => {
   global.document = {createElement: node};
   const panel = node(), list = node('ol'), status = node();
-  const approved = [];
-  const activity = new Activity(panel, list, status, async id => { approved.push(id); return true; });
+  const activity = new Activity(panel, list, status);
   activity.render(run());
-  assert.equal(status.textContent, 'Your approval is needed');
+  assert.equal(status.textContent, 'Turn 1 of 10');
   assert.equal(list.children.length, 1);
   assert.equal(title(list), 'Create your drawing');
   const heading = find(list, 'strong')[0];
@@ -73,10 +72,7 @@ test('only the current action appears and polling offers approval only for pendi
   assert.equal(find(list, 'summary').length, 0);
   activity.render(run());
   assert.equal(find(list, 'strong')[0], heading);
-  const button = find(list, 'button')[0];
-  await button.onclick();
-  assert.deepEqual(approved, ['action-1']);
-  assert.equal(button.disabled, true);
+  assert.equal(find(list, 'button').length, 0);
   const next = run(); next.progress.phase = 'drawing'; next.progress.steps[1].status = 'running';
   activity.render(next);
   assert.equal(title(list), 'Creating your drawing…');

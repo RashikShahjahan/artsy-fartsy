@@ -23,11 +23,12 @@ DIRECT_MODELS = [
     {"id": "openai/gpt-6-luna", "label": "GPT-6 Luna", "direct": True},
 ]
 ARTSY_MODELS = [
-    {"id": LARGE_MODEL_ID, "label": "Base"},
-    {"id": "artsy/sft-v2-qwen3.8-27b-final-preview-masked-cosine", "label": "SFT"},
-    {"id": "artsy/grpo-v4-subset200-b16-c64", "label": "GRPO"},
-    *[dict(model) for model in DIRECT_MODELS],
+    {"id": MODEL_ID, "label": "Base"},
+    {"id": "artsy/parti-sft-artcanvas-full-2026-11-07-qwen3.5-4b-r128-b32", "label": "SFT"},
+    {"id": "artsy/rlvr-experiment9-genai681-qwen3.5-4b-r128-b32-g4", "label": "RLVR"},
+    {"id": "artsy/rlhf-experiment10-genai1000-linear-epoch1-kl-budget-recovery", "label": "RLHF"},
 ]
+DEFAULT_ARTSY_MODEL = ARTSY_MODELS[-1]['id']
 
 def model_catalog(bridge_models=None):
     """Studio's default models plus saved fine-tunes advertised by the bridge."""
@@ -161,20 +162,17 @@ def artsy_request(body):
     """Consumer requests select one of four models with ten turns per drawing/edit."""
     if not isinstance(body, dict):
         raise ValueError('Invalid request.')
-    mode = body.get('execution_mode', 'auto')
-    if mode not in ('auto', 'approval'):
-        raise ValueError('Choose Auto or Approve steps.')
-    model = body.get('model', DIRECT_MODELS[0]['id'])
+    model = body.get('model', DEFAULT_ARTSY_MODEL)
     choice = next((entry for entry in ARTSY_MODELS if entry['id'] == model), None)
     if choice is None:
-        raise ValueError('Choose Base, SFT, GRPO, or GPT-6 Luna.')
+        raise ValueError('Choose Base, SFT, RLVR, or RLHF.')
     try:
         request = generation_request({'prompt': body.get('prompt'), 'seed': 42, 'model': model})
     except ValueError as error:
         if str(error) == 'Choose an available Studio model.':
             raise ValueError(f"{choice['label']} is unavailable. Start the native bridge with its completed checkpoint, then try again.") from error
         raise
-    request.update(experience='artsy', max_turns=10, execution_mode=mode)
+    request.update(experience='artsy', max_turns=10, execution_mode='auto')
     parent_id = body.get('parent_id')
     if parent_id is not None:
         if not isinstance(parent_id, str) or not re.fullmatch(r'[a-f0-9]{32}', parent_id):
@@ -199,23 +197,6 @@ def artsy_request(body):
 
 def content_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest() if path and Path(path).is_file() else None
-
-
-def approve_action(run_id, body):
-    if not isinstance(body, dict) or not isinstance(body.get('step_id'), str):
-        raise ValueError('Choose the action awaiting approval.')
-    directory = JOBS / run_id
-    job = json.loads((directory / 'job.json').read_text())
-    progress = json.loads((directory / 'progress.json').read_text())
-    if (job.get('execution_mode') != 'approval' or job.get('state') != 'running'
-            or progress.get('phase') != 'awaiting_approval'
-            or not any(step.get('id') == body['step_id'] and step.get('status') == 'pending'
-                       for step in progress.get('steps', []))):
-        raise ValueError('This action is no longer awaiting approval.')
-    temporary = directory / 'approval.tmp'
-    temporary.write_text(json.dumps({'step_id': body['step_id']}))
-    temporary.replace(directory / 'approval.json')
-    return {'approved': body['step_id']}
 
 
 def interpreter():
@@ -367,17 +348,6 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({'error': 'Local requests only.'}, 403)
         if self.serve_workspace():
             return
-        approve = re.fullmatch(r'/api/runs/([a-f0-9]{32})/approve', self.path)
-        if approve:
-            try:
-                size = int(self.headers.get('Content-Length', '0'))
-                if not 0 < size <= 4096:
-                    raise ValueError('Invalid approval request size.')
-                with LOCK:
-                    decision = approve_action(approve[1], json.loads(self.rfile.read(size)))
-                return self.send_json(decision)
-            except (OSError, ValueError, TypeError) as error:
-                return self.send_json({'error': str(error)}, 409)
         if self.path == '/api/artsy/speech':
             try:
                 size = int(self.headers.get('Content-Length', '0'))
@@ -629,7 +599,7 @@ class Handler(SimpleHTTPRequestHandler):
             from html import escape
             options = ''.join(
                 f'<option value="{escape(model["id"], quote=True)}"'
-                + (' selected' if model['id'] == DIRECT_MODELS[0]['id'] else '')
+                + (' selected' if model['id'] == DEFAULT_ARTSY_MODEL else '')
                 + f'>{escape(model["label"])}</option>' for model in ARTSY_MODELS)
             return self.send_page((ROOT / 'ui/artsy.html').read_text().replace(
                 '__ARTSY_MODEL_OPTIONS__', options))

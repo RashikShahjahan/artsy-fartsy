@@ -96,10 +96,9 @@
   }
 
   class Activity {
-    constructor(panel, list, status, onApprove) {
+    constructor(panel, list, status) {
       this.panel = panel; this.list = list; this.status = status;
       this.id = null; this.rows = new Map();
-      this.onApprove = onApprove;
     }
     reset(id = null) {
       this.id = id; this.rows.clear(); this.list.replaceChildren();
@@ -136,7 +135,7 @@
       this.selected = Math.max(0, Math.min(this.selected, history.length - 1));
       const displayed = active ? current ? [current] : [] : history.length ? [history[this.selected]] : [];
       const turn = run.progress?.turn;
-      this.status.textContent = active ? run.progress?.phase === 'awaiting_approval' ? 'Your approval is needed' : turn ? `Turn ${turn}${run.progress.max_turns ? ` of ${run.progress.max_turns}` : ''}` : 'Getting ready…'
+      this.status.textContent = active ? turn ? `Turn ${turn}${run.progress.max_turns ? ` of ${run.progress.max_turns}` : ''}` : 'Getting ready…'
         : `${history.length} ${history.length === 1 ? 'step' : 'steps'} recorded`;
       const visible = new Set(displayed.map(step => step.id));
       for (const [id, row] of this.rows) if (!visible.has(id)) { row.node.remove(); this.rows.delete(id); }
@@ -149,7 +148,7 @@
           if (active) this.list.scrollTop = 0;
         }
         row.node.hidden = !active && step.kind === 'model' && !step.output && !step.previews?.length;
-        const renderSignature = JSON.stringify([signature, active, run.execution_mode]);
+        const renderSignature = JSON.stringify([signature, active]);
         if (row.signature === renderSignature) continue;
         row.signature = renderSignature;
         const node = row.node;
@@ -178,16 +177,6 @@
           image.loading = 'lazy';
           image.src = url.startsWith('data:') ? url : `/api/runs/${run.id}/${url}`;
           children.push(image);
-        }
-        if (active && run.execution_mode === 'approval' && step.status === 'pending' && this.onApprove) {
-          const approve = document.createElement('button'); approve.type = 'button'; approve.className = 'approve-action';
-          approve.textContent = 'Approve action';
-          approve.onclick = async () => {
-            approve.disabled = true;
-            const accepted = await this.onApprove(step.id);
-            approve.disabled = !!accepted; approve.textContent = accepted ? 'Approved · continuing…' : 'Approve action';
-          };
-          children.push(approve);
         }
         node.replaceChildren(...children);
       }

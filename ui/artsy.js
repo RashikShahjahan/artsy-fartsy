@@ -7,7 +7,7 @@
   const ID = /^[a-f0-9]{32}$/;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const speech = new window.ArtsySpeech();
-  const activity = new window.ArtsyActivity(ui.agentActivity, ui.activitySteps, ui.activityStatus, approveAction);
+  const activity = new window.ArtsyActivity(ui.agentActivity, ui.activitySteps, ui.activityStatus);
   let drawings = [], current = null, activeRun = null, busy = false, listening = false;
   let recognition = null;
   let lastPhase = '', previewSpoken = false, lastPrompt = '', voiceOn = true;
@@ -17,20 +17,8 @@
     drawing: 'Putting it on paper…',
     previewing: 'Taking a closer look…',
     rendering: 'Finishing up…',
-    awaiting_approval: 'Waiting for your approval…',
   };
 
-  async function approveAction(stepId) {
-    if (!activeRun) return false;
-    try {
-      const response = await fetch(`/api/runs/${activeRun}/approve`, {method: 'POST',
-        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({step_id: stepId})});
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'The action could not be approved. Please try again.');
-      showError('');
-      return true;
-    } catch (error) { showError(error.message); return false; }
-  }
   async function loadActivity(id) {
     const request = ++activityRequest;
     activity.reset(id);
@@ -85,7 +73,6 @@
     ui.newDrawing.disabled = value; ui.newDrawing.hidden = !current;
     ui.versions.disabled = value;
     ui.model.disabled = value;
-    ui.executionModes.disabled = value;
     renderHistory(); updateVoiceLabel();
   }
   function showWorkspace() {
@@ -201,7 +188,7 @@
     try {
       const selected = current?.versions.find(version => version.id === current.selectedId) || current?.versions.at(-1);
       const parentId = selected?.editable === false ? null : selected?.id;
-      const response = await fetch('/api/artsy/runs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({prompt, model: ui.model.value, execution_mode: ui.modeApproval.checked ? 'approval' : 'auto', ...(parentId ? {parent_id: parentId} : {})})});
+      const response = await fetch('/api/artsy/runs', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({prompt, model: ui.model.value, ...(parentId ? {parent_id: parentId} : {})})});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'I couldn’t start this drawing. Please try again.');
       if (!ID.test(data.id)) throw new Error('Something went wrong. Please try again.');
@@ -234,8 +221,6 @@
       setBusy(true);
     }
     applyProgress(run.progress);
-    ui.modeApproval.checked=run.execution_mode==='approval';
-    ui.modeAuto.checked=!ui.modeApproval.checked;
     activity.render({...run,id});
     ui.drawingProcess.hidden=false;
     if(run.state==='queued')ui.voiceTitle.textContent='Getting ready…';
@@ -292,9 +277,6 @@
   ui.model.onchange = () => {
     try { localStorage.setItem('artsy.model', ui.model.value); } catch { /* Optional preference. */ }
   };
-  for (const input of [ui.modeAuto, ui.modeApproval]) input.onchange = () => {
-    try { localStorage.setItem('artsy.executionMode', ui.modeApproval.checked ? 'approval' : 'auto'); } catch { /* Optional preference. */ }
-  };
   ui.typeToggle.onclick = () => {
     stopListening(true);
     setTypedInput(ui.promptForm.hidden);
@@ -330,7 +312,6 @@
     if ([...ui.model.options].some(option => option.value === savedModel)) ui.model.value = savedModel;
     if (Array.isArray(saved)) drawings = saved.filter(d => d && ID.test(d.id) && typeof d.title === 'string' && Array.isArray(d.versions) && d.versions.length && d.versions.every(v => v && ID.test(v.id) && typeof v.prompt === 'string')).slice(0, 50);
     if (localStorage.getItem('artsy.voice') === 'false') ui.soundToggle.click();
-    ui.modeApproval.checked = localStorage.getItem('artsy.executionMode') === 'approval'; ui.modeAuto.checked = !ui.modeApproval.checked;
     const resume = localStorage.getItem(ACTIVE);
     if (ID.test(resume || '')) activeRun = resume;
   } catch { /* Start clean when browser storage is unavailable. */ }

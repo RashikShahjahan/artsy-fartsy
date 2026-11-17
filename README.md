@@ -71,13 +71,7 @@ sudo apt-get install build-essential pkg-config libcairo2-dev fonts-dejavu-core
 
 ## Draw and review in the UI
 
-Start the native Tinker bridge in one terminal:
-
-```sh
-HF_HOME="$PWD/.cache/huggingface" make serve
-```
-
-Install the local Kokoro voice once, then start the UI in another terminal:
+Install the local Kokoro voice once, then start the UI and native Tinker bridge:
 
 ```sh
 make tts-setup
@@ -86,9 +80,13 @@ make ui
 
 Open [http://127.0.0.1:4173](http://127.0.0.1:4173) for the voice-first Artsy
 experience: describe a drawing, watch its progress, then ask for changes by voice
-or text. It uses GPT-6 Luna through OpenRouter with ten internal turns per
-response; configure `OPENROUTER_API_KEY` and start Docker. The native bridge is
-only needed for Qwen. The developer [Studio](http://127.0.0.1:4173/studio) generates drawings;
+or text. Choose Base, SFT, RLVR, or RLHF from Drawing settings. These use the
+Qwen3.5 4B pipeline's latest completed checkpoints, with RLHF selected by default
+and ten internal turns per response. Start Docker separately, then run
+`make ui` for generation. It starts the native bridge and waits for it before starting the UI service,
+reuses an existing healthy bridge, and stops services it started on Ctrl-C.
+`make serve` remains available to run the bridge separately.
+The developer [Studio](http://127.0.0.1:4173/studio) generates drawings;
 Prompt review and SFT candidates review training data; Runs launches evaluation,
 SFT, RLVR, and preference RLHF jobs. RL prompts and RL rollouts browse saved training artifacts.
 The `/preferences` workspace supports blind ranking of existing model outputs.
