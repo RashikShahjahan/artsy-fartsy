@@ -1,4 +1,4 @@
-// Consumer routes only. The internal job launchers and review APIs stay private to ui/.
+// Only the consumer drawing API is exposed to the browser.
 export function allowedRoute(method: string, path: string): boolean {
   if (method === "GET")
     return /^runs\/[a-f0-9]{32}(?:\/(?:image\.png|preview-\d+-\d+\.png))?$/.test(

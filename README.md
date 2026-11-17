@@ -71,12 +71,19 @@ sudo apt-get install build-essential pkg-config libcairo2-dev fonts-dejavu-core
 
 ## Draw and review in the UI
 
-The client-facing UI is a separate Next.js application in [`client/`](client/README.md).
-Install it with `npm ci --prefix client`, run `make ui` for the Python backend,
-and run `make client` in another terminal. Open http://127.0.0.1:3000 for the
-client experience. Internal tools remain under `ui/`, with Studio at
-http://127.0.0.1:4173/studio. `make client-check` and `make client-build` validate
-the Next.js app independently.
+Launch the consumer app with **`make client`**, then open
+http://127.0.0.1:3000. This starts Next.js, the dedicated consumer API, and the
+native inference bridge together; Ctrl-C stops the services it started. Frontend
+dependencies are installed automatically if missing. The client has its own
+worker and `episodes/client/` storage, with no dependency on the internal UI or
+its server. Start Docker before generating drawings. For browsing without
+inference, use `make client ARGS="--no-inference"`. See
+[`client/README.md`](client/README.md) for configuration, production startup,
+and optional voice setup. `make client-check` checks both frontend and consumer
+backend; `make client-build` builds the frontend.
+
+Internal tools remain independently available through `make ui`, with Studio
+at http://127.0.0.1:4173/studio.
 
 The Python-only compatibility UI is still available as described below.
 

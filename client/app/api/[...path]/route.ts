@@ -18,7 +18,7 @@ async function proxy(
   const path = (await context.params).path.join("/");
   if (!allowedRoute(request.method, path))
     return Response.json({ error: "Not found." }, { status: 404 });
-  const backend = process.env.ARTSY_BACKEND_URL || "http://127.0.0.1:4173";
+  const backend = process.env.ARTSY_CLIENT_API_URL || "http://127.0.0.1:3001";
   try {
     const body = request.method === "POST" ? await request.text() : undefined;
     if (body && body.length > 20000)

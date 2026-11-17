@@ -1,55 +1,71 @@
 # Artsy client
 
-The consumer drawing experience is a standalone Next.js App Router application
-with React and strict TypeScript. The Python API and internal workspaces remain
-in `../ui/`. This app imports no scripts, styles, or templates from the internal UI.
+The consumer drawing app owns its Next.js frontend, Python API, drawing worker,
+process lifecycle, speech integration, and run storage. It does not import or
+start the internal UI or its server.
 
-Use Node.js 22.18+ and npm. From the repository root:
-
-```sh
-npm ci --prefix client
-make ui                 # terminal 1: Python service and inference bridge
-make client             # terminal 2: Next.js at http://127.0.0.1:3000
-```
-
-Start Docker before generating drawings. For browsing without the inference
-bridge, run `.venv/bin/python -m ui.server` instead of `make ui`. Voice output
-uses the existing Kokoro service; install its assets with `make tts-setup`.
-Voice input requires browser speech recognition and microphone permission.
-Typing remains available in browsers without recognition support.
-
-The server-only `ARTSY_BACKEND_URL` defaults to `http://127.0.0.1:4173`.
-Copy `.env.example` to `.env.local` to override it. The backend must be reachable
-from the Next.js server. The browser uses same-origin Next.js API routes.
-The proxy allows consumer generation, speech, individual run
-status, PNG artifacts, and cancellation. Internal training and review routes
-are not proxied. This remains a local application: authentication and
-multi-user isolation are not provided by the Python backend.
+From the repository root, with the project Python environment installed and
+Docker Desktop running:
 
 ```sh
-make client-check       # strict TypeScript and local tests, no model calls
-make client-build       # production build
-npm --prefix client start
+make client
 ```
 
-The backend selects the default drawing model; the client has no model settings.
+Open http://127.0.0.1:3000. This command installs frontend dependencies if missing,
+starts the dedicated consumer API on port 3001, starts or reuses the core native
+inference bridge on port 8080, and starts Next.js. Ctrl-C stops the processes it
+started, including active drawing workers. An already-running inference bridge
+is left running. Node.js 22.18+ and npm are required. Drawing generation requires
+the project's Tinker credentials, completed model checkpoint, and renderer image
+(see the repository setup instructions).
 
-For isolated testing, set `ARTSY_UI_PORT=4174` and
-`ARTSY_UI_JOBS="$PWD/episodes/ui-client-test"` when starting the Python backend,
-and `ARTSY_BACKEND_URL=http://127.0.0.1:4174` when starting Next.js.
+To browse and inspect saved drawings without starting inference:
 
-The interface supports new drawings, edits from any selected version, image
-downloads, browser-local history, recorded activity, voice, cancellation, and
-reload recovery with retry/backoff. Browser storage is optional. It keeps the
-legacy sketchbook schema, but browsers isolate storage by origin: history from
-port 4173 does not automatically appear on port 3000. Run files stay in
-`episodes/ui/` on the backend. The Python home page remains a compatibility
-entry point; new consumer UI development belongs here. Internal Studio remains
-at http://127.0.0.1:4173/studio.
+```sh
+make client ARGS="--no-inference"
+```
+
+Voice input uses browser speech recognition and microphone permission. Optional
+Kokoro speech output can be installed with `make client-tts-setup`; typing and
+drawing work without it.
+
+```sh
+make client-check       # TypeScript, frontend tests, and consumer API/lifecycle tests
+make client-build       # production frontend build
+make client ARGS="--production"
+```
+
+The browser calls same-origin Next.js routes. These forward only drawing,
+status, PNG, cancellation, and speech requests to the consumer API. The consumer
+API exposes no training, review, or internal workspace routes. This is a local,
+single-user app; the API binds to loopback.
+
+The default model is the completed RLHF checkpoint
+`artsy/rlhf-experiment10-genai1000-linear-epoch1-kl-budget-recovery`.
+The consumer backend shares the core `evaluation.draw` execution harness and
+`inference.server` bridge; neither requires the internal UI.
+
+Configuration is supplied to `make client` through environment variables:
+
+- `ARTSY_CLIENT_PORT`: frontend port, default `3000`.
+- `ARTSY_CLIENT_API_PORT`: consumer API port, default `3001`.
+- `ARTSY_CLIENT_JOBS`: run directory, default `episodes/client/`.
+- `ARTSY_CLIENT_MODEL`: drawing model, default RLHF checkpoint above.
+- `ARTSY_EVAL_PYTHON`: optional worker interpreter override.
+
+The launcher sets the server-only `ARTSY_CLIENT_API_URL` for Next.js. If starting
+Next.js and the consumer API manually, this defaults to `http://127.0.0.1:3001`.
+The old `ARTSY_BACKEND_URL` and `ARTSY_UI_*` settings are not used by this app.
+
+History is saved in browser storage; drawing artifacts live in `episodes/client/`.
+Existing browser history entries referring to internal-server artifacts will show
+as unavailable; they can be restarted from their original idea. Client and
+internal runs have separate storage and process ownership.
 
 Structure:
 
-- `app/`: page shell, metadata, global styles, and the restricted API proxy.
-- `components/`: drawing workspace, activity, and icons.
-- `hooks/`: abortable run polling and browser voice lifecycle.
-- `lib/`: shared types, sketchbook validation, and proxy policy tests.
+- `app/`: page shell, styles, and consumer API proxy.
+- `components/`: drawing workspace, versions, activity, and artwork recovery.
+- `hooks/`: run polling and browser voice lifecycle.
+- `lib/`: shared types, browser history, and frontend policy tests.
+- `backend/`: dedicated API, worker, launcher, speech, and backend tests.

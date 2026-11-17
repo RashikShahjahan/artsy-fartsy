@@ -2,9 +2,9 @@ PYTHON ?= .venv/bin/python
 EVAL_PYTHON ?= $(if $(wildcard .eval-venv/bin/python),.eval-venv/bin/python,$(PYTHON))
 ARGS ?=
 
-.PHONY: client client-build client-check ui tts-setup serve render draw eval eval-base agent-image dataset rlvr rlhf grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
+.PHONY: client client-build client-check client-tts-setup ui tts-setup serve render draw eval eval-base agent-image dataset rlvr rlhf grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
 client:
-	npm --prefix client run dev
+	$(PYTHON) -m client.backend.start $(ARGS)
 
 client-build:
 	npm --prefix client run build
@@ -12,6 +12,12 @@ client-build:
 client-check:
 	npm --prefix client run typecheck
 	npm --prefix client test
+	$(PYTHON) -m unittest discover -s client/backend -t . -p 'test_*.py' -v
+
+client-tts-setup:
+	UV_CACHE_DIR="$(CURDIR)/.cache/uv" uv venv --allow-existing --python 3.12 .tts-venv
+	UV_CACHE_DIR="$(CURDIR)/.cache/uv" uv pip install --python .tts-venv/bin/python kokoro-onnx==0.4.9
+	$(PYTHON) -m client.backend.setup_tts
 
 ui:
 	$(PYTHON) -m ui.start $(ARGS)
@@ -67,7 +73,7 @@ requirements-check:
 	$(PYTHON) scripts/sync_requirements.py --check
 
 syntax:
-	$(PYTHON) -m compileall -q drawing inference evaluation runtime training ui tests scripts
+	$(PYTHON) -m compileall -q drawing inference evaluation runtime training ui client/backend tests scripts
 	@for file in ui/*.js ui/*.cjs; do node --check "$$file" || exit; done
 
 check: requirements-check syntax test test-ui test-eval test-js
