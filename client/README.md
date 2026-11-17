@@ -64,8 +64,12 @@ internal runs have separate storage and process ownership.
 
 Structure:
 
-- `app/`: page shell, styles, and consumer API proxy.
+- `app/`: page shell, Tailwind theme and base styles, and consumer API proxy.
 - `components/`: drawing workspace, versions, activity, and artwork recovery.
 - `hooks/`: run polling and browser voice lifecycle.
 - `lib/`: shared types, browser history, and frontend policy tests.
 - `backend/`: dedicated API, worker, launcher, speech, and backend tests.
+
+UI styling uses Tailwind CSS v4 through `@tailwindcss/postcss`. Theme tokens live
+in `app/globals.css`; layout and state utilities live alongside the components.
+Shared button styles in `components/ui.ts` keep controls consistent.

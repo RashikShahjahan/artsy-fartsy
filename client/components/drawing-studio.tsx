@@ -12,6 +12,7 @@ import { useVoice } from "@/hooks/use-voice";
 import { Activity } from "./activity";
 import { Artwork } from "./artwork";
 import { Icon } from "./icon";
+import { iconButton, textButton } from "./ui";
 const examples = [
   {
     image: "landscape",
@@ -232,15 +233,16 @@ export function DrawingStudio() {
     }
   }
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <a href="/" className="wordmark" aria-label="Artsy home">
-          artsy<span>✳</span>
+    <div className="isolate flex min-h-svh flex-col">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-lg focus:bg-surface focus:p-3">Skip to drawing workspace</a>
+      <header className="mx-auto flex w-full max-w-7xl items-center justify-between gap-4 px-5 py-5 sm:px-10 sm:py-7">
+        <a href="/" className="font-serif text-3xl tracking-[-0.06em] no-underline" aria-label="Artsy home">
+          artsy<span className="ml-1.5 inline-block text-2xl text-coral" aria-hidden="true">✳</span>
         </a>
-        <div className="topbar-actions">
+        <div className="flex items-center gap-1 sm:gap-2">
           {current && (
             <button
-              className="icon-button"
+              className={iconButton}
               onClick={newDrawing}
               disabled={busy}
               aria-label="New drawing"
@@ -251,7 +253,7 @@ export function DrawingStudio() {
           )}
           {version && version.hasImage !== false && failedImageId !== version.id && !busy && (
             <a
-              className="icon-button"
+              className={iconButton}
               href={`/api/runs/${version.id}/image.png`}
               download="artsy-drawing.png"
               aria-label="Save image"
@@ -261,7 +263,7 @@ export function DrawingStudio() {
             </a>
           )}
           <button
-            className="icon-button"
+            className={iconButton}
             ref={historyButton}
             onClick={() => {
               setHistoryAttempt((attempt) => attempt + 1);
@@ -273,7 +275,7 @@ export function DrawingStudio() {
             <Icon name="history" />
           </button>
           <button
-            className="icon-button"
+            className={iconButton}
             onClick={voice.toggleSound}
             aria-label={voice.enabled ? "Mute Artsy" : "Unmute Artsy"}
             aria-pressed={voice.enabled}
@@ -283,21 +285,21 @@ export function DrawingStudio() {
           </button>
         </div>
       </header>
-      <main className={current || busy ? "workspace" : "welcome-workspace"}>
+      <main id="main-content" tabIndex={-1} className={`mx-auto flex w-full max-w-5xl min-w-0 flex-1 flex-col items-center justify-center px-5 pb-10 sm:px-7 ${current || busy ? "pt-5" : "pt-10 sm:pt-14"}`}>
         {!current && !busy && (
-          <section className="welcome">
-            <h1>What should we draw?</h1>
-            <p>Describe a drawing, then make it your own.</p>
+          <section className="text-center">
+            <h1 className="mb-4 font-serif text-[clamp(2.75rem,7vw,4.5rem)] leading-[1.1] font-normal tracking-[-0.045em]">What should we draw?</h1>
+            <p className="text-base leading-relaxed text-muted sm:text-lg">Describe a drawing, then make it your own.</p>
           </section>
         )}
         {(current || busy) && (
           <section
-            className="drawing-space"
+            className="flex w-full min-w-0 flex-col items-center"
             aria-label="Your drawing"
             aria-busy={busy}
           >
             {version && !busy && (
-              <div className="artwork-frame">
+              <div className="grid w-full place-items-center">
                 <Artwork
                   key={version.id}
                   version={version}
@@ -324,12 +326,12 @@ export function DrawingStudio() {
               />
             )}
             {!busy && version && (
-              <div className="drawing-caption">
-                <p>{version.prompt}</p>
+              <div className="mt-5 flex w-full max-w-2xl min-w-0 flex-col items-start gap-3 text-sm text-muted">
+                <p className="max-w-full leading-relaxed wrap-anywhere">{version.prompt}</p>
                 {current!.versions.length > 1 && (
-                  <nav className="version-list" aria-label="Drawing versions">
+                  <nav className="mt-1 flex w-full snap-x gap-3 overflow-x-auto px-1 pt-1 pb-4" aria-label="Drawing versions">
                     {current!.versions.map((v, i) => (
-                      <button type="button" key={v.id} className="version-card"
+                      <button type="button" key={v.id} className="w-40 shrink-0 snap-start rounded-xl border border-line bg-surface p-2 text-left transition-colors hover:border-coral aria-current:border-ink aria-current:ring-1 aria-current:ring-ink"
                         aria-current={v.id === version.id ? "true" : undefined}
                         aria-label={`Version ${i + 1}: ${v.prompt}`}
                         onClick={() => {
@@ -342,9 +344,9 @@ export function DrawingStudio() {
                           setFailedImageId("");
                           setMissingVersionId("");
                         }}>
-                        <HistoryThumbnail id={v.id} hasImage={v.hasImage} />
-                        <span className="version-label">Version {i + 1}{v.id === version.id ? " · Selected" : ""}</span>
-                        <span className="version-prompt">{v.prompt}</span>
+                        <HistoryThumbnail id={v.id} hasImage={v.hasImage} wide />
+                        <span className="mt-3 block text-sm font-medium text-ink">Version {i + 1}{v.id === version.id ? " · Selected" : ""}</span>
+                        <span className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted">{v.prompt}</span>
                       </button>
                     ))}
                   </nav>
@@ -352,15 +354,15 @@ export function DrawingStudio() {
               </div>
             )}
             {!busy && savedRun && (
-              <details className="recorded-steps">
-                <summary>How it came together</summary>
+              <details className="mt-5 w-full max-w-2xl rounded-xl border border-line px-4 py-3 text-sm text-muted">
+                <summary className="py-1 font-medium text-ink">How it came together</summary>
                 <Activity key={savedRun.id} run={savedRun} busy={false} />
               </details>
             )}
           </section>
         )}
-        <section className="voice-dock" aria-label="Talk to Artsy" hidden={!!version && missingVersionId === version.id}>
-          <p className="voice-status" role="status" aria-live="polite">
+        <section className={`flex w-full max-w-xl flex-col items-center hidden:hidden ${current || busy ? "mt-6" : "mt-8 sm:mt-10"}`} aria-label="Talk to Artsy" hidden={!!version && missingVersionId === version.id}>
+          <p className="mb-4 text-center text-sm leading-relaxed wrap-anywhere empty:hidden" role="status" aria-live="polite">
             {voice.listening
               ? voice.transcript || "Listening…"
               : busy
@@ -370,11 +372,11 @@ export function DrawingStudio() {
                   : notice || (current ? "Anything you’d like to change?" : "")}
           </p>
           {error && (
-            <div className="input-error" role="alert">
+            <div className="mb-4 w-full rounded-xl border border-coral/25 bg-surface p-4 text-center text-sm leading-relaxed text-coral [&>p]:mb-3" role="alert">
               <p>{error}</p>
               {canRetry && (
                 <button
-                  className="text-button"
+                  className={textButton}
                   disabled={busy || !prompt.trim()}
                   onClick={() => void submit(prompt)}
                 >
@@ -385,7 +387,7 @@ export function DrawingStudio() {
           )}
           {busy ? (
             <button
-              className="text-button"
+              className={textButton}
               disabled={canceling || starting}
               onClick={() => void cancel()}
             >
@@ -393,7 +395,7 @@ export function DrawingStudio() {
             </button>
           ) : (
             <form
-              className="prompt-form"
+              className="grid w-full grid-cols-[1fr_auto_auto] items-end gap-2 rounded-2xl border border-line bg-surface p-3 shadow-sm transition-shadow focus-within:border-coral focus-within:ring-1 focus-within:ring-coral/30 sm:p-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 void submit(prompt);
@@ -407,6 +409,8 @@ export function DrawingStudio() {
                 id="prompt"
                 maxLength={4000}
                 rows={2}
+                className="col-span-full max-h-52 min-h-16 w-full min-w-0 resize-y bg-transparent px-1 py-1 text-base leading-relaxed placeholder:text-muted focus-visible:outline-none"
+                aria-describedby="prompt-hint"
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
                 placeholder={
@@ -428,19 +432,19 @@ export function DrawingStudio() {
               {voice.supported && (
                 <button
                   type="button"
-                  className={`composer-mic ${voice.listening ? "listening" : ""}`}
+                  className={`${iconButton} col-start-2 border border-line ${voice.listening ? "bg-coral text-surface hover:bg-coral" : "hover:bg-ink/8"}`}
                   onClick={voice.start}
                   disabled={!ready}
                   aria-label={voice.listening ? "Finish dictating" : "Dictate an idea"}
                   aria-pressed={voice.listening}
                   title={voice.listening ? "Finish dictating" : "Dictate an idea"}
                 >
-                  {voice.listening ? <span className="stop-square" /> : <Icon name="mic" />}
+                  {voice.listening ? <span className="size-4 rounded-xs bg-current" /> : <Icon name="mic" />}
                 </button>
               )}
               <button
                 type="submit"
-                className="send-button"
+                className="col-start-3 inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-surface transition-colors hover:bg-coral disabled:hover:bg-ink"
                 disabled={!prompt.trim() || !ready || voice.listening}
                 aria-label="Send to Artsy"
               >
@@ -448,17 +452,18 @@ export function DrawingStudio() {
               </button>
             </form>
           )}
+          {!busy && <p id="prompt-hint" className="mt-3 text-center text-xs leading-relaxed text-muted">Enter to send · Shift + Enter for a new line</p>}
         </section>
         {!current && !busy && (
-          <section className="drawing-examples" aria-labelledby="examples-heading">
-            <h2 id="examples-heading">Start with a little inspiration</h2>
-            <p>Made with Artsy. Pick an idea, then make it yours.</p>
-            <div className="example-grid">
+          <section className="mt-9 w-full max-w-2xl sm:mt-12" aria-labelledby="examples-heading">
+            <h2 id="examples-heading" className="mb-2 text-sm font-semibold">Start with a little inspiration</h2>
+            <p className="mb-4 text-sm leading-relaxed text-muted">Made with Artsy. Pick an idea, then make it yours.</p>
+            <div className="grid grid-cols-1 gap-3 min-[480px]:grid-cols-3">
               {examples.map((example) => (
-                <button type="button" className="example-card" key={example.image}
+                <button type="button" className="flex items-center overflow-hidden rounded-xl border border-line bg-surface text-left transition-colors hover:border-coral min-[480px]:flex-col min-[480px]:items-stretch" key={example.image}
                   onClick={() => { setPrompt(example.prompt); input.current?.focus(); }}>
-                  <img src={`/examples/${example.image}.png`} alt="" width={1920} height={1200} />
-                  <span>{example.title}<span aria-hidden="true"> ↗</span></span>
+                  <img src={`/examples/${example.image}.png`} alt="" className="aspect-[8/5] w-28 shrink-0 object-contain min-[480px]:w-full" width={1920} height={1200} />
+                  <span className="flex flex-1 items-center justify-between gap-2 p-3 text-sm leading-relaxed">{example.title}<span className="text-coral" aria-hidden="true">↗</span></span>
                 </button>
               ))}
             </div>
@@ -466,16 +471,17 @@ export function DrawingStudio() {
         )}
       </main>
       <dialog
-        className="history-dialog"
+        className="m-auto mr-0 h-svh max-h-svh w-96 max-w-[92vw] overflow-y-auto border-0 bg-paper p-5 text-ink shadow-2xl backdrop:bg-ink/30 backdrop:backdrop-blur-sm sm:p-6"
         ref={dialog}
+        aria-labelledby="history-title"
         onClick={(event) => {
           if (event.target === event.currentTarget) closeHistory();
         }}
       >
-        <div className="history-header">
-          <h2>Your drawings</h2>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <h2 id="history-title" className="font-serif text-3xl font-normal tracking-tight">Your drawings</h2>
           <button
-            className="icon-button"
+            className={iconButton}
             onClick={closeHistory}
             aria-label="Close your drawings"
           >
@@ -491,7 +497,7 @@ export function DrawingStudio() {
               return (
                 <button
                   key={drawing.id}
-                  className="history-item"
+                  className="mb-2 flex w-full items-center gap-3 rounded-xl p-3 text-left transition-colors hover:bg-ink/5 aria-current:bg-ink/8"
                   disabled={busy}
                   aria-current={drawing.id === current?.id ? "true" : undefined}
                   onClick={() => openDrawing(drawing)}
@@ -501,9 +507,9 @@ export function DrawingStudio() {
                     id={thumbnail.id}
                     hasImage={thumbnail.hasImage}
                   />
-                  <span className="history-item-copy">
-                    <strong>{drawing.title}</strong>
-                    <small>
+                  <span className="min-w-0">
+                    <strong className="line-clamp-2 text-sm leading-relaxed font-medium wrap-anywhere">{drawing.title}</strong>
+                    <small className="mt-1 block text-xs text-muted">
                       {drawing.versions.length}{" "}
                       {drawing.versions.length === 1 ? "drawing" : "versions"}
                     </small>
@@ -513,11 +519,11 @@ export function DrawingStudio() {
             })}
           </nav>
         ) : (
-          <p className="empty-history">
+          <p className="rounded-xl border border-dashed border-line p-6 text-sm leading-relaxed text-muted">
             Your drawings will appear here after you make one.
           </p>
         )}
-        <p className="history-note">
+        <p className="mt-7 border-t border-line pt-4 text-xs leading-relaxed text-muted">
           History is saved in this browser.
         </p>
       </dialog>
@@ -525,13 +531,13 @@ export function DrawingStudio() {
   );
 }
 
-function HistoryThumbnail({ id, hasImage }: { id: string; hasImage?: boolean }) {
+function HistoryThumbnail({ id, hasImage, wide = false }: { id: string; hasImage?: boolean; wide?: boolean }) {
   const [failed, setFailed] = useState(false);
   return (
-    <span className="history-thumbnail" aria-hidden="true">
+    <span className={`grid shrink-0 place-items-center overflow-hidden rounded-lg border border-line bg-surface text-xs text-muted ${wide ? "aspect-[8/5] w-full" : "size-16"}`} aria-hidden="true">
       {failed || hasImage === false
         ? <span>No preview</span>
-        : <img src={`/api/runs/${id}/image.png`} alt="" loading="lazy" onError={() => setFailed(true)} />}
+        : <img src={`/api/runs/${id}/image.png`} alt="" className="size-full object-contain" loading="lazy" onError={() => setFailed(true)} />}
     </span>
   );
 }

@@ -15,10 +15,12 @@ const paths = {
 };
 export function Icon({
   name,
+  className = "",
   ...props
 }: SVGProps<SVGSVGElement> & { name: keyof typeof paths }) {
   return (
     <svg
+      className={`size-[22px] shrink-0 ${className}`}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import type { Run, Step } from "@/lib/types";
 import { Icon } from "./icon";
+import { textButton } from "./ui";
 const phases: Record<string, string> = {
   thinking: "Imagining your drawing…",
   drawing: "Putting it on paper…",
@@ -36,12 +37,12 @@ export function Activity({ run, busy, status }: { run: Run | null; busy: boolean
     : previewName;
   if (!busy && !steps.length) return null;
   return (
-    <section className="activity" aria-label="Drawing steps">
+    <section className="mx-auto my-5 w-full max-w-2xl text-center" aria-label="Drawing steps">
       {preview && (
-        <img className="preview" src={preview} alt="Drawing in progress" />
+        <img className="mx-auto mb-6 block max-h-[48svh] max-w-full rounded-md object-contain" src={preview} alt="Drawing in progress" />
       )}
-      <div className="activity-label" role="status">
-        <Icon name="spark" className={busy ? "breathing" : ""} />
+      <div className="flex items-center justify-center gap-3 text-sm [&>svg]:text-coral" role="status">
+        <Icon name="spark" className={busy ? "motion-safe:animate-pulse" : ""} />
         <span>
           {busy
             ? status || phases[run?.progress?.phase || "thinking"] ||
@@ -51,10 +52,11 @@ export function Activity({ run, busy, status }: { run: Run | null; busy: boolean
       </div>
       {selected &&
         (selected.kind === "model" || selected.kind === "message") &&
-        selected.output && <p className="agent-message">{selected.output}</p>}
+        selected.output && <p className="mt-4 max-h-[35svh] overflow-y-auto text-left text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">{selected.output}</p>}
       {!busy && steps.length > 0 && (
-        <div className="step-navigation">
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-2 text-xs sm:gap-3">
           <button
+            className={textButton}
             onClick={() => setIndex((i) => Math.max(0, i - 1))}
             disabled={index === 0}
           >
@@ -65,6 +67,7 @@ export function Activity({ run, busy, status }: { run: Run | null; busy: boolean
             {selected?.status}
           </span>
           <button
+            className={textButton}
             onClick={() => setIndex((i) => Math.min(steps.length - 1, i + 1))}
             disabled={index >= steps.length - 1}
           >
