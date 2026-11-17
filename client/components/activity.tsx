@@ -17,7 +17,7 @@ function label(step: Step) {
     return "Finishing your drawing";
   return "Refining your drawing";
 }
-export function Activity({ run, busy }: { run: Run | null; busy: boolean }) {
+export function Activity({ run, busy, status }: { run: Run | null; busy: boolean; status?: string }) {
   const [index, setIndex] = useState(0);
   const steps = (run?.progress?.steps || []).filter(
     (step) => step.kind !== "model" || step.output || step.previews?.length,
@@ -25,7 +25,8 @@ export function Activity({ run, busy }: { run: Run | null; busy: boolean }) {
   const selected = busy
     ? steps.at(-1)
     : steps[Math.min(index, steps.length - 1)];
-  const previewName = selected?.previews?.findLast(
+  const previewSteps = busy ? steps : selected ? [selected] : [];
+  const previewName = previewSteps.flatMap((step) => step.previews || []).findLast(
     (src) =>
       /^data:image\/png;base64,/.test(src) ||
       /^preview-\d+-\d+\.png$/.test(src),
@@ -42,9 +43,10 @@ export function Activity({ run, busy }: { run: Run | null; busy: boolean }) {
       <div className="activity-label" role="status">
         <Icon name="spark" className={busy ? "breathing" : ""} />
         <span>
-          {selected
-            ? label(selected)
-            : phases[run?.progress?.phase || "thinking"] || "Getting ready…"}
+          {busy
+            ? status || phases[run?.progress?.phase || "thinking"] ||
+              (selected ? label(selected) : "Getting ready…")
+            : selected ? label(selected) : "Drawing steps"}
         </span>
       </div>
       {selected &&

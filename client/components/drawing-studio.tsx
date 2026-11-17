@@ -313,7 +313,16 @@ export function DrawingStudio() {
                 />
               </div>
             )}
-            {busy && <Activity key={activeId || "starting"} run={run} busy />}
+            {busy && (
+              <Activity
+                key={activeId || "starting"}
+                run={run}
+                busy
+                status={canceling || run?.state === "stopping"
+                  ? "Stopping…"
+                  : connectionError || (starting ? "Getting ready…" : undefined)}
+              />
+            )}
             {!busy && version && (
               <div className="drawing-caption">
                 <p>{version.prompt}</p>
@@ -355,7 +364,7 @@ export function DrawingStudio() {
             {voice.listening
               ? voice.transcript || "Listening…"
               : busy
-                ? connectionError || (canceling ? "Stopping…" : "Drawing…")
+                ? ""
                 : error || (version && (failedImageId === version.id || version.hasImage === false))
                   ? ""
                   : notice || (current ? "Anything you’d like to change?" : "")}
