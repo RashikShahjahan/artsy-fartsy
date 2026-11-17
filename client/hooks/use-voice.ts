@@ -31,19 +31,12 @@ export function useVoice(
   const [transcript, setTranscript] = useState("");
   const [enabled, setEnabled] = useState(true);
   const recognition = useRef<Recognition | null>(null);
-  const audio = useRef<HTMLAudioElement | null>(null);
-  const audioUrl = useRef<string | null>(null);
-  const speechRequest = useRef<AbortController | null>(null);
   const callbacks = useRef({ onTranscript, onError });
   useEffect(() => {
     callbacks.current = { onTranscript, onError };
   });
   const cancelSpeech = useCallback(() => {
-    speechRequest.current?.abort();
-    audio.current?.pause();
-    audio.current = null;
-    if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
-    audioUrl.current = null;
+    window.speechSynthesis?.cancel();
   }, []);
   const stop = useCallback(() => {
     const session = recognition.current;
@@ -75,26 +68,10 @@ export function useVoice(
   }, [cancelSpeech, stop]);
   async function speak(text: string) {
     cancelSpeech();
-    if (!enabled || document.hidden) return;
-    const controller = new AbortController();
-    speechRequest.current = controller;
-    try {
-      const response = await fetch("/api/artsy/speech", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: text.slice(0, 500) }),
-        signal: controller.signal,
-      });
-      if (!response.ok) return;
-      const blob = await response.blob();
-      if (controller.signal.aborted) return;
-      audioUrl.current = URL.createObjectURL(blob);
-      audio.current = new Audio(audioUrl.current);
-      await audio.current.play();
-    } catch {
-      /* Voice output is optional; drawing and typing remain available. */
-    }
+    if (!enabled || document.hidden || !window.speechSynthesis) return;
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(text.slice(0, 500)));
   }
+
   function toggleSound() {
     cancelSpeech();
     setEnabled(!enabled);

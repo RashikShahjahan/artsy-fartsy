@@ -61,3 +61,13 @@ export function completedDrawing(
     ],
   };
 }
+
+export function historyDrawings(runs: Run[]): Drawing[] {
+  let drawings: Drawing[] = [];
+  // History arrives newest first. Build parent/version relationships oldest first.
+  for (const run of [...runs].reverse()) {
+    const drawing = completedDrawing(run, null, drawings);
+    if (drawing) drawings = [drawing, ...drawings.filter(d => d.id !== drawing.id)];
+  }
+  return drawings.slice(0, 50);
+}

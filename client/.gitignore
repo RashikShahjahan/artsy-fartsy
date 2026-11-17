@@ -1,5 +1,9 @@
 node_modules/
 .next/
+.vercel/
 *.tsbuildinfo
 .env*
 !.env.example
+/.swc
+.swc/
+app/.well-known/workflow/

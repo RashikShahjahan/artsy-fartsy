@@ -1,0 +1,29 @@
+[
+  {
+    "id": "artsy/parti-sft-artcanvas-full-2026-11-07-qwen3.5-4b-r128-b32",
+    "label": "Qwen3.5 \u00b7 4B \u00b7 SFT",
+    "repo_id": "Rashik24/parti-sft-artcanvas-full-2026-11-07-qwen3.5-4b-r128-b32",
+    "revision": "ee57fed866a16653de398be0a42f1105520d1572",
+    "base_model": "Qwen/Qwen3.5-4B",
+    "base_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "context_window": 262144
+  },
+  {
+    "id": "artsy/rlhf-experiment10-genai1000-linear-epoch1-kl-budget-recovery",
+    "label": "Qwen3.5 \u00b7 4B \u00b7 RLHF",
+    "repo_id": "Rashik24/rlhf-experiment10-genai1000-linear-epoch1-kl-budget-recovery",
+    "revision": "363cd37ea4af111604cc5f846cd7febed77a3a3d",
+    "base_model": "Qwen/Qwen3.5-4B",
+    "base_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "context_window": 262144
+  },
+  {
+    "id": "artsy/rlvr-experiment9-genai681-qwen3.5-4b-r128-b32-g4",
+    "label": "Qwen3.5 \u00b7 4B \u00b7 RLVR",
+    "repo_id": "Rashik24/rlvr-experiment9-genai681-qwen3.5-4b-r128-b32-g4",
+    "revision": "ffcef6d3d785caffaaa67ee1976f233ac9c187ce",
+    "base_model": "Qwen/Qwen3.5-4B",
+    "base_revision": "851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a",
+    "context_window": 262144
+  }
+]

@@ -1,75 +1,119 @@
 # Artsy client
 
-The consumer drawing app owns its Next.js frontend, Python API, drawing worker,
-process lifecycle, speech integration, and run storage. It does not import or
-start the internal UI or its server.
+Artsy is one Next.js application. Its same-origin routes start drawings, report
+progress, cancel jobs, restore history, and serve private artifacts. Vercel
+Workflow coordinates jobs across requests; no separate API server or domain is
+required.
 
-From the repository root, with the project Python environment installed and
-Docker Desktop running:
+The existing Python mini-SWE agent and native Tinker backend run in a trusted
+Vercel Sandbox. Every generated shell command runs in a second Sandbox with
+network access denied and no credentials. The agent exchanges command requests
+and results through files relayed by Workflow steps. Final submissions are
+rendered again in a fresh directory using the existing Python rendering logic.
 
-```sh
-make client
-```
+Job metadata, progress, cancellation, and session history live in Upstash Redis.
+Images, editable Python source, previews, and agent traces live in a **private**
+Vercel Blob store and are served through the app after checking session ownership.
+History survives reloads and application restarts. A random HttpOnly cookie owns
+the sketchbook; clearing cookies creates a new sketchbook. This is anonymous
+session ownership, with no account or cross-device history synchronization.
 
-Open http://127.0.0.1:3000. This command installs frontend dependencies if missing,
-starts the dedicated consumer API on port 3001, starts or reuses the core native
-inference bridge on port 8080, and starts Next.js. Ctrl-C stops the processes it
-started, including active drawing workers. An already-running inference bridge
-is left running. Node.js 22.18+ and npm are required. Drawing generation requires
-the project's Tinker credentials, completed model checkpoint, and renderer image
-(see the repository setup instructions).
+## Setup
 
-To browse and inspect saved drawings without starting inference:
-
-```sh
-make client ARGS="--no-inference"
-```
-
-Voice input uses browser speech recognition and microphone permission. Optional
-Kokoro speech output can be installed with `make client-tts-setup`; typing and
-drawing work without it.
-
-```sh
-make client-check       # TypeScript, frontend tests, and consumer API/lifecycle tests
-make client-build       # production frontend build
-make client ARGS="--production"
-```
-
-The browser calls same-origin Next.js routes. These forward only drawing,
-status, PNG, cancellation, and speech requests to the consumer API. The consumer
-API exposes no training, review, or internal workspace routes. This is a local,
-single-user app; the API binds to loopback.
-
-The default model is the completed RLHF checkpoint
+Use Node.js 22.18 or newer. Connect Upstash Redis and a private Vercel Blob store
+to the Vercel `artsy` project, then configure the variables in
+[.env.example](.env.example). Keep Tinker credentials server-only. Set
+`ARTSY_TINKER_MODEL_PATH` to the existing completed RLHF sampler checkpoint URI
+(`tinker://…`); the hosted runner does not depend on local checkpoint discovery.
+The established model is
 `artsy/rlhf-experiment10-genai1000-linear-epoch1-kl-budget-recovery`.
-The consumer backend shares the core `evaluation.draw` execution harness and
-`inference.server` bridge; neither requires the internal UI.
 
-Configuration is supplied to `make client` through environment variables:
+Production can use a prepared Sandbox snapshot through
+`ARTSY_SANDBOX_SNAPSHOT`; it takes precedence over `ARTSY_SANDBOX_IMAGE`. The
+`client/sandbox/prepare.sh` script installs the runtime from a source-only archive
+in a Python 3.14 Sandbox. Snapshot that environment after its smoke test and use
+the snapshot ID for both job VMs. Snapshots have bounded retention and must be
+refreshed before they expire.
 
-- `ARTSY_CLIENT_PORT`: frontend port, default `3000`.
-- `ARTSY_CLIENT_API_PORT`: consumer API port, default `3001`.
-- `ARTSY_CLIENT_JOBS`: run directory, default `episodes/client/`.
-- `ARTSY_CLIENT_MODEL`: drawing model, default RLHF checkpoint above.
-- `ARTSY_EVAL_PYTHON`: optional worker interpreter override.
+Alternatively, build and publish the Python runtime image to Vercel Container Registry,
+using the repository root as the build context and `client/sandbox/Dockerfile`
+as the Dockerfile. For example, with the Vercel CLI authenticated (see the
+[Container Registry CLI reference](https://vercel.com/docs/container-registry/cli-reference)):
 
-The launcher sets the server-only `ARTSY_CLIENT_API_URL` for Next.js. If starting
-Next.js and the consumer API manually, this defaults to `http://127.0.0.1:3001`.
-The old `ARTSY_BACKEND_URL` and `ARTSY_UI_*` settings are not used by this app.
+```sh
+vercel vcr login docker --project artsy
+vercel vcr build docker . artsy-runtime:latest --project artsy --push -- -f client/sandbox/Dockerfile
+```
 
-History is saved in browser storage; drawing artifacts live in `episodes/client/`.
-Existing browser history entries referring to internal-server artifacts will show
-as unavailable; they can be restarted from their original idea. Client and
-internal runs have separate storage and process ownership.
+Set `ARTSY_SANDBOX_IMAGE` to the resulting VCR image reference, preferably pinned
+to a digest. The Dockerfile-specific ignore file limits the build context to
+runtime inputs. The image contains the trusted runner, existing Python drawing
+logic, native Tinker dependencies, ArtCanvas, and Cairo. Sandbox starts commands
+explicitly; the image needs no API listener or Docker daemon.
 
-Structure:
+For local development, link `client/` to the Vercel project and pull its environment:
 
-- `app/`: page shell, Tailwind theme and base styles, and consumer API proxy.
-- `components/`: drawing workspace, versions, activity, and artwork recovery.
-- `hooks/`: run polling and browser voice lifecycle.
-- `lib/`: shared types, browser history, and frontend policy tests.
-- `backend/`: dedicated API, worker, launcher, speech, and backend tests.
+```sh
+cd client
+vercel link
+vercel env pull .env.local
+npm ci
+npm run dev
+```
 
-UI styling uses Tailwind CSS v4 through `@tailwindcss/postcss`. Theme tokens live
-in `app/globals.css`; layout and state utilities live alongside the components.
-Shared button styles in `components/ui.ts` keep controls consistent.
+Sandbox authenticates automatically with deployment OIDC on Vercel. Local OIDC
+credentials expire; pull the environment again when needed. External callers
+can instead configure `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`.
+Workflow uses its local runtime during development and Vercel's durable runtime
+when deployed. Deploy the `client/` directory as the Next.js application.
+
+From the repository root, `make client` starts Next.js only. `make client-check`
+runs TypeScript checks, frontend/workflow tests, and the legacy Python backend
+tests. `make client-build` builds the production application. The Python Sandbox
+adapter smoke test runs with `.venv/bin/python -m unittest client.sandbox.test_agent`.
+For environments that block Turbopack worker ports, use
+`npm --prefix client run build -- --webpack`.
+
+## Job behavior
+
+- `POST /api/artsy/runs`: accepts a prompt and optional owned `parent_id`, returns
+  a job ID immediately. Each session can have one active drawing.
+- `GET /api/runs`: restores the session's latest 100 jobs and active drawing.
+- `GET /api/runs/:id`: returns saved state and activity for polling.
+- `POST /api/runs/:id/cancel`: records cancellation before stopping both VMs.
+  The workflow remains responsible for cleanup if cancellation arrives during startup.
+- `GET /api/runs/:id/image.png`, `program.py`, `trace.json`, and
+  `preview-N-N.png`: serve owned artifacts from private Blob storage.
+
+Jobs have ten model turns and a twenty-minute VM lifetime. Partial work is saved
+with editable source when the turn limit is reached. Failed jobs remain in job
+history; the visual sketchbook displays completed and paused drawings. Workflow
+steps save progress before acknowledging actions. Side-effectful agent startup
+and shell execution do not automatically retry, avoiding duplicate inference or
+shell actions after ambiguous failures. Infrastructure failures mark the job
+failed, trigger VM cleanup, and let the user retry as a new drawing.
+
+Voice input uses browser speech recognition. Optional speech output uses the
+browser's speech synthesis, so it needs no Python TTS server.
+
+The legacy local Python API and launcher remain in `backend/` for existing tests
+and tools; the Next.js app no longer calls or starts them. Existing local artifacts
+are not automatically uploaded or adopted into a new hosted session.
+
+The application is deployed to [artsy.rashik.sh](https://artsy.rashik.sh/) on the
+Vercel `artsy` project. Production uses the free `artsy-jobs` Upstash Redis store,
+the private `artsy-drawings` Blob store, and the prepared runtime snapshot
+`snap_xeqX5HATHWMEXFjsGfXuiRkbDwhu`. The snapshot expires after 30 days without use;
+refresh it with the process in [sandbox/README.md](sandbox/README.md) if it expires.
+
+Deployment `dpl_GBihCTAb6Uak1uLoxwq8nia53sWz` was promoted after a real Tinker
+job generated a 1920×1200 image, saved source and trace files, restored session
+history, denied another session access, and successfully cancelled a second
+running job. No job VMs remained running after verification.
+
+The completed SFT, RLVR, and RLHF adapters are also stored in public Hugging Face
+repositories. Repository IDs and verified commit revisions are recorded in
+[`inference/huggingface_models.json`](../inference/huggingface_models.json).
+To export completed checkpoints again, run
+`.venv/bin/python -m scripts.publish_models` with Tinker credentials and a
+Hugging Face login.

@@ -4,7 +4,7 @@ ARGS ?=
 
 .PHONY: client client-build client-check client-tts-setup ui tts-setup serve render draw eval eval-base agent-image dataset rlvr rlhf grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
 client:
-	$(PYTHON) -m client.backend.start $(ARGS)
+	npm --prefix client run dev -- $(ARGS)
 
 client-build:
 	npm --prefix client run build
@@ -12,6 +12,7 @@ client-build:
 client-check:
 	npm --prefix client run typecheck
 	npm --prefix client test
+	$(PYTHON) -m unittest client.sandbox.test_agent -v
 	$(PYTHON) -m unittest discover -s client/backend -t . -p 'test_*.py' -v
 
 client-tts-setup:

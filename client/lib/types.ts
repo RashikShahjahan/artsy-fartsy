@@ -28,6 +28,8 @@ export type Run = {
   progress?: { phase?: string; steps?: Step[] };
   result?: {
     outcome?: string;
+    sourceHash?: string;
+    imageHash?: string;
     turnLimitReached?: boolean;
     refusalReason?: string;
     reason?: string;

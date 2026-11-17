@@ -7,12 +7,16 @@
     "build": "next build",
     "start": "next start --hostname 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test lib/*.test.ts"
+    "test": "node --experimental-strip-types --experimental-test-module-mocks --test lib/*.test.ts test/server/*.test.mjs"
   },
   "dependencies": {
+    "@upstash/redis": "^1.41.0",
+    "@vercel/blob": "^2.9.0",
+    "@vercel/sandbox": "^4.0.0",
     "next": "^16.0.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "workflow": "^5.5.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.5",

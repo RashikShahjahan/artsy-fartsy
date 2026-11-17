@@ -77,3 +77,13 @@ test("turn-limited responses retain their image and edit availability", () => {
     true,
   );
 });
+
+test('server history restores version chains and excludes active or failed jobs', async () => {
+  const { historyDrawings } = await import('./sketchbook.ts');
+  const original = { ...run, id: parent, prompt: 'A fox', parent_id: undefined };
+  const drawings = historyDrawings([{ ...run, id: 'c'.repeat(32), state: 'failed' }, run, original]);
+  assert.equal(drawings.length, 1);
+  assert.equal(drawings[0].id, parent);
+  assert.equal(drawings[0].selectedId, child);
+  assert.deepEqual(drawings[0].versions.map(v => v.id), [parent, child]);
+});

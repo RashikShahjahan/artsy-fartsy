@@ -5,6 +5,7 @@ import {
   STORAGE,
   completedDrawing,
   readDrawings,
+  historyDrawings,
 } from "@/lib/sketchbook";
 import { RUN_ID, type Drawing, type Run } from "@/lib/types";
 import { useRun } from "@/hooks/use-run";
@@ -50,7 +51,7 @@ export function DrawingStudio() {
   const dialog = useRef<HTMLDialogElement>(null);
   const historyButton = useRef<HTMLButtonElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
-  const busy = starting || !!activeId;
+  const busy = !ready || starting || !!activeId;
   const version =
     current?.versions.find((v) => v.id === current.selectedId) ||
     current?.versions.at(-1);
@@ -115,7 +116,19 @@ export function DrawingStudio() {
     } catch {
       /* Start with an empty sketchbook. */
     }
-    setReady(true);
+    const controller = new AbortController();
+    fetch('/api/runs', { cache: 'no-store', signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error('History unavailable');
+        const { runs } = await response.json() as { runs: Run[] };
+        if (controller.signal.aborted) return;
+        setDrawings(historyDrawings(runs));
+        const active = runs.find(r => ['queued', 'running', 'stopping'].includes(r.state));
+        rememberRun(active?.id || null);
+      })
+      .catch(() => { /* Keep the browser sketchbook while reconnecting. */ })
+      .finally(() => { if (!controller.signal.aborted) setReady(true); });
+    return () => controller.abort();
   }, []);
   useEffect(() => {
     if (ready) {
