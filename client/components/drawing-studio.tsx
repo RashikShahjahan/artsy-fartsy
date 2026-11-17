@@ -13,9 +13,21 @@ import { Activity } from "./activity";
 import { Artwork } from "./artwork";
 import { Icon } from "./icon";
 const examples = [
-  { image: "robot", title: "A friendly robot", prompt: "Draw a small friendly robot holding a yellow flower." },
-  { image: "sailboat", title: "A moonlit sail", prompt: "Draw a red sailboat beneath a crescent moon." },
-  { image: "apple", title: "A simple still life", prompt: "Draw a red apple with a green leaf on a white background." },
+  {
+    image: "landscape",
+    title: "A sunny landscape",
+    prompt: "Draw a sunny landscape with green hills, trees, birds, and a warm cream sky.",
+  },
+  {
+    image: "fractal",
+    title: "A colorful fractal",
+    prompt: "A highly detailed, colorful fractal design with infinite complexity, featuring swirling patterns that resemble spirals, paisley shapes, and branching tendrils. The fractal is rendered in vibrant gradients of blue, green, and gold, transitioning into purples and pinks at the edges. The pattern feels infinite, with intricate, repeating details visible at every zoom level. The background is dark to highlight the luminous fractal shapes, creating a mesmerizing and otherworldly effect.",
+  },
+  {
+    image: "metropolis",
+    title: "A future metropolis",
+    prompt: "A glowing metropolis with flying cars, towering skyscrapers, and neon lights reflecting on wet streets.",
+  },
 ];
 
 export function DrawingStudio() {
