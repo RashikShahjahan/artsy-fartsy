@@ -1,4 +1,4 @@
-import { RUN_ID, type Drawing, type Run } from "./types.ts";
+import { RUN_ID, type Drawing, type Run, type Version } from "./types.ts";
 export const STORAGE = "artsy.sketchbook.v1";
 export const ACTIVE = "artsy.active.v1";
 export function readDrawings(raw: string | null): Drawing[] {
@@ -41,7 +41,7 @@ export function completedDrawing(
     )
   )
     return null;
-  const base = current ||
+  const base = (current?.versions.some((v) => v.id === run.parent_id) ? current : null) ||
     drawings.find((d) => d.versions.some((v) => v.id === run.parent_id)) || {
       id: run.id,
       title: run.prompt,
@@ -62,11 +62,34 @@ export function completedDrawing(
   };
 }
 
+export function savedDrawing(run: Run, current: Drawing | null, drawings: Drawing[]): Drawing | null {
+  if (run.state !== "failed") return completedDrawing(run, current, drawings);
+  return {
+    id: run.id,
+    title: run.prompt,
+    selectedId: run.id,
+    versions: [{
+      id: run.id,
+      prompt: run.prompt,
+      failed: true,
+      hasImage: false,
+      editable: false,
+      parentId: run.parent_id,
+      error: run.result?.refusalReason || run.result?.reason,
+    }],
+  };
+}
+
+export function promptParent(version: Version | undefined): string | undefined {
+  if (version?.failed) return version.parentId;
+  return version?.editable === false ? undefined : version?.id;
+}
+
 export function historyDrawings(runs: Run[]): Drawing[] {
   let drawings: Drawing[] = [];
   // History arrives newest first. Build parent/version relationships oldest first.
   for (const run of [...runs].reverse()) {
-    const drawing = completedDrawing(run, null, drawings);
+    const drawing = savedDrawing(run, null, drawings);
     if (drawing) drawings = [drawing, ...drawings.filter(d => d.id !== drawing.id)];
   }
   return drawings.slice(0, 50);

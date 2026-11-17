@@ -3,6 +3,9 @@ export type Version = {
   prompt: string;
   hasImage?: boolean;
   editable?: boolean;
+  failed?: boolean;
+  parentId?: string;
+  error?: string;
 };
 export type Drawing = {
   id: string;

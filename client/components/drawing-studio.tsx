@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   ACTIVE,
   STORAGE,
-  completedDrawing,
+  savedDrawing,
+  promptParent,
   readDrawings,
   historyDrawings,
 } from "@/lib/sketchbook";
@@ -55,6 +56,8 @@ export function DrawingStudio() {
   const version =
     current?.versions.find((v) => v.id === current.selectedId) ||
     current?.versions.at(-1);
+  const versionIndex = current?.versions.findIndex((item) => item.id === version?.id);
+  const canRevise = !!version && !version.failed;
   const voice = useVoice(
     (text) => {
       setPrompt((draft) =>
@@ -76,7 +79,7 @@ export function DrawingStudio() {
     }
   }
   function finish(run: Run) {
-    const drawing = completedDrawing(run, current, drawings);
+    const drawing = savedDrawing(run, current, drawings);
     setSavedRun(run);
     rememberRun(null);
     setCanceling(false);
@@ -85,6 +88,11 @@ export function DrawingStudio() {
       setDrawings((items) =>
         [drawing, ...items.filter((d) => d.id !== drawing.id)].slice(0, 50),
       );
+      if (run.state === "failed") {
+        setError(drawing.versions[0].error || "");
+        setPrompt(run.prompt);
+        return;
+      }
       const message =
         run.result?.outcome === "incomplete"
           ? "Here’s the latest step. What would you like to do next?"
@@ -168,11 +176,13 @@ export function DrawingStudio() {
     voice.cancelSpeech();
     setCurrent(drawing);
     setFailedImageId("");
+    setMissingVersionId("");
     setSavedRun(null);
-    setError("");
-    setCanRetry(false);
     setNotice("");
-    setPrompt("");
+    const selected = drawing.versions.find((v) => v.id === drawing.selectedId) || drawing.versions.at(-1);
+    setPrompt(selected?.failed ? selected.prompt : "");
+    setError(selected?.error || "");
+    setCanRetry(false);
     closeHistory();
   }
   function newDrawing() {
@@ -201,14 +211,13 @@ export function DrawingStudio() {
     voice.stop();
     voice.cancelSpeech();
     try {
+      const parentId = promptParent(version);
       const response = await fetch("/api/artsy/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: text,
-          ...(version?.editable !== false && version?.id
-            ? { parent_id: version.id }
-            : {}),
+          ...(parentId ? { parent_id: parentId } : {}),
         }),
       });
       if (response.status >= 500)
@@ -313,19 +322,27 @@ export function DrawingStudio() {
           >
             {version && !busy && (
               <div className="grid w-full place-items-center">
-                <Artwork
-                  key={version.id}
-                  version={version}
-                  hasAlternatives={current!.versions.length > 1}
-                  onUnavailable={setFailedImageId}
-                  onMissing={setMissingVersionId}
-                  onStartAgain={() => {
-                    const idea = current!.title;
-                    newDrawing();
-                    setPrompt(idea);
-                    requestAnimationFrame(() => input.current?.focus());
-                  }}
-                />
+                {version.failed ? (
+                  <div className="flex min-h-48 w-full flex-col items-center justify-center rounded-2xl border border-dashed border-line bg-surface/60 p-6 text-center" role="status">
+                    <Icon name="image" />
+                    <h2 className="mt-4 text-lg font-medium">Drawing failed</h2>
+                    <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted">Your prompt is saved below. You can edit it, then retry.</p>
+                  </div>
+                ) : (
+                  <Artwork
+                    key={version.id}
+                    version={version}
+                    hasAlternatives={current!.versions.length > 1}
+                    onUnavailable={setFailedImageId}
+                    onMissing={setMissingVersionId}
+                    onStartAgain={() => {
+                      const idea = current!.title;
+                      newDrawing();
+                      setPrompt(idea);
+                      requestAnimationFrame(() => input.current?.focus());
+                    }}
+                  />
+                )}
               </div>
             )}
             {busy && (
@@ -338,56 +355,16 @@ export function DrawingStudio() {
                   : connectionError || (starting ? "Getting ready…" : undefined)}
               />
             )}
-            {!busy && version && (
-              <div className="mt-5 flex w-full max-w-2xl min-w-0 flex-col items-start gap-3 text-sm text-muted">
-                <p className="max-w-full leading-relaxed wrap-anywhere">{version.prompt}</p>
-                {current!.versions.length > 1 && (
-                  <nav className="mt-1 flex w-full snap-x gap-3 overflow-x-auto px-1 pt-1 pb-4" aria-label="Drawing versions">
-                    {current!.versions.map((v, i) => (
-                      <button type="button" key={v.id} className="w-40 shrink-0 snap-start rounded-xl border border-line bg-surface p-2 text-left transition-colors hover:border-coral aria-current:border-ink aria-current:ring-1 aria-current:ring-ink"
-                        aria-current={v.id === version.id ? "true" : undefined}
-                        aria-label={`Version ${i + 1}: ${v.prompt}`}
-                        onClick={() => {
-                          const selected = { ...current!, selectedId: v.id };
-                          setCurrent(selected);
-                          setDrawings((items) => items.map((drawing) => drawing.id === selected.id ? selected : drawing));
-                          setNotice("");
-                          setError("");
-                          setCanRetry(false);
-                          setFailedImageId("");
-                          setMissingVersionId("");
-                        }}>
-                        <HistoryThumbnail id={v.id} hasImage={v.hasImage} wide />
-                        <span className="mt-3 block text-sm font-medium text-ink">Version {i + 1}{v.id === version.id ? " · Selected" : ""}</span>
-                        <span className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted">{v.prompt}</span>
-                      </button>
-                    ))}
-                  </nav>
-                )}
-              </div>
-            )}
-            {!busy && savedRun && (
-              <details className="mt-5 w-full max-w-2xl rounded-xl border border-line px-4 py-3 text-sm text-muted">
-                <summary className="py-1 font-medium text-ink">How it came together</summary>
-                <Activity key={savedRun.id} run={savedRun} busy={false} />
-              </details>
-            )}
           </section>
         )}
         <section className={`flex w-full max-w-xl flex-col items-center hidden:hidden ${current || busy ? "mt-6" : "mt-8 sm:mt-10"}`} aria-label="Talk to Artsy" hidden={!!version && missingVersionId === version.id}>
-          <p className="mb-4 text-center text-sm leading-relaxed wrap-anywhere empty:hidden" role="status" aria-live="polite">
-            {voice.listening
-              ? voice.transcript || "Listening…"
-              : busy
-                ? ""
-                : error || (version && (failedImageId === version.id || version.hasImage === false))
-                  ? ""
-                  : notice || (current ? "Anything you’d like to change?" : "")}
+          <p className={voice.listening ? "mb-4 text-center text-sm leading-relaxed wrap-anywhere" : "sr-only"} role="status" aria-live="polite">
+            {voice.listening ? voice.transcript || "Listening…" : busy || error ? "" : notice}
           </p>
           {error && (
             <div className="mb-4 w-full rounded-xl border border-coral/25 bg-surface p-4 text-center text-sm leading-relaxed text-coral [&>p]:mb-3" role="alert">
               <p>{error}</p>
-              {canRetry && (
+              {canRetry && !version?.failed && (
                 <button
                   className={textButton}
                   disabled={busy || !prompt.trim()}
@@ -414,20 +391,23 @@ export function DrawingStudio() {
                 void submit(prompt);
               }}
             >
-              <label className="sr-only" htmlFor="prompt">
-                What would you like Artsy to draw or change?
+              <label className={version ? "col-span-full px-1 font-medium" : "sr-only"} htmlFor="prompt">
+                {version?.failed ? "Edit your prompt" : canRevise ? "Revise this drawing" : "What would you like Artsy to draw or change?"}
               </label>
+              {canRevise && versionIndex !== undefined && (
+                <p id="prompt-version" className="col-span-full px-1 text-sm text-muted">Selected version {versionIndex + 1}</p>
+              )}
               <textarea
                 ref={input}
                 id="prompt"
                 maxLength={4000}
                 rows={2}
                 className="col-span-full max-h-52 min-h-16 w-full min-w-0 resize-y bg-transparent px-1 py-1 text-base leading-relaxed placeholder:text-muted focus-visible:outline-none"
-                aria-describedby="prompt-hint"
+                aria-describedby={canRevise ? "prompt-version prompt-hint" : "prompt-hint"}
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
                 placeholder={
-                  current
+                  canRevise
                     ? "What would you like to change?"
                     : "A sleepy cat in a sunny window…"
                 }
@@ -457,16 +437,51 @@ export function DrawingStudio() {
               )}
               <button
                 type="submit"
-                className="col-start-3 inline-flex size-11 shrink-0 items-center justify-center rounded-full bg-ink text-surface transition-colors hover:bg-coral disabled:hover:bg-ink"
+                className={`col-start-3 inline-flex h-11 shrink-0 items-center justify-center rounded-full bg-ink text-surface transition-colors hover:bg-coral disabled:hover:bg-ink ${version?.failed ? "gap-2 px-4 text-sm font-medium" : "w-11"}`}
                 disabled={!prompt.trim() || !ready || voice.listening}
-                aria-label="Send to Artsy"
+                aria-label={version?.failed ? undefined : "Send to Artsy"}
               >
+                {version?.failed && "Retry prompt"}
                 <Icon name="arrow" />
               </button>
             </form>
           )}
           {!busy && <p id="prompt-hint" className="mt-3 text-center text-xs leading-relaxed text-muted">Enter to send · Shift + Enter for a new line</p>}
         </section>
+        {!busy && current && version && !version.failed && (
+          <div className="mt-5 flex w-full max-w-2xl min-w-0 flex-col items-start gap-3 text-sm text-muted">
+            <p className="max-w-full leading-relaxed wrap-anywhere">{version.prompt}</p>
+            {current.versions.length > 1 && (
+              <nav className="mt-1 flex w-full snap-x gap-3 overflow-x-auto px-1 pt-1 pb-4" aria-label="Drawing versions">
+                {current.versions.map((v, i) => (
+                  <button type="button" key={v.id} className="w-40 shrink-0 snap-start rounded-xl border border-line bg-surface p-2 text-left transition-colors hover:border-coral aria-current:border-ink aria-current:ring-1 aria-current:ring-ink"
+                    aria-current={v.id === version.id ? "true" : undefined}
+                    aria-label={`Version ${i + 1}: ${v.prompt}`}
+                    onClick={() => {
+                      const selected = { ...current, selectedId: v.id };
+                      setCurrent(selected);
+                      setDrawings((items) => items.map((drawing) => drawing.id === selected.id ? selected : drawing));
+                      setNotice("");
+                      setError("");
+                      setCanRetry(false);
+                      setFailedImageId("");
+                      setMissingVersionId("");
+                    }}>
+                    <HistoryThumbnail id={v.id} hasImage={v.hasImage} wide />
+                    <span className="mt-3 block text-sm font-medium text-ink">Version {i + 1}{v.id === version.id ? " · Selected" : ""}</span>
+                    <span className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted">{v.prompt}</span>
+                  </button>
+                ))}
+              </nav>
+            )}
+          </div>
+        )}
+        {!busy && savedRun && (
+          <details className="mt-5 w-full max-w-2xl rounded-xl border border-line px-4 py-3 text-sm text-muted">
+            <summary className="py-1 font-medium text-ink">How it came together</summary>
+            <Activity key={savedRun.id} run={savedRun} busy={false} />
+          </details>
+        )}
         {!current && !busy && (
           <section className="mt-9 w-full max-w-2xl sm:mt-12" aria-labelledby="examples-heading">
             <h2 id="examples-heading" className="mb-2 text-sm font-semibold">Start with a little inspiration</h2>
@@ -523,8 +538,7 @@ export function DrawingStudio() {
                   <span className="min-w-0">
                     <strong className="line-clamp-2 text-sm leading-relaxed font-medium wrap-anywhere">{drawing.title}</strong>
                     <small className="mt-1 block text-xs text-muted">
-                      {drawing.versions.length}{" "}
-                      {drawing.versions.length === 1 ? "drawing" : "versions"}
+                      {thumbnail.failed ? "Drawing failed" : `${drawing.versions.length} ${drawing.versions.length === 1 ? "drawing" : "versions"}`}
                     </small>
                   </span>
                 </button>
