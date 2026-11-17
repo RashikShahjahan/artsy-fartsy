@@ -707,42 +707,33 @@ conditional on delivery.
 - 16-turn retry HPSv3: `eval-results/experiment6-control-mini-swe-16-turn-retry-hpsv3-2026-11-05/` and `eval-results/experiment6-error-aware-mini-swe-16-turn-retry-hpsv3-2026-11-05/`
 - Combined per-prompt report and scores: `eval-results/experiment6-hpsv3-all-retries-2026-11-06/`
 
-## Experiment 7 — Prompt-only mini-SWE evaluation
+## Experiment 7 — Mini-SWE prompt revisions and one epoch of RLVR at 32 vs. 128 rollouts per update
 
-- **Recorded:** 2026-11-06 (America/Toronto).
-- **Status:** Planned. Evaluation is pending.
-- **Question:** Does the revised mini-SWE task prompt improve timely preview and valid submission while preserving visual quality and prompt adherence?
-- **Checkpoint:** Reuse the Experiment 6 control checkpoint. At the fixed 12-turn cap, both Experiment 6 arms delivered 56/163 valid images. Of the 107 control failures, 62 never attempted a preview and 45 had a valid initial preview but reached the cap without submitting.
+- **Recorded:** 2026-11-10 (America/Toronto).
+- **Status at recording:** Baseline checkpoint complete. Candidate training launched. Held-out evaluation pending.
+- **Question:** How do the two rollout batch sizes compare after one pass over the same prompts?
 
-### Prompt change
+### Mini-SWE prompt revisions (November 6)
 
-Use the bundled mini-SWE system template. The user message wraps the drawing
-request with the pycairo output requirements, a recommended workflow, and bash
-command rules. The workflow asks the agent to identify the requested constraints
-and consult the installed API reference, preview before submission, make focused
-edits and preview again as needed, and submit promptly once the drawing meets
-the request. The templates are in `drawing/mini_agent.py`.
+At Experiment 6's 12-turn cap, both arms delivered 56/163 valid images. Of the
+107 control failures, 62 never attempted a preview and 45 rendered a preview
+before reaching the cap without submitting.
+
+The revised prompt used the bundled mini-SWE system template and moved the
+drawing requirements, recommended workflow, and bash rules into the task
+message. It asked the agent to consult the API reference, preview the drawing,
+make focused edits and preview again as needed, and submit promptly. Later
+revisions put the ArtCanvas API reference directly in the prompt and required
+preview and submission on separate turns. See [`drawing/mini_agent.py`](drawing/mini_agent.py).
 
 Experiment 6's teacher trajectories were generated before the mandatory
 submission sentence was added. The Experiment 6 training export received that
 sentence through a system-message migration that preserved the teacher actions.
 
-### Evaluation plan
+The planned old-vs-new prompt comparison on the Experiment 6 control checkpoint
+was never run. The RLVR batch-size comparison below evaluates a different change.
 
-Evaluate the Experiment 6 control checkpoint with the previous and revised
-prompts on the original 163 evaluation prompts. Use the same 12-turn cap and
-inference settings in both arms. Track the turn of the first successful preview,
-valid submission and render rates, and visual quality and adherence on delivered
-images. The prompt is the only experimental variable.
-
-Defer reallocating RL prompts, generating additional trajectories, and running
-another SFT job to a later experiment.
-
-## Experiment 8 — One epoch of RLVR at 32 vs. 128 rollouts per update
-
-- **Recorded:** 2026-11-10 (America/Toronto).
-- **Status:** Baseline checkpoint complete. Candidate training launched. Held-out evaluation pending.
-- **Question:** How do the two rollout batch sizes compare after one pass over the same prompts?
+### RLVR batch-size comparison
 
 | Arm | Prompts per full update | Rollouts per full update | Updates | Planned training rollouts |
 | --- | ---: | ---: | ---: | ---: |
@@ -767,17 +758,17 @@ its first checkpoint to raise the Docker concurrency cap.
 - [Baseline checkpoint](checkpoints/rlvr-g4-continued/final.json) and [training manifest](checkpoints/rlvr-g4-continued/training-manifest.json).
 - [Candidate training manifest](checkpoints/rlvr-g4-b32-epoch1-c128/training-manifest.json) and [run log](checkpoints/rlvr-g4-b32-epoch1-c128.console.log).
 
-## Experiment 9 — Threefold RLVR prompt expansion and harder held-out evaluation
+## Experiment 8 — Threefold RLVR prompt expansion and harder held-out evaluation
 
 - **Recorded:** 2026-11-12 (America/Toronto).
 - **Status:** Complete. Training finished all 22 updates and saved the final checkpoint at 13:40 America/Toronto on 2026-11-12. Matched base/SFT/RLVR evaluation completed all 450 episodes with zero sample errors; RLVR delivered 147/150 valid images (98.0%), versus SFT's 109/150 (72.7%).
 - **Question:** Does a fresh epoch of execution-verifier RL on 681 diverse prompts improve execution reliability on more demanding requests?
-- **Initialization:** [Qwen3.5-4B Parti SFT, rank 128, step 72](checkpoints/parti-sft-artcanvas-full-2026-11-07-qwen3.5-4b-r128-b32/final.json), the same SFT state used by Experiment 8. No RL checkpoint continuation.
+- **Initialization:** [Qwen3.5-4B Parti SFT, rank 128, step 72](checkpoints/parti-sft-artcanvas-full-2026-11-07-qwen3.5-4b-r128-b32/final.json), the same SFT state used by Experiment 7. No RL checkpoint continuation.
 - **Training prompts:** Existing 227 canonical Parti RLVR prompts plus 454 GenAI-Bench prompts, exactly 681 (3x). The 100 Parti RLHF prompts remain reserved.
 - **Evaluation:** New 150-prompt GenAI-Bench hard set: 50 counting/binding, 50 spatial/composition, 50 comparison/differentiation/logic. Each has at least three source skill tags, ranked by tag complexity. The hard label is a selection proxy; relative difficulty against the original Parti suite has not been measured in a matched comparison. The original 163 Parti evaluation prompts remain a separate regression benchmark.
 - **Source:** `BaiqiL/GenAI-Bench-1600@e51e8a8070fadfbfe1f160436bf14e7664e87247`, prompt and skill JSON only. No source-image generation or human-rating supervision.
 - **Leakage checks:** All additions screened for exact and lexical near-duplicate overlap with canonical Parti SFT/eval/RL splits, the selected checkpoint's exact SFT input, SFT-v2 prompts, and each other. Semantic equivalence is not guaranteed. Original Parti stage assignments remain unchanged.
-- **Training settings:** Match the Experiment 8 larger-batch arm: one epoch, 32 prompt groups/update, four rollouts/prompt, max 128 concurrent Docker episodes, LR 1e-5, temperature 1, PPO clip 0.2, SFT-reference KL 0.01, seed 42, save every update. **22 updates / 2,724 rollouts**, including nine prompts / 36 rollouts in the final update. Reward remains the negative-only execution verifier; visual adherence is not optimized by RLVR.
+- **Training settings:** Match the Experiment 7 larger-batch arm: one epoch, 32 prompt groups/update, four rollouts/prompt, max 128 concurrent Docker episodes, LR 1e-5, temperature 1, PPO clip 0.2, SFT-reference KL 0.01, seed 42, save every update. **22 updates / 2,724 rollouts**, including nine prompts / 36 rollouts in the final update. Reward remains the negative-only execution verifier; visual adherence is not optimized by RLVR.
 - **Dataset:** [Manifest](datasets/experiment9-genai/manifest.json), [preparation notes](datasets/experiment9-genai/README.md), [training inputs](datasets/experiment9-genai/rlvr/prompts.jsonl), [hard eval](datasets/experiment9-genai/evaluation-hard/prompts.jsonl).
 - **Reproduction:** `.venv/bin/python scripts/prepare_expanded_rlvr.py`; source file hashes, exclusion inputs, selection rules and split hashes are pinned in the manifest.
 - **Validation:** Exact dataset sizes, unchanged original 227 Parti records, split disjointness, lexical train/eval near-duplicate screening, and byte-identical reproduction passed. Trainer dry run passed; 19 existing RL split/verifier tests passed. [Validation report](datasets/experiment9-genai/validation.json).
@@ -786,13 +777,13 @@ its first checkpoint to raise the Docker concurrency cap.
 ### Matched base → SFT → RLVR hard evaluation (2026-11-12)
 
 - **Status:** Complete. All 450 episodes finished with zero sample errors; comparison saved on 2026-11-12 at 14:20 America/Toronto.
-- **Scope:** All 150 new hard held-out prompts on `Qwen/Qwen3.5-4B` base, the exact Parti SFT initialization (rank 128, step 72), and Experiment 9's final RLVR policy (step 22): **450 episodes**. The original 163-prompt Parti regression set is separate from this run.
+- **Scope:** All 150 new hard held-out prompts on `Qwen/Qwen3.5-4B` base, the exact Parti SFT initialization (rank 128, step 72), and Experiment 8's final RLVR policy (step 22): **450 episodes**. The original 163-prompt Parti regression set is separate from this run.
 - **Controls:** Same mini-SWE Inspect harness, prompt order and seeds; one sample/prompt/model, temperature 0, 25 model turns, 32,768 generated tokens per response, no aggregate-token or episode deadline. Base alias verified to have no configured checkpoint; SFT/RLVR aliases checked against their exact final sampler paths.
 - **Concurrency:** 32 samples, model connections and Docker sandboxes per model, three model runs in parallel (**96 episodes maximum in total**).
 - **Scoring:** Execution-only, matching the execution-reliability objective. Fresh source rendering verifies submitted PNGs; no visual preference or adherence judge is enabled.
 - **Artifacts:** [Comparison manifest](eval-results/experiment9-hard150-comparison/manifest.json), [orchestrator log](eval-results/experiment9-hard150-comparison/runner.log), and [completed comparison](eval-results/experiment9-hard150-comparison/comparison.json). Per-model summaries: [base](eval-results/experiment9-hard150-base/summary.json), [SFT](eval-results/experiment9-hard150-sft/summary.json), and [RLVR](eval-results/experiment9-hard150-rlvr/summary.json). Each run retains its Inspect log, submitted source, images and result records.
 
-### Experiment 9 hard-evaluation results
+### Experiment 8 hard-evaluation results
 
 | Model | Valid renders | Render rate | Evaluation duration |
 | --- | ---: | ---: | ---: |
@@ -841,7 +832,7 @@ Previous checkpoint: `rlvr-g4-b32-epoch1-c128`, step 8, 227 prompts / 908 rollou
 
 [Four-model comparison](eval-results/experiment9-hard150-comparison/comparison-with-parti.json) · [Parti-only summary](eval-results/experiment9-hard150-parti-rlvr/summary.json).
 
-### Experiment 9 deferred HPSv3 comparison
+### Experiment 8 deferred HPSv3 comparison
 
 Completed 2026-11-12T22:40:11.964469+00:00. All 600 episode records processed, including 505 valid images scored and 95 failed deliveries assigned zero normalized preference. No image generation was repeated.
 
@@ -867,12 +858,12 @@ Raw means condition on each model delivering an image, so their prompt subsets d
 
 [HPSv3 comparison](eval-results/experiment9-hard150-hpsv3/comparison.json) · [Per-episode scores](eval-results/experiment9-hard150-hpsv3/scores.csv) · [Scoring provenance](eval-results/experiment9-hard150-hpsv3/run-manifest.json).
 
-## Experiment 10 — RLHF on 1,000 prompts from expanded RLVR
+## Experiment 9 — RLHF on 1,000 prompts from expanded RLVR
 
 - **Recorded:** 2026-11-13 (America/Toronto).
 - **Status (2026-11-14):** Crashed at 02:42 America/Toronto after 27 of 32 updates. Batch 27's rollouts completed but its KL-reference scoring failed: 262,144 prompt tokens plus the SDK's required one output token exceeded the 262,144-token hosted window. Fixed the rollout budget to reserve that token (effective maximum 262,143 with KL enabled). Launched optimizer-state recovery from checkpoint `000027` in the sibling `-kl-budget-recovery` directory for the five remaining updates (544 rollouts). Original artifacts remain intact. Two earlier restarts followed network/JWT refresh interruptions. Last completed batch mean reward 0.305, valid renders 77.3%; final training results and held-out evaluation pending.
-- **Question:** Does final-image preference RL improve visual quality after Experiment 9's execution-verifier training on a larger RLHF prompt pool?
-- **Initialization:** Experiment 9's final step-22 Qwen3.5-4B rank-128 RLVR checkpoint. Fresh RLHF optimizer; preserve its frozen SFT KL reference. This run starts from RLVR, independently of the completed 300-prompt RLHF run.
+- **Question:** Does final-image preference RL improve visual quality after Experiment 8's execution-verifier training on a larger RLHF prompt pool?
+- **Initialization:** Experiment 8's final step-22 Qwen3.5-4B rank-128 RLVR checkpoint. Fresh RLHF optimizer; preserve its frozen SFT KL reference. This run starts from RLVR, independently of the completed 300-prompt RLHF run.
 - **Training dataset:** Exactly 1,000 prompts: the unchanged 100-prompt Parti RLHF reserve plus 900 GenAI-Bench prompts. All previous 300 RLHF records are retained unchanged; 700 additional prompts are selected by seeded hash over the remaining screened source pool. The expansion does not impose skill quotas.
 - **Provenance and exclusions:** Same pinned GenAI-Bench source and frozen SFT/Parti/RLVR/hard-evaluation exclusions as the 300-prompt preparation. All new GenAI inputs are screened for exact and lexical near-duplicate overlap with excluded inputs and each other. Semantic equivalence is not verified. No source images or human ratings are used.
 - **Settings:** One epoch, 32 prompt groups/update, four rollouts/prompt, max 32 concurrent Docker episodes, LR 1e-5, temperature 1, PPO clip 0.2, SFT-reference KL 0.01, seed 42, save every update. **32 updates / 4,000 rollouts**; final update has eight prompts / 32 rollouts. Mini-SWE harness and hosted 262,144-token context.
