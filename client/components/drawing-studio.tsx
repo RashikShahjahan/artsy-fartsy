@@ -10,7 +10,14 @@ import { RUN_ID, type Drawing, type Run } from "@/lib/types";
 import { useRun } from "@/hooks/use-run";
 import { useVoice } from "@/hooks/use-voice";
 import { Activity } from "./activity";
+import { Artwork } from "./artwork";
 import { Icon } from "./icon";
+const examples = [
+  { image: "robot", title: "A friendly robot", prompt: "Draw a small friendly robot holding a yellow flower." },
+  { image: "sailboat", title: "A moonlit sail", prompt: "Draw a red sailboat beneath a crescent moon." },
+  { image: "apple", title: "A simple still life", prompt: "Draw a red apple with a green leaf on a white background." },
+];
+
 export function DrawingStudio() {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [current, setCurrent] = useState<Drawing | null>(null);
@@ -19,7 +26,7 @@ export function DrawingStudio() {
   const [ready, setReady] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [failedImageId, setFailedImageId] = useState("");
-  const [imageAttempt, setImageAttempt] = useState(0);
+  const [missingVersionId, setMissingVersionId] = useState("");
   const [historyAttempt, setHistoryAttempt] = useState(0);
   const [canRetry, setCanRetry] = useState(false);
   const [error, setError] = useState("");
@@ -155,7 +162,7 @@ export function DrawingStudio() {
   }
   async function submit(text: string) {
     text = text.trim();
-    if (busy || submitting.current || voice.listening || !text) return;
+    if (busy || submitting.current || voice.listening || !text || (version && missingVersionId === version.id)) return;
     if (text.length > 4000) {
       setError("Please keep your idea under 4,000 characters.");
       return;
@@ -279,29 +286,19 @@ export function DrawingStudio() {
           >
             {version && !busy && (
               <div className="artwork-frame">
-                {version.hasImage === false || failedImageId === version.id ? (
-                  <div className="artwork-unavailable" role="status">
-                    <Icon name="image" />
-                    <h2>{version.hasImage === false ? "No image for this version" : "Drawing unavailable"}</h2>
-                    <p>{version.hasImage === false
-                      ? "Try another version or describe what to draw next."
-                      : "We couldn’t load this drawing. You can try loading it again."}</p>
-                    {version.hasImage !== false && (
-                      <button className="text-button" onClick={() => {
-                        setImageAttempt((attempt) => attempt + 1);
-                        setFailedImageId("");
-                      }}>Retry loading</button>
-                    )}
-                  </div>
-                ) : (
-                  <img
-                    key={`${version.id}-${imageAttempt}`}
-                    className="drawing-image"
-                    src={`/api/runs/${version.id}/image.png?attempt=${imageAttempt}`}
-                    alt={version.prompt}
-                    onError={() => setFailedImageId(version.id)}
-                  />
-                )}
+                <Artwork
+                  key={version.id}
+                  version={version}
+                  hasAlternatives={current!.versions.length > 1}
+                  onUnavailable={setFailedImageId}
+                  onMissing={setMissingVersionId}
+                  onStartAgain={() => {
+                    const idea = current!.title;
+                    newDrawing();
+                    setPrompt(idea);
+                    requestAnimationFrame(() => input.current?.focus());
+                  }}
+                />
               </div>
             )}
             {busy && <Activity key={activeId || "starting"} run={run} busy />}
@@ -309,32 +306,27 @@ export function DrawingStudio() {
               <div className="drawing-caption">
                 <p>{version.prompt}</p>
                 {current!.versions.length > 1 && (
-                  <select
-                    aria-label="Drawing version"
-                    value={version.id}
-                    onChange={(event) => {
-                      const selected = {
-                        ...current!,
-                        selectedId: event.target.value,
-                      };
-                      setCurrent(selected);
-                      setDrawings((items) =>
-                        items.map((drawing) =>
-                          drawing.id === selected.id ? selected : drawing,
-                        ),
-                      );
-                      setNotice("");
-                      setError("");
-                      setCanRetry(false);
-                      setFailedImageId("");
-                    }}
-                  >
+                  <nav className="version-list" aria-label="Drawing versions">
                     {current!.versions.map((v, i) => (
-                      <option value={v.id} key={v.id}>
-                        Version {i + 1} — {v.prompt}
-                      </option>
+                      <button type="button" key={v.id} className="version-card"
+                        aria-current={v.id === version.id ? "true" : undefined}
+                        aria-label={`Version ${i + 1}: ${v.prompt}`}
+                        onClick={() => {
+                          const selected = { ...current!, selectedId: v.id };
+                          setCurrent(selected);
+                          setDrawings((items) => items.map((drawing) => drawing.id === selected.id ? selected : drawing));
+                          setNotice("");
+                          setError("");
+                          setCanRetry(false);
+                          setFailedImageId("");
+                          setMissingVersionId("");
+                        }}>
+                        <HistoryThumbnail id={v.id} hasImage={v.hasImage} />
+                        <span className="version-label">Version {i + 1}{v.id === version.id ? " · Selected" : ""}</span>
+                        <span className="version-prompt">{v.prompt}</span>
+                      </button>
                     ))}
-                  </select>
+                  </nav>
                 )}
               </div>
             )}
@@ -346,7 +338,7 @@ export function DrawingStudio() {
             )}
           </section>
         )}
-        <section className="voice-dock" aria-label="Talk to Artsy">
+        <section className="voice-dock" aria-label="Talk to Artsy" hidden={!!version && missingVersionId === version.id}>
           <p className="voice-status" role="status" aria-live="polite">
             {voice.listening
               ? voice.transcript || "Listening…"
@@ -436,6 +428,21 @@ export function DrawingStudio() {
             </form>
           )}
         </section>
+        {!current && !busy && (
+          <section className="drawing-examples" aria-labelledby="examples-heading">
+            <h2 id="examples-heading">Start with a little inspiration</h2>
+            <p>Made with Artsy. Pick an idea, then make it yours.</p>
+            <div className="example-grid">
+              {examples.map((example) => (
+                <button type="button" className="example-card" key={example.image}
+                  onClick={() => { setPrompt(example.prompt); input.current?.focus(); }}>
+                  <img src={`/examples/${example.image}.png`} alt="" width={1920} height={1200} />
+                  <span>{example.title}<span aria-hidden="true"> ↗</span></span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
       </main>
       <dialog
         className="history-dialog"

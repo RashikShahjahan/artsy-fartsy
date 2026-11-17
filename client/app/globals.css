@@ -72,28 +72,6 @@ svg {
   display: flex;
   flex-direction: column;
 }
-.app-shell:before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background-image: repeating-radial-gradient(
-    ellipse at -10% 50%,
-    transparent 0 15px,
-    #80647844 16px 17px,
-    transparent 18px 29px,
-    #bc806344 30px 31px,
-    transparent 32px 43px,
-    #b5a06b44 44px 45px
-  );
-  mask-image: radial-gradient(
-    ellipse at center,
-    transparent 25%,
-    #0004 65%,
-    #000 100%
-  );
-}
 .topbar {
   display: flex;
   justify-content: space-between;
@@ -287,15 +265,65 @@ svg {
   line-height: 1.6;
   margin: 0;
 }
-.drawing-caption select {
-  max-width: 100%;
+
+.voice-dock[hidden] { display: none; }
+.drawing-examples {
   width: 100%;
-  text-overflow: ellipsis;
-  border-radius: 6px;
-  padding: 8px;
-  border: 0;
-  background: transparent;
+  max-width: 680px;
+  margin-top: 44px;
+}
+.drawing-examples h2 {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0 0 8px;
+}
+.drawing-examples > p {
   font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 16px;
+  line-height: 1.6;
+}
+.example-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.example-card {
+  padding: 0;
+  text-align: left;
+  border: 1px solid var(--line);
+  background: #fffaf0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.example-card img { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; object-fit: contain; }
+.example-card > span { display: block; padding: 12px; font-size: 13px; line-height: 1.5; }
+.example-card:hover { border-color: var(--coral); }
+.version-list {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  overflow-x: auto;
+  padding: 6px 6px 12px;
+  margin-top: 8px;
+}
+.version-card {
+  flex: 0 0 150px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffaf0;
+  text-align: left;
+}
+.version-card:hover { border-color: var(--coral); }
+.version-card[aria-current] { border: 2px solid var(--ink); padding: 7px; }
+.version-card .history-thumbnail { width: 100%; height: auto; aspect-ratio: 8 / 5; }
+.version-label { display: block; font-size: 12px; margin-top: 10px; color: var(--ink); }
+.version-prompt {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.6;
+  margin-top: 6px;
+  color: var(--muted);
 }
 .recorded-steps {
   width: 100%;
@@ -443,6 +471,9 @@ svg {
   }
 }
 @media (max-width: 600px) {
+  .example-grid { gap: 8px; }
+  .example-card > span { padding: 9px; font-size: 12px; }
+  .drawing-examples { margin-top: 32px; }
   .topbar {
     padding: 20px;
   }
