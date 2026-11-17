@@ -2,6 +2,8 @@
 
 Record experiments here with their setup, results, interpretation, and supporting artifacts. Mark planned runs explicitly and append future entries with sequential experiment numbers; retain the scope and caveats of earlier results.
 
+[Supporting development charts](docs/model-development/README.md) summarize the intermediate experiments and completed final-model comparison, including saved results newer than the status notes below.
+
 ## Experiment 1 — Original 163-prompt LoRA rank evaluation
 
 - **Scope:** Original 163 held-out PartiPrompts, evaluated on the base model and SFT ranks 32, 64 and 128. The subsequent 228-prompt extension is Experiment 2.

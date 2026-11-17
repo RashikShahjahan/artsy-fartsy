@@ -1,0 +1,249 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1004.4pt" height="627.876562pt" viewBox="0 0 1004.4 627.876562" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-11-16T20:28:36.025518</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 627.876562 
+L 1004.4 627.876562 
+L 1004.4 0 
+L 0 0 
+z
+" style="fill: #f7f9fb"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 66.117073 259.07904 
+L 329.663415 259.07904 
+Q 339.594146 259.07904 339.594146 254.3616 
+L 339.594146 167.2704 
+Q 339.594146 162.55296 329.663415 162.55296 
+L 66.117073 162.55296 
+Q 56.186341 162.55296 56.186341 167.2704 
+L 56.186341 254.3616 
+Q 56.186341 259.07904 66.117073 259.07904 
+z
+" clip-path="url(#p9e06dbe18a)" style="fill: #ffffff; stroke: #3978af; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 379.317073 259.07904 
+L 642.863415 259.07904 
+Q 652.794146 259.07904 652.794146 254.3616 
+L 652.794146 167.2704 
+Q 652.794146 162.55296 642.863415 162.55296 
+L 379.317073 162.55296 
+Q 369.386341 162.55296 369.386341 167.2704 
+L 369.386341 254.3616 
+Q 369.386341 259.07904 379.317073 259.07904 
+z
+" clip-path="url(#p9e06dbe18a)" style="fill: #ffffff; stroke: #9370b5; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 692.517073 259.07904 
+L 956.063415 259.07904 
+Q 965.994146 259.07904 965.994146 254.3616 
+L 965.994146 167.2704 
+Q 965.994146 162.55296 956.063415 162.55296 
+L 692.517073 162.55296 
+Q 682.586341 162.55296 682.586341 167.2704 
+L 682.586341 254.3616 
+Q 682.586341 259.07904 692.517073 259.07904 
+z
+" clip-path="url(#p9e06dbe18a)" style="fill: #ffffff; stroke: #91a0ae; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 66.117073 398.78784 
+L 306.746341 398.78784 
+Q 316.677073 398.78784 316.677073 394.0704 
+L 316.677073 310.608 
+Q 316.677073 305.89056 306.746341 305.89056 
+L 66.117073 305.89056 
+Q 56.186341 305.89056 56.186341 310.608 
+L 56.186341 394.0704 
+Q 56.186341 398.78784 66.117073 398.78784 
+z
+" clip-path="url(#p9e06dbe18a)" style="fill: #ffffff; stroke: #3978af; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 379.317073 367.94304 
+L 635.22439 367.94304 
+Q 645.155122 367.94304 645.155122 363.2256 
+L 645.155122 294.2784 
+Q 645.155122 289.56096 635.22439 289.56096 
+L 379.317073 289.56096 
+Q 369.386341 289.56096 369.386341 294.2784 
+L 369.386341 363.2256 
+Q 369.386341 367.94304 379.317073 367.94304 
+z
+" clip-path="url(#p9e06dbe18a)" style="fill: #ffffff; stroke: #9370b5; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 379.317073 476.80704 
+L 635.22439 476.80704 
+Q 645.155122 476.80704 645.155122 472.0896 
+L 645.155122 403.1424 
+Q 645.155122 398.42496 635.22439 398.42496 
+L 379.317073 398.42496 
+Q 369.386341 398.42496 369.386341 403.1424 
+L 369.386341 472.0896 
+Q 369.386341 476.80704 379.317073 476.80704 
+z
+" clip-path="url(#p9e06dbe18a)" style="fill: #ffffff; stroke: #15958b; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 700.156098 367.94304 
+L 956.063415 367.94304 
+Q 965.994146 367.94304 965.994146 363.2256 
+L 965.994146 294.2784 
+Q 965.994146 289.56096 956.063415 289.56096 
+L 700.156098 289.56096 
+Q 690.225366 289.56096 690.225366 294.2784 
+L 690.225366 363.2256 
+Q 690.225366 367.94304 700.156098 367.94304 
+z
+" clip-path="url(#p9e06dbe18a)" style="fill: #ffffff; stroke: #9370b5; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 700.156098 476.80704 
+L 956.063415 476.80704 
+Q 965.994146 476.80704 965.994146 472.0896 
+L 965.994146 403.1424 
+Q 965.994146 398.42496 956.063415 398.42496 
+L 700.156098 398.42496 
+Q 690.225366 398.42496 690.225366 403.1424 
+L 690.225366 472.0896 
+Q 690.225366 476.80704 700.156098 476.80704 
+z
+" clip-path="url(#p9e06dbe18a)" style="fill: #ffffff; stroke: #d87535; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #3978af" x="75.283902" y="185.789321" transform="rotate(-0 75.283902 185.789321)">Experiments 1–4 · rank studies</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(75.283902 208.883598)">Ranks 32 / 64 / 128</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(75.283902 223.536606)">Original and expanded SFT datasets</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(75.283902 239.17227)">Luna, HPSv3 and blinded human review</text>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9370b5" x="388.483902" y="185.789321" transform="rotate(-0 388.483902 185.789321)">Experiments 5–6 · harness / loss</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(388.483902 209.256919)">mini-SWE and revised teacher traces</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(388.483902 223.536606)">Control vs error-aware supervision</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(388.483902 238.736606)">Separate fresh SFT experiments</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #91a0ae" x="701.683902" y="185.789321" transform="rotate(-0 701.683902 185.789321)">Experiment 7 · prompt-only plan</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(701.683902 208.336606)">Revised task prompt</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(701.683902 223.536606)">Evaluation pending in experiment log</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(701.683902 238.736606)">No result claimed in this chart pack</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #3978af" x="75.283902" y="329.126921" transform="rotate(-0 75.283902 329.126921)">Selected SFT · step 72</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(75.283902 351.674206)">2,282 trajectories · rank 128</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(75.283902 366.874206)">Fresh starting point for RL branches</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(75.283902 382.994519)">Not a continuation of rank studies</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9370b5" x="388.483902" y="312.797321" transform="rotate(-0 388.483902 312.797321)">Exp 8 · Parti-only RLVR</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(388.483902 335.344606)">227 prompts · 908 rollouts / epoch</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(388.483902 350.544606)">32 vs 128 rollouts/update; epoch 2</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #15958b" x="388.483902" y="421.661321" transform="rotate(-0 388.483902 421.661321)">Exp 9 · expanded RLVR</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(388.483902 444.208606)">681 prompts · 2,724 rollouts</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(388.483902 459.408606)">22 updates · starts from SFT</text>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #9370b5" x="709.322927" y="312.797321" transform="rotate(-0 709.322927 312.797321)">RLHF · 300-prompt branch</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(709.322927 335.344606)">300 prompts · 1,200 rollouts</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(709.322927 350.544606)">10 updates · fresh RLHF optimizer</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #d87535" x="709.322927" y="421.661321" transform="rotate(-0 709.322927 421.661321)">Exp 10 · final RLHF</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(709.322927 444.208606)">1,000 prompts · 4,000 rollouts</text>
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans'; fill: #182c3c" transform="translate(709.322927 459.408606)">32 updates · recovered after 27</text>
+   </g>
+   <g id="patch_10">
+    <path d="M 320.13375 344.558011 
+Q 344.941646 337.82395 368.023161 331.558513 
+" style="fill: none; stroke: #526678; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 363.200494 330.588006 
+L 368.023161 331.558513 
+L 364.353155 334.834342 
+" style="fill: none; stroke: #526678; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 319.472842 375.66084 
+Q 344.942158 406.772048 369.278312 436.49908 
+" style="fill: none; stroke: #526678; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 368.193415 431.700851 
+L 369.278312 436.49908 
+L 364.788791 434.48806 
+" style="fill: none; stroke: #526678; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 647.684313 408.670207 
+Q 667.689035 374.114087 686.797526 341.106118 
+" style="fill: none; stroke: #526678; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 682.689113 343.811843 
+L 686.797526 341.106118 
+L 686.497058 346.016283 
+" style="fill: none; stroke: #526678; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 648.680571 439.4304 
+Q 667.690107 439.4304 684.910788 439.4304 
+" style="fill: none; stroke: #526678; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 680.510788 437.2304 
+L 684.910788 439.4304 
+L 680.510788 441.6304 
+" style="fill: none; stroke: #526678; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+  </g>
+  <g id="text_17">
+   <text style="font-weight: 700; font-size: 22px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #182c3c" x="21.6" y="38.316563" transform="rotate(-0 21.6 38.316563)">Development map: experiments, branches and the final model lineage</text>
+  </g>
+  <g id="text_18">
+   <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #526678" x="21.6" y="70.2" transform="rotate(-0 21.6 70.2)">Qwen3.5-4B • experiment sequence is not a single continuous training run</text>
+  </g>
+  <g id="text_19">
+   <text style="font-size: 9px; font-family: 'DejaVu Sans'; fill: #526678" transform="translate(21.6 587.16)">Arrows show checkpoint initialization only. The 300- and 1,000-prompt RLHF runs independently start from Experiment 9 RLVR.</text>
+   <text style="font-size: 9px; font-family: 'DejaVu Sans'; fill: #526678" transform="translate(21.6 601.56)">Earlier experiment boxes summarize research decisions; no checkpoint-inheritance arrows are asserted for them.</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p9e06dbe18a">
+   <rect x="43.2" y="138.24" width="939.6" height="362.88"/>
+  </clipPath>
+ </defs>
+</svg>

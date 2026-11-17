@@ -18,7 +18,10 @@ export function DrawingStudio() {
   const [starting, setStarting] = useState(false);
   const [ready, setReady] = useState(false);
   const [prompt, setPrompt] = useState("");
-  const [typed, setTyped] = useState(false);
+  const [failedImageId, setFailedImageId] = useState("");
+  const [imageAttempt, setImageAttempt] = useState(0);
+  const [historyAttempt, setHistoryAttempt] = useState(0);
+  const [canRetry, setCanRetry] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [savedRun, setSavedRun] = useState<Run | null>(null);
@@ -32,10 +35,14 @@ export function DrawingStudio() {
     current?.versions.find((v) => v.id === current.selectedId) ||
     current?.versions.at(-1);
   const voice = useVoice(
-    (text) => void submit(text),
+    (text) => {
+      setPrompt((draft) =>
+        [draft.trim(), text].filter(Boolean).join(" ").slice(0, 4000),
+      );
+      input.current?.focus();
+    },
     (message) => {
       setError(message);
-      setTyped(true);
     },
   );
   function rememberRun(id: string | null) {
@@ -72,14 +79,13 @@ export function DrawingStudio() {
             : "I couldn’t finish that. Try again?"),
       );
       setPrompt(run.prompt);
-      setTyped(true);
+      setCanRetry(true);
     }
   }
   const { run, connectionError } = useRun(activeId, finish, () => {
     rememberRun(null);
     setCanceling(false);
     setError("This drawing is unavailable. Please try again.");
-    setTyped(true);
   });
   useEffect(() => {
     try {
@@ -128,8 +134,10 @@ export function DrawingStudio() {
     voice.stop();
     voice.cancelSpeech();
     setCurrent(drawing);
+    setFailedImageId("");
     setSavedRun(null);
     setError("");
+    setCanRetry(false);
     setNotice("");
     setPrompt("");
     closeHistory();
@@ -142,11 +150,12 @@ export function DrawingStudio() {
     setSavedRun(null);
     setPrompt("");
     setError("");
+    setCanRetry(false);
     setNotice("");
   }
   async function submit(text: string) {
     text = text.trim();
-    if (busy || submitting.current || !text) return;
+    if (busy || submitting.current || voice.listening || !text) return;
     if (text.length > 4000) {
       setError("Please keep your idea under 4,000 characters.");
       return;
@@ -154,6 +163,7 @@ export function DrawingStudio() {
     submitting.current = true;
     setStarting(true);
     setError("");
+    setCanRetry(false);
     setNotice("");
     voice.stop();
     voice.cancelSpeech();
@@ -168,6 +178,8 @@ export function DrawingStudio() {
             : {}),
         }),
       });
+      if (response.status >= 500)
+        throw new Error("Drawing is temporarily unavailable. Your idea is still here. Try again in a moment.");
       const data = await response.json();
       if (!response.ok || !RUN_ID.test(data.id))
         throw new Error(
@@ -176,11 +188,12 @@ export function DrawingStudio() {
       rememberRun(data.id);
       setPrompt("");
       setSavedRun(null);
-      setTyped(false);
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Please try again.");
+      setError(error instanceof TypeError || error instanceof SyntaxError
+        ? "Drawing is temporarily unavailable. Your idea is still here. Try again in a moment."
+        : error instanceof Error ? error.message : "Please try again.");
       setPrompt(text);
-      setTyped(true);
+      setCanRetry(true);
     } finally {
       submitting.current = false;
       setStarting(false);
@@ -217,7 +230,7 @@ export function DrawingStudio() {
               <Icon name="plus" />
             </button>
           )}
-          {version && version.hasImage !== false && !busy && (
+          {version && version.hasImage !== false && failedImageId !== version.id && !busy && (
             <a
               className="icon-button"
               href={`/api/runs/${version.id}/image.png`}
@@ -231,7 +244,10 @@ export function DrawingStudio() {
           <button
             className="icon-button"
             ref={historyButton}
-            onClick={() => dialog.current?.showModal()}
+            onClick={() => {
+              setHistoryAttempt((attempt) => attempt + 1);
+              dialog.current?.showModal();
+            }}
             aria-label="Your drawings"
             title="Your drawings"
           >
@@ -251,9 +267,8 @@ export function DrawingStudio() {
       <main className={current || busy ? "workspace" : "welcome-workspace"}>
         {!current && !busy && (
           <section className="welcome">
-            <p className="eyebrow">A LITTLE SPACE FOR YOUR IMAGINATION</p>
-            <h1>Hi, I’m Artsy.</h1>
-            <p>What should we draw?</p>
+            <h1>What should we draw?</h1>
+            <p>Describe a drawing, then make it your own.</p>
           </section>
         )}
         {(current || busy) && (
@@ -262,22 +277,37 @@ export function DrawingStudio() {
             aria-label="Your drawing"
             aria-busy={busy}
           >
-            {version && version.hasImage !== false && !busy && (
-              <img
-                className="drawing-image"
-                src={`/api/runs/${version.id}/image.png`}
-                alt={version.prompt}
-                onError={() =>
-                  setError(
-                    "This image couldn’t be loaded. The drawing service may be unavailable.",
-                  )
-                }
-              />
+            {version && !busy && (
+              <div className="artwork-frame">
+                {version.hasImage === false || failedImageId === version.id ? (
+                  <div className="artwork-unavailable" role="status">
+                    <Icon name="image" />
+                    <h2>{version.hasImage === false ? "No image for this version" : "Drawing unavailable"}</h2>
+                    <p>{version.hasImage === false
+                      ? "Try another version or describe what to draw next."
+                      : "We couldn’t load this drawing. You can try loading it again."}</p>
+                    {version.hasImage !== false && (
+                      <button className="text-button" onClick={() => {
+                        setImageAttempt((attempt) => attempt + 1);
+                        setFailedImageId("");
+                      }}>Retry loading</button>
+                    )}
+                  </div>
+                ) : (
+                  <img
+                    key={`${version.id}-${imageAttempt}`}
+                    className="drawing-image"
+                    src={`/api/runs/${version.id}/image.png?attempt=${imageAttempt}`}
+                    alt={version.prompt}
+                    onError={() => setFailedImageId(version.id)}
+                  />
+                )}
+              </div>
             )}
             {busy && <Activity key={activeId || "starting"} run={run} busy />}
             {!busy && version && (
               <div className="drawing-caption">
-                <p>{current?.title}</p>
+                <p>{version.prompt}</p>
                 {current!.versions.length > 1 && (
                   <select
                     aria-label="Drawing version"
@@ -294,11 +324,14 @@ export function DrawingStudio() {
                         ),
                       );
                       setNotice("");
+                      setError("");
+                      setCanRetry(false);
+                      setFailedImageId("");
                     }}
                   >
                     {current!.versions.map((v, i) => (
                       <option value={v.id} key={v.id}>
-                        Version {i + 1}
+                        Version {i + 1} — {v.prompt}
                       </option>
                     ))}
                   </select>
@@ -319,12 +352,23 @@ export function DrawingStudio() {
               ? voice.transcript || "Listening…"
               : busy
                 ? connectionError || (canceling ? "Stopping…" : "Drawing…")
-                : notice || (current ? "Anything you’d like to change?" : "")}
+                : error || (version && (failedImageId === version.id || version.hasImage === false))
+                  ? ""
+                  : notice || (current ? "Anything you’d like to change?" : "")}
           </p>
           {error && (
-            <p className="input-error" role="alert">
-              {error}
-            </p>
+            <div className="input-error" role="alert">
+              <p>{error}</p>
+              {canRetry && (
+                <button
+                  className="text-button"
+                  disabled={busy || !prompt.trim()}
+                  onClick={() => void submit(prompt)}
+                >
+                  Try again
+                </button>
+              )}
+            </div>
           )}
           {busy ? (
             <button
@@ -335,87 +379,64 @@ export function DrawingStudio() {
               {canceling ? "Stopping…" : "Stop drawing"}
             </button>
           ) : (
-            <>
-              {typed || !voice.supported ? (
-                <form
-                  className="prompt-form"
-                  onSubmit={(event) => {
+            <form
+              className="prompt-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit(prompt);
+              }}
+            >
+              <label className="sr-only" htmlFor="prompt">
+                What would you like Artsy to draw or change?
+              </label>
+              <textarea
+                ref={input}
+                id="prompt"
+                maxLength={4000}
+                rows={2}
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder={
+                  current
+                    ? "What would you like to change?"
+                    : "A sleepy cat in a sunny window…"
+                }
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
                     event.preventDefault();
                     void submit(prompt);
-                  }}
-                >
-                  <label className="sr-only" htmlFor="prompt">
-                    What would you like Artsy to draw or change?
-                  </label>
-                  <textarea
-                    ref={input}
-                    id="prompt"
-                    maxLength={4000}
-                    rows={2}
-                    value={prompt}
-                    onChange={(event) => setPrompt(event.target.value)}
-                    placeholder={
-                      current
-                        ? "What would you like to change?"
-                        : "A sleepy cat in a sunny window…"
-                    }
-                    onKeyDown={(event) => {
-                      if (
-                        event.key === "Enter" &&
-                        !event.shiftKey &&
-                        !event.nativeEvent.isComposing
-                      ) {
-                        event.preventDefault();
-                        void submit(prompt);
-                      }
-                    }}
-                  />
-                  <button
-                    type="submit"
-                    className="send-button"
-                    disabled={!prompt.trim() || !ready}
-                    aria-label="Send to Artsy"
-                  >
-                    <Icon name="arrow" />
-                  </button>
-                </form>
-              ) : (
-                <button
-                  className={`mic-button ${voice.listening ? "listening" : ""}`}
-                  onClick={voice.start}
-                  disabled={!ready}
-                  aria-label={
-                    voice.listening
-                      ? "Finish speaking and send your idea"
-                      : "Start talking to Artsy"
                   }
-                  aria-pressed={voice.listening}
-                >
-                  {voice.listening ? (
-                    <span className="stop-square" />
-                  ) : (
-                    <Icon name="mic" />
-                  )}
-                </button>
-              )}
+                }}
+              />
               {voice.supported && (
                 <button
-                  className="type-toggle"
-                  onClick={() => {
-                    voice.stop();
-                    setTyped(!typed);
-                    if (!typed) setTimeout(() => input.current?.focus(), 0);
-                  }}
+                  type="button"
+                  className={`composer-mic ${voice.listening ? "listening" : ""}`}
+                  onClick={voice.start}
+                  disabled={!ready}
+                  aria-label={voice.listening ? "Finish dictating" : "Dictate an idea"}
+                  aria-pressed={voice.listening}
+                  title={voice.listening ? "Finish dictating" : "Dictate an idea"}
                 >
-                  <Icon name={typed ? "mic" : "keyboard"} />
-                  {typed ? "Use your voice" : "Or type an idea"}
+                  {voice.listening ? <span className="stop-square" /> : <Icon name="mic" />}
                 </button>
               )}
-            </>
+              <button
+                type="submit"
+                className="send-button"
+                disabled={!prompt.trim() || !ready || voice.listening}
+                aria-label="Send to Artsy"
+              >
+                <Icon name="arrow" />
+              </button>
+            </form>
           )}
         </section>
       </main>
-      <footer>Made of imagination. Yours and a little of ours.</footer>
       <dialog
         className="history-dialog"
         ref={dialog}
@@ -435,33 +456,54 @@ export function DrawingStudio() {
         </div>
         {drawings.length ? (
           <nav aria-label="Saved drawings">
-            {drawings.map((drawing) => (
-              <button
-                key={drawing.id}
-                className="history-item"
-                disabled={busy}
-                aria-current={drawing.id === current?.id ? "true" : undefined}
-                onClick={() => openDrawing(drawing)}
-              >
-                <strong>{drawing.title}</strong>
-                <small>
-                  {drawing.versions.length}{" "}
-                  {drawing.versions.length === 1 ? "drawing" : "versions"}
-                </small>
-              </button>
-            ))}
+            {drawings.map((drawing) => {
+              const thumbnail =
+                drawing.versions.find((v) => v.id === drawing.selectedId) ||
+                drawing.versions.at(-1)!;
+              return (
+                <button
+                  key={drawing.id}
+                  className="history-item"
+                  disabled={busy}
+                  aria-current={drawing.id === current?.id ? "true" : undefined}
+                  onClick={() => openDrawing(drawing)}
+                >
+                  <HistoryThumbnail
+                    key={`${thumbnail.id}-${historyAttempt}`}
+                    id={thumbnail.id}
+                    hasImage={thumbnail.hasImage}
+                  />
+                  <span className="history-item-copy">
+                    <strong>{drawing.title}</strong>
+                    <small>
+                      {drawing.versions.length}{" "}
+                      {drawing.versions.length === 1 ? "drawing" : "versions"}
+                    </small>
+                  </span>
+                </button>
+              );
+            })}
           </nav>
         ) : (
           <p className="empty-history">
-            Your ideas will find a home here.
-            <br />
-            Make your first drawing to get started.
+            Your drawings will appear here after you make one.
           </p>
         )}
         <p className="history-note">
-          Saved in this browser. Artwork stays on your drawing service.
+          History is saved in this browser.
         </p>
       </dialog>
     </div>
+  );
+}
+
+function HistoryThumbnail({ id, hasImage }: { id: string; hasImage?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <span className="history-thumbnail" aria-hidden="true">
+      {failed || hasImage === false
+        ? <span>No preview</span>
+        : <img src={`/api/runs/${id}/image.png`} alt="" loading="lazy" onError={() => setFailed(true)} />}
+    </span>
   );
 }

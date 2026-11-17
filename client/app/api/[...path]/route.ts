@@ -39,11 +39,12 @@ async function proxy(
         "X-Content-Type-Options": "nosniff",
       },
     });
-  } catch {
+  } catch (error) {
+    console.error("Drawing service request failed:", error);
     return Response.json(
       {
         error:
-          "Artsy can’t reach the drawing service. Start the Python backend and try again.",
+          "Drawing is temporarily unavailable. Please try again in a moment.",
       },
       { status: 502 },
     );

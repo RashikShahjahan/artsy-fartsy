@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="940.112344pt" height="486.108562pt" viewBox="0 0 940.112344 486.108562" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-11-16T20:28:34.950320</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 486.108562 
+L 940.112344 486.108562 
+L 940.112344 -0 
+L 0 -0 
+z
+" style="fill: #f7f9fb"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 104.192344 383.904 
+L 918.512344 383.904 
+L 918.512344 109.728 
+L 104.192344 109.728 
+z
+" style="fill: #f7f9fb"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 104.192344 122.190545 
+L 662.370562 122.190545 
+L 662.370562 163.732364 
+L 104.192344 163.732364 
+z
+" clip-path="url(#pe4bcc5823c)" style="fill: #d87535"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 662.370562 122.190545 
+L 673.646889 122.190545 
+L 673.646889 163.732364 
+L 662.370562 163.732364 
+z
+" clip-path="url(#pe4bcc5823c)" style="fill: #dce2e6"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 104.192344 191.426909 
+L 466.133792 191.426909 
+L 466.133792 232.968727 
+L 104.192344 232.968727 
+z
+" clip-path="url(#pe4bcc5823c)" style="fill: #d87535"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 466.133792 191.426909 
+L 673.646889 191.426909 
+L 673.646889 232.968727 
+L 466.133792 232.968727 
+z
+" clip-path="url(#pe4bcc5823c)" style="fill: #dce2e6"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 104.192344 260.663273 
+L 473.568265 260.663273 
+L 473.568265 302.205091 
+L 104.192344 302.205091 
+z
+" clip-path="url(#pe4bcc5823c)" style="fill: #d87535"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 473.568265 260.663273 
+L 673.646889 260.663273 
+L 673.646889 302.205091 
+L 473.568265 302.205091 
+z
+" clip-path="url(#pe4bcc5823c)" style="fill: #dce2e6"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 104.192344 329.899636 
+L 390.910716 329.899636 
+L 390.910716 371.441455 
+L 104.192344 371.441455 
+z
+" clip-path="url(#pe4bcc5823c)" style="fill: #d87535"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 390.910716 329.899636 
+L 673.646889 329.899636 
+L 673.646889 371.441455 
+L 390.910716 371.441455 
+z
+" clip-path="url(#pe4bcc5823c)" style="fill: #dce2e6"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1">
+      <defs>
+       <path id="m17236b6428" d="M 0 0 
+L 0 3.5 
+" style="stroke: #425364; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#m17236b6428" x="104.192344" y="383.904" style="fill: #425364; stroke: #425364; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_1">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #425364" x="104.192344" y="399.261422" transform="rotate(-0 104.192344 399.261422)">0</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_2">
+      <g>
+       <use xlink:href="#m17236b6428" x="246.55598" y="383.904" style="fill: #425364; stroke: #425364; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_2">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #425364" x="246.55598" y="399.261422" transform="rotate(-0 246.55598 399.261422)">25</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_3">
+      <g>
+       <use xlink:href="#m17236b6428" x="388.919616" y="383.904" style="fill: #425364; stroke: #425364; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_3">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #425364" x="388.919616" y="399.261422" transform="rotate(-0 388.919616 399.261422)">50</text>
+     </g>
+    </g>
+    <g id="xtick_4">
+     <g id="line2d_4">
+      <g>
+       <use xlink:href="#m17236b6428" x="531.283253" y="383.904" style="fill: #425364; stroke: #425364; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_4">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #425364" x="531.283253" y="399.261422" transform="rotate(-0 531.283253 399.261422)">75</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_5">
+      <g>
+       <use xlink:href="#m17236b6428" x="673.646889" y="383.904" style="fill: #425364; stroke: #425364; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_5">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #425364" x="673.646889" y="399.261422" transform="rotate(-0 673.646889 399.261422)">100</text>
+     </g>
+    </g>
+    <g id="text_6">
+     <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #425364" x="511.352344" y="414.262281" transform="rotate(-0 511.352344 414.262281)">Final RLHF win share (%)</text>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_6">
+      <defs>
+       <path id="mdab340fdbb" d="M 0 0 
+L -3.5 0 
+" style="stroke: #425364; stroke-width: 0.8"/>
+      </defs>
+      <g>
+       <use xlink:href="#mdab340fdbb" x="104.192344" y="142.961455" style="fill: #425364; stroke: #425364; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_7">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #425364" x="97.192344" y="147.140165" transform="rotate(-0 97.192344 147.140165)">vs Base</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_7">
+      <g>
+       <use xlink:href="#mdab340fdbb" x="104.192344" y="212.197818" style="fill: #425364; stroke: #425364; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_8">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #425364" x="97.192344" y="216.376529" transform="rotate(-0 97.192344 216.376529)">vs SFT</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_8">
+      <g>
+       <use xlink:href="#mdab340fdbb" x="104.192344" y="281.434182" style="fill: #425364; stroke: #425364; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_9">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #425364" x="97.192344" y="285.612893" transform="rotate(-0 97.192344 285.612893)">vs RLVR · 681</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_9">
+      <g>
+       <use xlink:href="#mdab340fdbb" x="104.192344" y="350.670545" style="fill: #425364; stroke: #425364; stroke-width: 0.8"/>
+      </g>
+     </g>
+     <g id="text_10">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #425364" x="97.192344" y="354.849256" transform="rotate(-0 97.192344 354.849256)">vs RLHF · 300</text>
+     </g>
+    </g>
+   </g>
+   <g id="line2d_10">
+    <path d="M 388.919616 383.904 
+L 388.919616 109.728 
+" clip-path="url(#pe4bcc5823c)" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #425364"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 104.192344 383.904 
+L 918.512344 383.904 
+" style="fill: none; stroke: #dce2e6; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="383.281453" y="145.819306" transform="rotate(-0 383.281453 145.819306)">99 wins</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #182c3c" x="685.03598" y="145.819306" transform="rotate(-0 685.03598 145.819306)">98.0%  ·  101 pairs  ·  2 losses</text>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="285.163068" y="215.05567" transform="rotate(-0 285.163068 215.05567)">75 wins</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #182c3c" x="685.03598" y="215.05567" transform="rotate(-0 685.03598 215.05567)">63.6%  ·  118 pairs  ·  43 losses</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="288.880304" y="284.292033" transform="rotate(-0 288.880304 284.292033)">96 wins</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #182c3c" x="685.03598" y="284.292033" transform="rotate(-0 685.03598 284.292033)">64.9%  ·  148 pairs  ·  52 losses</text>
+   </g>
+   <g id="text_17">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #ffffff" x="247.55153" y="353.528397" transform="rotate(-0 247.55153 353.528397)">72 wins</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #182c3c" x="685.03598" y="353.528397" transform="rotate(-0 685.03598 353.528397)">50.3%  ·  143 pairs  ·  71 losses</text>
+   </g>
+  </g>
+  <g id="text_19">
+   <text style="font-weight: 700; font-size: 22px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #182c3c" x="85.472344" y="38.316562" transform="rotate(-0 85.472344 38.316562)">Final RLHF improves over RLVR; RLHF branches remain close</text>
+  </g>
+  <g id="text_20">
+   <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #526678" x="85.472344" y="58.32" transform="rotate(-0 85.472344 58.32)">HPSv3 preference on prompts where both checkpoints delivered an image</text>
+  </g>
+  <g id="text_21">
+   <text style="font-size: 9px; font-family: 'DejaVu Sans'; fill: #526678" transform="translate(85.472344 445.392)">Orange = RLHF trained on 1,000 prompts; gray = comparator wins. No ties in these pairs; failed deliveries are excluded.</text>
+   <text style="font-size: 9px; font-family: 'DejaVu Sans'; fill: #526678" transform="translate(85.472344 459.792)">72–71 versus RLHF · 300 is an almost even split. These counts do not establish a general advantage across seeds or human judges.</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pe4bcc5823c">
+   <rect x="104.192344" y="109.728" width="814.32" height="274.176"/>
+  </clipPath>
+ </defs>
+</svg>
