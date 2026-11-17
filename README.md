@@ -71,6 +71,15 @@ sudo apt-get install build-essential pkg-config libcairo2-dev fonts-dejavu-core
 
 ## Draw and review in the UI
 
+The client-facing UI is a separate Next.js application in [`client/`](client/README.md).
+Install it with `npm ci --prefix client`, run `make ui` for the Python backend,
+and run `make client` in another terminal. Open http://127.0.0.1:3000 for the
+client experience. Internal tools remain under `ui/`, with Studio at
+http://127.0.0.1:4173/studio. `make client-check` and `make client-build` validate
+the Next.js app independently.
+
+The Python-only compatibility UI is still available as described below.
+
 Install the local Kokoro voice once, then start the UI and native Tinker bridge:
 
 ```sh

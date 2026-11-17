@@ -55,7 +55,7 @@ def model_catalog(bridge_models=None):
 from drawing.dataset_specs import validate_specs
 
 ROOT = Path(__file__).resolve().parents[1]
-JOBS = ROOT / 'episodes' / 'ui'
+JOBS = Path(os.getenv('ARTSY_UI_JOBS', str(ROOT / 'episodes' / 'ui'))).expanduser().resolve()
 RL_ROOT = Path(os.getenv('ARTSY_RL_ROOT', str(ROOT / 'checkpoints'))).expanduser().resolve()
 RL_DATASET = Path(os.environ['ARTSY_RL_DATASET']).expanduser().resolve() if os.getenv('ARTSY_RL_DATASET') else None
 LOCK = threading.RLock()

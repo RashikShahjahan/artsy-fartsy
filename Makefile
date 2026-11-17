@@ -2,7 +2,17 @@ PYTHON ?= .venv/bin/python
 EVAL_PYTHON ?= $(if $(wildcard .eval-venv/bin/python),.eval-venv/bin/python,$(PYTHON))
 ARGS ?=
 
-.PHONY: ui tts-setup serve render draw eval eval-base agent-image dataset rlvr rlhf grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
+.PHONY: client client-build client-check ui tts-setup serve render draw eval eval-base agent-image dataset rlvr rlhf grpo test test-ui test-eval test-js requirements-sync requirements-check syntax check test-all
+client:
+	npm --prefix client run dev
+
+client-build:
+	npm --prefix client run build
+
+client-check:
+	npm --prefix client run typecheck
+	npm --prefix client test
+
 ui:
 	$(PYTHON) -m ui.start $(ARGS)
 

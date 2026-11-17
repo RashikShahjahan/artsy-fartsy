@@ -1,4 +1,9 @@
-# Artsy generation UI
+# Artsy internal UI and API
+
+The primary client-facing experience now lives in the separate
+[`client/`](../client/README.md) Next.js application on port 3000. This directory
+owns the Python API, Studio, dataset review, and training/evaluation workspaces.
+The Python home page is retained for compatibility.
 
 From the repository root:
 
